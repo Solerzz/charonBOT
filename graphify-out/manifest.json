@@ -1,8 +1,254 @@
 {
   "AGENTS.md": {
-    "mtime": 1793900224.7682118,
-    "seen": 1793900690.3093538,
-    "ast_hash": "f36539ecc9af68f33ebd72770ce4a19e",
-    "semantic_hash": "f36539ecc9af68f33ebd72770ce4a19e"
+    "mtime": 1793919468.971951,
+    "seen": 1793920568.4470243,
+    "ast_hash": "db2b64f58dab9bc397cf3d5852366fbc",
+    "semantic_hash": ""
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1793920517.0633762,
+    "seen": 1793920568.4470243,
+    "ast_hash": "7c336136b1ce7bc6904c6f0e78420207",
+    "semantic_hash": ""
+  },
+  "package.json": {
+    "mtime": 1793920348.7910979,
+    "seen": 1793920568.4470243,
+    "ast_hash": "5da97226ceb878ba36e05fec111a1f53",
+    "semantic_hash": ""
+  },
+  "prisma.config.ts": {
+    "mtime": 1793920006.2250948,
+    "seen": 1793920568.4470243,
+    "ast_hash": "c335b03a48d22e1e599bf9bfc1ae1d18",
+    "semantic_hash": ""
+  },
+  "scripts/register-commands.ts": {
+    "mtime": 1793920348.788599,
+    "seen": 1793920568.4470243,
+    "ast_hash": "17f697243a77bb095175fc3e665bb4c3",
+    "semantic_hash": ""
+  },
+  "src/application.ts": {
+    "mtime": 1793920348.7870471,
+    "seen": 1793920568.4470243,
+    "ast_hash": "a923c32f0eab2a3f49cd2f22062265a8",
+    "semantic_hash": ""
+  },
+  "src/core/config/env.ts": {
+    "mtime": 1793919748.5945039,
+    "seen": 1793920568.4470243,
+    "ast_hash": "be5e6875f81514f8851dc62dd9a7cdc6",
+    "semantic_hash": ""
+  },
+  "src/core/database/prisma.ts": {
+    "mtime": 1793920006.236313,
+    "seen": 1793920568.4470243,
+    "ast_hash": "f375b899c84c20a7cded2c257d999e7b",
+    "semantic_hash": ""
+  },
+  "src/core/discord/client.ts": {
+    "mtime": 1793920169.7707052,
+    "seen": 1793920568.4470243,
+    "ast_hash": "56e5d673404473f117b5901e77bb2b3c",
+    "semantic_hash": ""
+  },
+  "src/core/discord/interactions/interaction-handler.ts": {
+    "mtime": 1793920169.7722046,
+    "seen": 1793920568.4470243,
+    "ast_hash": "de68a8c34b38a87c87af792f51ef0f39",
+    "semantic_hash": ""
+  },
+  "src/core/discord/interactions/interaction-registry.ts": {
+    "mtime": 1793920169.7737043,
+    "seen": 1793920568.4470243,
+    "ast_hash": "be9bf2655b682cce6b51941f063b283f",
+    "semantic_hash": ""
+  },
+  "src/core/logger/logger.ts": {
+    "mtime": 1793919821.89041,
+    "seen": 1793920568.4470243,
+    "ast_hash": "40e3a8814c543cdb640fcd9b5efbd962",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/browser.ts": {
+    "mtime": 1793920024.165338,
+    "seen": 1793920568.4470243,
+    "ast_hash": "09f205dfe66bd5e2091b56fcee89a8ba",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/client.ts": {
+    "mtime": 1793920024.165338,
+    "seen": 1793920568.4470243,
+    "ast_hash": "cadecd6d83a5fba7c2ab208f83790087",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/commonInputTypes.ts": {
+    "mtime": 1793920024.165338,
+    "seen": 1793920568.4470243,
+    "ast_hash": "8b78c93cffdeee77a7e036653c67bfb4",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/enums.ts": {
+    "mtime": 1793920024.165338,
+    "seen": 1793920568.4470243,
+    "ast_hash": "fa6c58ad2d5526df3ff4f7e351d5f2f2",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/internal/class.ts": {
+    "mtime": 1793920024.1693792,
+    "seen": 1793920568.4470243,
+    "ast_hash": "a14772a6752cde7e395baa0c8caac00a",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/internal/prismaNamespace.ts": {
+    "mtime": 1793920024.16887,
+    "seen": 1793920568.4470243,
+    "ast_hash": "22fee32a970e8f9235a7168ca670b01c",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/internal/prismaNamespaceBrowser.ts": {
+    "mtime": 1793920024.1693792,
+    "seen": 1793920568.4470243,
+    "ast_hash": "c521e5dc058320cc98baae52b5787055",
+    "semantic_hash": ""
+  },
+  "src/generated/prisma/models.ts": {
+    "mtime": 1793920024.166349,
+    "seen": 1793920568.4470243,
+    "ast_hash": "ff30a378aa77f041ba5d644a47ea3678",
+    "semantic_hash": ""
+  },
+  "src/index.ts": {
+    "mtime": 1793920348.790097,
+    "seen": 1793920568.4470243,
+    "ast_hash": "778489c2016474eea305b6dfa55a0663",
+    "semantic_hash": ""
+  },
+  "src/modules/status/status.command.ts": {
+    "mtime": 1793920348.785036,
+    "seen": 1793920568.4470243,
+    "ast_hash": "24a7b3c6e26907ec8fe4f8cf48662222",
+    "semantic_hash": ""
+  },
+  "tests/integration/database-connection.test.ts": {
+    "mtime": 1793919960.9781141,
+    "seen": 1793920568.4470243,
+    "ast_hash": "918075841a520c11396be7c1731f7b45",
+    "semantic_hash": ""
+  },
+  "tests/unit/application.test.ts": {
+    "mtime": 1793920386.661397,
+    "seen": 1793920568.4470243,
+    "ast_hash": "7409f87f766aabb215f4a47ce02ca2a4",
+    "semantic_hash": ""
+  },
+  "tests/unit/bootstrap.test.ts": {
+    "mtime": 1793919589.6295857,
+    "seen": 1793920568.4470243,
+    "ast_hash": "d1e0f52f9037074a92983af4380f14e5",
+    "semantic_hash": ""
+  },
+  "tests/unit/core/config/env.test.ts": {
+    "mtime": 1793919723.8989737,
+    "seen": 1793920568.4470243,
+    "ast_hash": "2879f19ecaa2a940d65ea6fc15b03be5",
+    "semantic_hash": ""
+  },
+  "tests/unit/core/database/prisma.test.ts": {
+    "mtime": 1793919960.976576,
+    "seen": 1793920568.4470243,
+    "ast_hash": "bc4d4fcc5f30727ca460b59b44336929",
+    "semantic_hash": ""
+  },
+  "tests/unit/core/discord/interaction-registry.test.ts": {
+    "mtime": 1793920139.2602947,
+    "seen": 1793920568.4470243,
+    "ast_hash": "125309e927d5721cfb3ee65102ac212c",
+    "semantic_hash": ""
+  },
+  "tests/unit/core/logger/logger.test.ts": {
+    "mtime": 1793919805.122692,
+    "seen": 1793920568.4470243,
+    "ast_hash": "bec2ebae898f829294b3758758227c46",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/status/status.command.test.ts": {
+    "mtime": 1793920278.2655282,
+    "seen": 1793920568.4470243,
+    "ast_hash": "5c08f9de406f1d5230c3876ff15909a6",
+    "semantic_hash": ""
+  },
+  "tests/unit/scripts/register-commands.test.ts": {
+    "mtime": 1793920313.391965,
+    "seen": 1793920568.4470243,
+    "ast_hash": "549b8b45f8dcd7bd05f68ac181d9eca4",
+    "semantic_hash": ""
+  },
+  "tsconfig.build.json": {
+    "mtime": 1793919589.6250567,
+    "seen": 1793920568.4470243,
+    "ast_hash": "1b61aa8dbe88da40abe4b796617aa6bc",
+    "semantic_hash": ""
+  },
+  "tsconfig.json": {
+    "mtime": 1793919589.6225574,
+    "seen": 1793920568.4470243,
+    "ast_hash": "a31acaa40511d57e73eab375b7aaae09",
+    "semantic_hash": ""
+  },
+  "vitest.config.ts": {
+    "mtime": 1793919589.626575,
+    "seen": 1793920568.4470243,
+    "ast_hash": "3664f2c96b63a753ff4c57dd0adce951",
+    "semantic_hash": ""
+  },
+  ".github/pull_request_template.md": {
+    "mtime": 1793920517.0598547,
+    "seen": 1793920568.4470243,
+    "ast_hash": "177f2085ecbe1dc3c87e983d96fda687",
+    "semantic_hash": ""
+  },
+  "CHANGELOG.md": {
+    "mtime": 1793920492.456523,
+    "seen": 1793920568.4470243,
+    "ast_hash": "d877646735b79069edd969d559179704",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1793920492.454004,
+    "seen": 1793920568.4470243,
+    "ast_hash": "f62e5d05a64d0a7f6ec706cf7bd7d009",
+    "semantic_hash": ""
+  },
+  "docs/architecture.md": {
+    "mtime": 1793920517.0437396,
+    "seen": 1793920568.4470243,
+    "ast_hash": "df3636f7c37a0e85a4ac17d305765c18",
+    "semantic_hash": ""
+  },
+  "docs/releases/v0.1.0.md": {
+    "mtime": 1793920517.0558171,
+    "seen": 1793920568.4475248,
+    "ast_hash": "be17a7e8dbc3524dfba63392af8d5f57",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-11-05-charon-stage-1-infrastructure.md": {
+    "mtime": 1793919468.9764667,
+    "seen": 1793920568.4475248,
+    "ast_hash": "0a0e346e84797380666679019cfd7d4f",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-11-05-charon-v1-design.md": {
+    "mtime": 1793919468.977967,
+    "seen": 1793920568.4475248,
+    "ast_hash": "4a24b43f07c45c7ba85d394edb859eaf",
+    "semantic_hash": ""
+  },
+  "package-lock.json": {
+    "mtime": 1793919920.248031,
+    "seen": 1793920568.4475248,
+    "ast_hash": "312e805a3c20155e8527fc7ca0be6ce5",
+    "semantic_hash": ""
   }
 }
