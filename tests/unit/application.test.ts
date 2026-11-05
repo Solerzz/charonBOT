@@ -1,5 +1,7 @@
 import type { Interaction } from 'discord.js';
-import { describe, expect, it } from 'vitest';
+import { Writable } from 'node:stream';
+
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createApplication,
@@ -91,7 +93,111 @@ describe('application lifecycle', () => {
     await expect(application.start()).rejects.toThrow(
       'Database connection check failed',
     );
-    expect(events).toEqual(['database:connect']);
+    expect(events).toEqual([
+      'database:connect',
+      'discord:destroy',
+      'database:disconnect',
+    ]);
+  });
+
+  it('releases resources when Discord login fails', async () => {
+    const events: string[] = [];
+    const ports = dependencies(events);
+    ports.discord.login = async () => {
+      events.push('discord:login');
+      throw new Error('login failed');
+    };
+    const application = createApplication(config, {
+      ...ports,
+      logger: createLogger({ level: 'silent' }),
+    });
+
+    await expect(application.start()).rejects.toThrow('login failed');
+    expect(events).toEqual([
+      'database:connect',
+      'database:query',
+      'discord:listener',
+      'discord:login',
+      'discord:destroy',
+      'database:disconnect',
+    ]);
+  });
+
+  it('shares one startup across concurrent start calls', async () => {
+    const events: string[] = [];
+    const ports = dependencies(events);
+    const application = createApplication(config, {
+      ...ports,
+      logger: createLogger({ level: 'silent' }),
+    });
+
+    await Promise.all([application.start(), application.start()]);
+
+    expect(events).toEqual([
+      'database:connect',
+      'database:query',
+      'discord:listener',
+      'discord:login',
+    ]);
+  });
+
+  it('does not continue to Discord login when stop begins during startup', async () => {
+    const events: string[] = [];
+    let releaseConnection: (() => void) | undefined;
+    const connectionGate = new Promise<void>((resolve) => {
+      releaseConnection = resolve;
+    });
+    const ports = dependencies(events);
+    ports.database.$connect = async () => {
+      events.push('database:connect');
+      await connectionGate;
+    };
+    const application = createApplication(config, {
+      ...ports,
+      logger: createLogger({ level: 'silent' }),
+    });
+
+    const starting = application.start();
+    const stopping = application.stop('SIGTERM');
+    releaseConnection?.();
+    await Promise.all([starting, stopping]);
+
+    expect(events).toEqual([
+      'database:connect',
+      'database:query',
+      'discord:destroy',
+      'database:disconnect',
+    ]);
+  });
+
+  it('contains a rejected dispatch at the Discord event boundary', async () => {
+    const logLines: string[] = [];
+    const destination = new Writable({
+      write(chunk, _encoding, callback) {
+        logLines.push(chunk.toString());
+        callback();
+      },
+    });
+    let interactionListener: ((interaction: Interaction) => void) | undefined;
+    const events: string[] = [];
+    const ports = dependencies(events);
+    ports.discord.on = (_event, listener) => {
+      interactionListener = listener;
+    };
+    ports.dispatcher.dispatch = async () => {
+      throw new Error('dispatch-secret-token');
+    };
+    const application = createApplication(config, {
+      ...ports,
+      logger: createLogger({ level: 'error', destination }),
+    });
+    await application.start();
+
+    interactionListener?.({ id: 'interaction-4' } as Interaction);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(logLines.join('')).toContain('Interaction dispatch failed');
+    expect(logLines.join('')).not.toContain('dispatch-secret-token');
   });
 
   it('destroys Discord and disconnects the database only once', async () => {
@@ -111,7 +217,7 @@ describe('application lifecycle', () => {
   it.each(['SIGINT', 'SIGTERM'] as const)(
     'registers %s as a graceful shutdown signal',
     async (signal) => {
-      const registered = new Map<string, () => Promise<void>>();
+      const registered = new Map<string, () => void>();
       const source: SignalSource = {
         once: (event, listener) => {
           registered.set(event, listener);
@@ -129,9 +235,34 @@ describe('application lifecycle', () => {
         },
         source,
       );
-      await registered.get(signal)?.();
+      registered.get(signal)?.();
 
-      expect(received).toEqual([signal]);
+      await vi.waitFor(() => expect(received).toEqual([signal]));
     },
   );
+
+  it('reports an asynchronous shutdown failure without exposing the error', async () => {
+    const registered = new Map<string, () => void>();
+    const source: SignalSource = {
+      once: (event, listener) => {
+        registered.set(event, listener);
+        return source;
+      },
+    };
+    const failures: string[] = [];
+
+    registerShutdownSignals(
+      {
+        start: async () => undefined,
+        stop: async () => {
+          throw new Error('shutdown-secret-token');
+        },
+      },
+      source,
+      (signal) => failures.push(signal),
+    );
+    registered.get('SIGINT')?.();
+
+    await vi.waitFor(() => expect(failures).toEqual(['SIGINT']));
+  });
 });

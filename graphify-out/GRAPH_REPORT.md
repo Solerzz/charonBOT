@@ -1,17 +1,17 @@
 # Graph Report - feature-etapa-1-infraestrutura  (2026-11-05)
 
 ## Corpus Check
-- 41 files · ~9,617 words
+- 41 files · ~10,542 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
 ## Summary
-- 373 nodes · 514 edges · 18 communities
+- 376 nodes · 519 edges · 17 communities
 - Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 19 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `51f98983`
+- Built from commit: `196783a8`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -21,14 +21,13 @@
 - application.ts
 - class.ts
 - package.json
-- register-commands.ts
+- application.ts
 - steps
 - Arquitetura do Charon
-- prisma.ts
+- class.ts
 - Charon v1 — Design
 - compilerOptions
 - compilerOptions
-- scripts
 - Review Focus
 - Changelog
 - Charon v0.1.0 — Infraestrutura
@@ -43,7 +42,7 @@
 5. `createApplication()` - 10 edges
 6. `InteractionRegistry` - 10 edges
 7. `PrismaClient` - 10 edges
-8. `scripts` - 9 edges
+8. `createLogger()` - 9 edges
 9. `AppConfig` - 9 edges
 10. `InteractionHandler` - 9 edges
 
@@ -56,7 +55,7 @@
   docs/superpowers/plans/2026-11-05-charon-stage-1-infrastructure.md → src/core/config/env.ts
 - `Task 2: Validated configuration` --references--> `loadConfig()`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-stage-1-infrastructure.md → src/core/config/env.ts
-- `Task 4: Prisma adapter` --references--> `createPrismaClient()`  [INFERRED]
+- `Task 4: Prisma adapter` --references--> `checkDatabase()`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-stage-1-infrastructure.md → src/core/database/prisma.ts
 
 ## Import Cycles
@@ -65,7 +64,7 @@
 ## Hyperedges (group relationships)
 - **Graphify Maintenance and Usage Workflow** — agents_graphify_command, agents_graphify_query, agents_graphify_update, agents_graph_json, agents_graph_report, agents_wiki_index [INFERRED 0.75]
 
-## Communities (18 total, 0 thin omitted)
+## Communities (17 total, 0 thin omitted)
 
 ### Community 0 - "Graphify Knowledge Graph (graphify-out)"
 Cohesion: 0.33
@@ -76,20 +75,20 @@ Cohesion: 0.02
 Nodes (99): AnyNull, Args, At, AtLeast, AtLoose, AtStrict, BatchPayload, Boolean (+91 more)
 
 ### Community 2 - "application.ts"
-Cohesion: 0.08
-Nodes (19): Task 5: Discord client and interaction registry, discord.js, pino, createDefaultDispatcher(), DiscordClientPort, InteractionDispatcher, SignalSource, AppConfig (+11 more)
+Cohesion: 0.10
+Nodes (12): Task 5: Discord client and interaction registry, discord.js, commandDefinitions, CommandRegistrar, registerCommands(), createDefaultDispatcher(), createDiscordClient(), InteractionHandler (+4 more)
 
 ### Community 3 - "class.ts"
-Cohesion: 0.06
-Nodes (16): @prisma/client@7.10.1, @prisma/client, $Enums, $Enums, config, decodeBase64AsWasm(), LogOptions, PrismaClient (+8 more)
+Cohesion: 0.12
+Nodes (11): @prisma/client@7.10.1, @prisma/client, $Enums, $Enums, AnyNull, DbNull, Decimal, JsonNull (+3 more)
 
 ### Community 4 - "package.json"
-Cohesion: 0.09
-Nodes (29): dependencies, discord.js@14.28.1, dotenv@18.0.9, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, zod@4.6.7, devDependencies (+21 more)
+Cohesion: 0.06
+Nodes (39): dependencies, discord.js@14.28.1, dotenv@18.0.9, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, zod@4.6.7, devDependencies (+31 more)
 
-### Community 5 - "register-commands.ts"
-Cohesion: 0.11
-Nodes (13): Task 2: Validated configuration, vitest, commandDefinitions, CommandRegistrar, registerCommands(), Application, registerShutdownSignals(), environmentSchema (+5 more)
+### Community 5 - "application.ts"
+Cohesion: 0.07
+Nodes (30): Task 2: Validated configuration, Task 4: Prisma adapter, vitest, Application, ApplicationOverrides, createApplication(), DiscordClientPort, InteractionDispatcher (+22 more)
 
 ### Community 6 - "steps"
 Cohesion: 0.11
@@ -99,9 +98,9 @@ Nodes (18): jobs, verify, name, on, pull_request, push, permissions, contents (+
 Cohesion: 0.12
 Nodes (14): Arquitetura do Charon, Banco de dados, Estilo, Estrutura da Etapa 1, Fluxo de inicialização, Interações, Próximos módulos, Charon (+6 more)
 
-### Community 8 - "prisma.ts"
-Cohesion: 0.25
-Nodes (9): Task 4: Prisma adapter, ApplicationOverrides, createApplication(), checkDatabase(), createPrismaClient(), DatabaseClient, disconnectDatabase(), disconnectedClients (+1 more)
+### Community 8 - "class.ts"
+Cohesion: 0.11
+Nodes (5): config, decodeBase64AsWasm(), LogOptions, PrismaClient, PrismaClientConstructor
 
 ### Community 9 - "Charon v1 — Design"
 Cohesion: 0.14
@@ -114,10 +113,6 @@ Nodes (12): compilerOptions, esModuleInterop, exactOptionalPropertyTypes, forceC
 ### Community 11 - "compilerOptions"
 Cohesion: 0.18
 Nodes (10): ./tsconfig.json, compilerOptions, declaration, outDir, rootDir, sourceMap, types, exclude (+2 more)
-
-### Community 12 - "scripts"
-Cohesion: 0.22
-Nodes (9): scripts, build, commands:register, dev, prisma:generate, start, test, test:run (+1 more)
 
 ### Community 13 - "Review Focus"
 Cohesion: 0.25
@@ -141,22 +136,22 @@ Nodes (3): PrismaClientBaseOptions, PrismaClientOptionsWithAccelerateUrl, Prisma
 
 ## Knowledge Gaps
 - **3 isolated node(s):** `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md`
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 237 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 239 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `@prisma/client` connect `class.ts` to `prismaNamespace.ts`, `package.json`?**
-  _High betweenness centrality (0.131) - this node is a cross-community bridge._
+- **Why does `@prisma/client` connect `class.ts` to `class.ts`, `prismaNamespace.ts`, `package.json`?**
+  _High betweenness centrality (0.128) - this node is a cross-community bridge._
 - **What connects `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md` to the rest of the system?**
   _3 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `prismaNamespace.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._
-- **Why does `InteractionRegistry` connect `application.ts` to `Arquitetura do Charon`?**
+- **Why does `InteractionRegistry` connect `application.ts` to `application.ts`, `Arquitetura do Charon`?**
   _High betweenness centrality (0.080) - this node is a cross-community bridge._
 - **Should `application.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.08325624421831637 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.09841269841269841 - nodes in this community are weakly interconnected._
 - **Why does `Interações` connect `Arquitetura do Charon` to `application.ts`?**
   _High betweenness centrality (0.061) - this node is a cross-community bridge._
 - **Should `class.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.06006006006006006 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.11578947368421053 - nodes in this community are weakly interconnected._

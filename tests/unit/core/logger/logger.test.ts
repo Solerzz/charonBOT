@@ -68,4 +68,43 @@ describe('createLogger', () => {
       database: { url: '[Redacted]', directUrl: '[Redacted]' },
     });
   });
+
+  it('redacts credential keys at arbitrary depth and regardless of casing', () => {
+    const { lines, logger } = captureLogger();
+
+    logger.info({
+      request: {
+        credentials: { Password: 'deep-password' },
+        headers: { Authorization: 'Bearer authorization-secret' },
+      },
+      config: {
+        DATABASE_URL: 'postgresql://charon:nested-secret@example.com/charon',
+      },
+    });
+
+    const output = lines.join('');
+    expect(output).not.toMatch(
+      /deep-password|authorization-secret|nested-secret/,
+    );
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
+      request: {
+        credentials: { Password: '[Redacted]' },
+        headers: { Authorization: '[Redacted]' },
+      },
+      config: { DATABASE_URL: '[Redacted]' },
+    });
+  });
+
+  it('redacts a PostgreSQL connection string passed as a log message', () => {
+    const { lines, logger } = captureLogger();
+
+    logger.error(
+      'Connection failed: postgresql://charon:message-secret@example.com/charon',
+    );
+
+    expect(lines.join('')).not.toContain('message-secret');
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
+      msg: 'Connection failed: [Redacted]',
+    });
+  });
 });

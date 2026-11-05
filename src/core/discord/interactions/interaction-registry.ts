@@ -20,15 +20,15 @@ export class InteractionRegistry {
   }
 
   public async dispatch(interaction: Interaction): Promise<boolean> {
-    const handler = this.#handlers.find((candidate) =>
-      candidate.canHandle(interaction),
-    );
-
-    if (!handler) {
-      return false;
-    }
-
     try {
+      const handler = this.#handlers.find((candidate) =>
+        candidate.canHandle(interaction),
+      );
+
+      if (!handler) {
+        return false;
+      }
+
       await handler.execute(interaction);
     } catch (error) {
       this.logger.error(
@@ -39,6 +39,7 @@ export class InteractionRegistry {
         'Interaction handler failed',
       );
       await this.#respondWithFailure(interaction);
+      return true;
     }
 
     return true;

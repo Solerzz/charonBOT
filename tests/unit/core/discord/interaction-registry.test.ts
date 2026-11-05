@@ -100,4 +100,31 @@ describe('InteractionRegistry', () => {
     });
     expect(logLines.join('')).not.toContain('discord-secret-token');
   });
+
+  it('contains matcher errors and sends a safe ephemeral response', async () => {
+    let reply: unknown;
+    const interaction = interactionFrom({
+      id: 'interaction-3',
+      replied: false,
+      deferred: false,
+      isRepliable: () => true,
+      reply: async (payload: unknown) => {
+        reply = payload;
+      },
+    });
+    const handler: InteractionHandler<Interaction> = {
+      canHandle: (_candidate): _candidate is Interaction => {
+        throw new Error('matcher-secret-token');
+      },
+      execute: async () => undefined,
+    };
+    const registry = new InteractionRegistry(createSilentLogger());
+    registry.register(handler);
+
+    await expect(registry.dispatch(interaction)).resolves.toBe(true);
+    expect(reply).toEqual({
+      content: 'Não foi possível concluir esta ação.',
+      flags: MessageFlags.Ephemeral,
+    });
+  });
 });
