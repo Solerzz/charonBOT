@@ -69,6 +69,30 @@ describe('buildSetupDashboard', () => {
     expect(payload.embeds[0].description).toBe('1 Voice Creator configurado. Selecione um para editar.');
   });
 
+  it('marks missing voice/category targets unavailable while preserving recovery controls', () => {
+    const payload = json({ configurations: [first, second], unavailableChannelDiscordIds: [first.creatorChannelDiscordId, first.categoryDiscordId] });
+    expect(payload.flags).toBeUndefined();
+    expect(payload.embeds[0].color).toBe(0x2b2d31);
+    expect(payload.embeds[0].fields).toContainEqual({ name: 'Atenção', value: 'Canal Voice Creator indisponível. Selecione outro Voice Creator ou exclua esta configuração.\nCategoria indisponível. Escolha outra categoria.' });
+    expect(payload.embeds[0].fields[0].value).toBe('Indisponível · ID 22345678901234567');
+    expect(payload.embeds[0].fields[1].value).toBe('Indisponível · ID 32345678901234567');
+    expect(payload.embeds[0].fields[2].value).toBe('Indisponível');
+    const controls = payload.components.flatMap((row: { components: unknown[] }) => row.components);
+    expect(controls[0].options[0]).toMatchObject({ label: 'Canal indisponível · 22345678901234567', value: first.id, default: true });
+    const category = controls.find((control: { custom_id: string }) => control.custom_id === `setup:v1:change-category:${first.id}`);
+    expect(category.default_values).toBeUndefined();
+    expect(category.disabled).not.toBe(true);
+    expect(controls.find((control: { custom_id: string }) => control.custom_id === `setup:v1:delete:${first.id}`).disabled).not.toBe(true);
+    expect(controls.find((control: { custom_id: string }) => control.custom_id === 'setup:v1:add').disabled).not.toBe(true);
+  });
+
+  it('does not carry another creator unavailable warning onto the selected healthy creator', () => {
+    const payload = json({ configurations: [first, second], selectedVoiceCreatorId: second.id, unavailableChannelDiscordIds: [first.creatorChannelDiscordId] });
+    expect(payload.embeds[0].fields.some((field: { name: string }) => field.name === 'Atenção')).toBe(false);
+    expect(payload.embeds[0].fields[0].value).toBe('<#42345678901234567>');
+    expect(payload.components[2].components[0].default_values).toEqual([{ id: second.categoryDiscordId, type: 'channel' }]);
+  });
+
   it('navigates all creators in large guilds with existing UUID selection actions', () => {
     const configurations = Array.from({ length: 30 }, (_, i) => ({ ...first, id: `123e4567-e89b-42d3-a456-${String(i).padStart(12, '0')}` }));
     const firstPage = json({ configurations });

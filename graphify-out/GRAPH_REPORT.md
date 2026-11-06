@@ -1,17 +1,17 @@
 # Graph Report - feature-etapa-1-infraestrutura  (2026-11-06)
 
 ## Corpus Check
-- 60 files · ~34,190 words
+- 60 files · ~34,749 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
 ## Summary
-- 799 nodes · 1102 edges · 34 communities (29 shown, 5 thin omitted)
+- 799 nodes · 1101 edges · 34 communities (29 shown, 5 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 52 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `184394b2`
+- Built from commit: `175ad4ad`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -208,7 +208,7 @@ Nodes (4): Task 1: Persist Voice Creator and Temporary Room State, RoomVisibilit
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `@prisma/client` connect `package.json` to `prismaNamespace.ts`, `class.ts`, `class.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `setup.repository.ts`, `commonInputTypes.ts`?**
-  _High betweenness centrality (0.231) - this node is a cross-community bridge._
+  _High betweenness centrality (0.230) - this node is a cross-community bridge._
 - **Are the 3 inferred relationships involving `SetupService` (e.g. with `Task 2: Add Voice Creator Repository and Setup Service` and `Task 3: Build the Private Setup Dashboard`) actually correct?**
   _`SetupService` has 3 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md` to the rest of the system?**

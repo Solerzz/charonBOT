@@ -71,18 +71,23 @@ export class SetupCommand
       const configurations = await this.service.list(interaction.guildId);
       const selected = configurations[0];
       const voiceChannels = [];
+      const unavailableChannelDiscordIds: string[] = [];
       if (selected !== undefined) {
         const channel = await gateway.getVoiceChannel(
           selected.creatorChannelDiscordId,
         );
         const category = await gateway.getCategory(selected.categoryDiscordId);
-        if (channel === null || category === null) {
-          throw new SetupDiscordError();
+        if (channel === null) {
+          unavailableChannelDiscordIds.push(selected.creatorChannelDiscordId);
+        } else {
+          voiceChannels.push(channel);
         }
-        voiceChannels.push(channel);
+        if (category === null) {
+          unavailableChannelDiscordIds.push(selected.categoryDiscordId);
+        }
       }
       await interaction.editReply(
-        buildSetupDashboard({ configurations, voiceChannels }),
+        buildSetupDashboard({ configurations, voiceChannels, unavailableChannelDiscordIds }),
       );
     } catch (error: unknown) {
       if (!(error instanceof SetupDiscordError)) {

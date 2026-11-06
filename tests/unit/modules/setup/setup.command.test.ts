@@ -119,11 +119,43 @@ describe('SetupCommand', () => {
     expect(editReply.mock.calls[0]![0]).toMatchObject({ content: expect.stringContaining('O Charon precisa') });
   });
 
-  it('rejects stale selected channels with a safe ephemeral domain error', async () => {
-    const { command, interaction, editReply, fetch } = fixture([configuration]);
-    fetch.mockImplementation(async (id: string) => id === configuration.creatorChannelDiscordId ? null as never : ({ id, guildId, type: ChannelType.GuildText, permissionsFor: () => botPermissions, isThread: () => false }) as never);
+  it.each([
+    [configuration.creatorChannelDiscordId],
+    [configuration.categoryDiscordId],
+    [configuration.creatorChannelDiscordId, configuration.categoryDiscordId],
+  ])('opens a recoverable private dashboard when persisted targets are unavailable: %j', async (...missing) => {
+    const other = { ...configuration, id: '123e4567-e89b-42d3-a456-426614174001', creatorChannelDiscordId: '52345678901234567' };
+    const { command, interaction, deferReply, editReply, fetch, send } = fixture([configuration, other]);
+    const resolve = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (id: string) => missing.includes(id) ? null as never : resolve(id));
     await command.execute(interaction);
-    expect(editReply.mock.calls[0]![0]).toEqual({ content: 'Canal de voz ou categoria indisponível neste servidor.' });
+    expect(deferReply).toHaveBeenCalledExactlyOnceWith({ flags: MessageFlags.Ephemeral });
+    const payload = JSON.parse(JSON.stringify(editReply.mock.calls[0]![0]));
+    expect(payload).toHaveProperty('embeds');
+    expect(payload.embeds[0].title).toBe('Configuração do Charon');
+    expect(payload.embeds[0].fields).toContainEqual(expect.objectContaining({ name: 'Atenção', value: expect.stringContaining('indisponível') }));
+    const controls = payload.components.flatMap((row: { components: unknown[] }) => row.components);
+    expect(controls[0].options).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: configuration.id, default: true }),
+      expect.objectContaining({ value: other.id, default: false }),
+    ]));
+    expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:delete:${configuration.id}` }));
+    expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:change-category:${configuration.id}` }));
+    expect(controls).toContainEqual(expect.objectContaining({ custom_id: 'setup:v1:add' }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('still denies setup for actual target permission failures rather than treating them as stale state', async () => {
+    const { command, interaction, editReply, fetch } = fixture([configuration]);
+    const resolve = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (id: string) => {
+      if (id === configuration.creatorChannelDiscordId) {
+        throw { code: 50013 };
+      }
+      return resolve(id);
+    });
+    await command.execute(interaction);
+    expect(editReply.mock.calls[0]![0]).toEqual({ content: 'O Charon precisa de Gerenciar Canais, Mover Membros, Conectar e Enviar Mensagens no contexto da configuração.' });
   });
 
   it('leaves unexpected failures to the central interaction registry', async () => {
