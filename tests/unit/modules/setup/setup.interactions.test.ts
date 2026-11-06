@@ -1,0 +1,385 @@
+import { MessageFlags, MessageFlagsBitField, PermissionFlagsBits, PermissionsBitField, type Interaction } from 'discord.js';
+import { describe, expect, it, vi } from 'vitest';
+
+import { SetupInteractions, type SetupInteraction, type SetupDiscordGatewayFactory } from '../../../../src/modules/setup/setup.interactions.js';
+import { SetupDiscordError, type SetupDiscordGateway } from '../../../../src/modules/setup/setup.discord.js';
+import { VoiceCreatorAlreadyConfiguredError, VoiceCreatorNotFoundError, type CreateVoiceCreatorInput, type VoiceCreatorConfiguration, type VoiceCreatorRepository } from '../../../../src/modules/setup/setup.repository.js';
+import { SetupService } from '../../../../src/modules/setup/setup.service.js';
+
+const guildId = '12345678901234567';
+const first: VoiceCreatorConfiguration = {
+  id: '123e4567-e89b-42d3-a456-426614174000', guildDiscordId: guildId,
+  creatorChannelDiscordId: '22345678901234567', categoryDiscordId: '32345678901234567',
+  roomCommandsEnabled: true, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
+};
+const second = { ...first, id: '123e4567-e89b-42d3-a456-426614174001', creatorChannelDiscordId: '52345678901234567' };
+type Kind = 'button' | 'channel' | 'string' | 'modal' | 'role';
+
+function fixture(action = 'toggle-commands', kind: Kind = 'button', values: string[] = [], identifier = first.id) {
+  let configurations = [{ ...first }, { ...second }];
+  const listByGuild = vi.fn(async () => configurations.map((item) => ({ ...item })));
+  const findById = vi.fn(async (id: string) => configurations.find((item) => item.id === id) ?? null);
+  const create = vi.fn(async (input: CreateVoiceCreatorInput) => {
+    const created = { ...first, ...input, id: '123e4567-e89b-42d3-a456-426614174002' };
+    configurations.push(created);
+    return created;
+  });
+  const updateCategory = vi.fn(async (id: string, categoryDiscordId: string) => {
+    const item = configurations.find((entry) => entry.id === id)!;
+    item.categoryDiscordId = categoryDiscordId;
+    return { ...item };
+  });
+  const setRoomCommandsEnabled = vi.fn(async (id: string, enabled: boolean) => {
+    const item = configurations.find((entry) => entry.id === id)!;
+    item.roomCommandsEnabled = enabled;
+    return { ...item };
+  });
+  const remove = vi.fn(async (id: string) => { configurations = configurations.filter((item) => item.id !== id); });
+  const repository: VoiceCreatorRepository = { listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, delete: remove, findByChannel: vi.fn() };
+  const assertCanConfigure = vi.fn().mockResolvedValue(undefined);
+  const getVoiceChannel = vi.fn(async (id: string) => ({ id, name: id === second.creatorChannelDiscordId ? 'Segundo' : 'Criar sala', categoryDiscordId: first.categoryDiscordId }));
+  const getCategory = vi.fn(async (id: string) => ({ id, name: 'Salas' }));
+  const renameVoiceChannel = vi.fn().mockResolvedValue(undefined);
+  const gateway: SetupDiscordGateway = { assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel };
+  const factory = vi.fn<SetupDiscordGatewayFactory>().mockReturnValue(gateway);
+  const reply = vi.fn().mockResolvedValue(undefined);
+  const deferUpdate = vi.fn().mockResolvedValue(undefined);
+  const editReply = vi.fn().mockResolvedValue(undefined);
+  const showModal = vi.fn().mockResolvedValue(undefined);
+  const send = vi.fn();
+  const interaction = {
+    customId: action === 'add' ? 'setup:v1:add' : `setup:v1:${action}:${identifier}`,
+    values, isButton: () => kind === 'button', isAnySelectMenu: () => ['channel', 'string', 'role'].includes(kind),
+    isChannelSelectMenu: () => kind === 'channel', isStringSelectMenu: () => kind === 'string',
+    isModalSubmit: () => kind === 'modal', isFromMessage: () => true,
+    inGuild: () => true, guildId, guild: { id: guildId }, channelId: '42345678901234567',
+    memberPermissions: new PermissionsBitField(PermissionFlagsBits.Administrator),
+    message: { flags: new MessageFlagsBitField(MessageFlags.Ephemeral) },
+    fields: { getTextInputValue: vi.fn().mockReturnValue('Novo nome') },
+    channel: { send }, reply, deferUpdate, editReply, showModal,
+  } as unknown as SetupInteraction;
+  return { handler: new SetupInteractions(new SetupService(repository), factory), interaction, factory, reply, deferUpdate, editReply, showModal, send, listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, remove, assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel, configurations };
+}
+
+function payload(f: ReturnType<typeof fixture>) {
+  return JSON.parse(JSON.stringify(f.editReply.mock.calls.at(-1)![0]));
+}
+
+function expectNoMutation(f: ReturnType<typeof fixture>) {
+  for (const mutation of [f.create, f.updateCategory, f.setRoomCommandsEnabled, f.remove, f.renameVoiceChannel]) {
+    expect(mutation).not.toHaveBeenCalled();
+  }
+  expect(f.send).not.toHaveBeenCalled();
+}
+
+describe('SetupInteractions', () => {
+  it.each([['button', true], ['channel', true], ['string', true], ['modal', true], ['role', true]] as const)('routes only the setup v1 namespace for %s', (kind, expected) => {
+    const f = fixture('delete', kind);
+    expect(f.handler.canHandle(f.interaction)).toBe(expected);
+    for (const customId of ['calls:v1:delete:x', 'setup:v2:add', 'setup:v1evil:add']) {
+      expect(f.handler.canHandle({ ...f.interaction, customId } as unknown as Interaction)).toBe(false);
+    }
+    expect(f.handler.canHandle({ ...f.interaction, isButton: () => false, isAnySelectMenu: () => false, isModalSubmit: () => false } as unknown as Interaction)).toBe(false);
+  });
+
+  it('acknowledges the private source before requests, toggles only the selected creator, and refreshes persisted data', async () => {
+    const f = fixture('toggle-commands', 'button', [], second.id);
+    await f.handler.execute(f.interaction);
+    expect(f.deferUpdate).toHaveBeenCalledExactlyOnceWith();
+    expect(f.deferUpdate.mock.invocationCallOrder[0]).toBeLessThan(f.assertCanConfigure.mock.invocationCallOrder[0]!);
+    expect(f.assertCanConfigure).toHaveBeenCalledWith('42345678901234567');
+    expect(f.setRoomCommandsEnabled).toHaveBeenCalledExactlyOnceWith(second.id, false);
+    expect(f.configurations[0]!.roomCommandsEnabled).toBe(true);
+    expect(f.listByGuild).toHaveBeenCalledTimes(2);
+    expect(payload(f).embeds[0].fields).toContainEqual({ name: 'Comandos da sala', value: expect.stringContaining('Desabilitados') });
+    expect(f.reply).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+    expect(payload(f).flags).toBeUndefined();
+    expect(payload(f).content).toBeNull();
+    expect(payload(f).allowedMentions).toEqual({ parse: [] });
+  });
+
+  it('selects another persisted creator using UUID values, including pagination values', async () => {
+    const f = fixture('select', 'string', [second.id]);
+    await f.handler.execute(f.interaction);
+    expect(payload(f).components[0].components[0].options).toContainEqual(expect.objectContaining({ value: second.id, default: true, label: 'Segundo' }));
+    expectNoMutation(f);
+  });
+
+  it('starts add with a validated existing voice channel and a native category selector', async () => {
+    const f = fixture('add', 'channel', ['62345678901234567']);
+    await f.handler.execute(f.interaction);
+    expect(f.getVoiceChannel).toHaveBeenCalledWith('62345678901234567');
+    expect(payload(f).components[0].components[0]).toMatchObject({ custom_id: 'setup:v1:add-category:62345678901234567', type: 8, channel_types: [4] });
+    expectNoMutation(f);
+  });
+
+  it('revalidates both add targets on the second step and renders the newly persisted creator', async () => {
+    const f = fixture('add-category', 'channel', ['72345678901234567'], '62345678901234567');
+    await f.handler.execute(f.interaction);
+    expect(f.getVoiceChannel).toHaveBeenCalledWith('62345678901234567');
+    expect(f.getCategory).toHaveBeenCalledWith('72345678901234567');
+    expect(f.create).toHaveBeenCalledExactlyOnceWith({ guildDiscordId: guildId, creatorChannelDiscordId: '62345678901234567', categoryDiscordId: '72345678901234567' });
+    expect(payload(f).embeds[0].title).toBe('Configuração do Charon');
+    expect(payload(f).components[0].components[0].options).toContainEqual(expect.objectContaining({ value: '123e4567-e89b-42d3-a456-426614174002', default: true }));
+    expect(payload(f).embeds[0].fields).toContainEqual({ name: 'Voice Creator', value: '<#62345678901234567>' });
+  });
+
+  it('changes destination even when the old category no longer exists', async () => {
+    const f = fixture('change-category', 'channel', ['72345678901234567']);
+    f.getCategory.mockImplementation(async (id) => id === first.categoryDiscordId ? null as never : { id, name: 'Nova' });
+    await f.handler.execute(f.interaction);
+    expect(f.updateCategory).toHaveBeenCalledExactlyOnceWith(first.id, '72345678901234567');
+    expect(payload(f).embeds[0].fields).toContainEqual({ name: 'Categoria das salas', value: '<#72345678901234567>' });
+  });
+
+  it('opens a native rename modal without an incompatible prior acknowledgement', async () => {
+    const f = fixture('rename');
+    await f.handler.execute(f.interaction);
+    const modal = JSON.parse(JSON.stringify(f.showModal.mock.calls[0]![0]));
+    expect(modal).toMatchObject({ custom_id: `setup:v1:rename:${first.id}`, title: 'Renomear Voice Creator' });
+    expect(modal.components[0].components[0]).toMatchObject({ custom_id: 'name', value: 'Criar sala', min_length: 1, max_length: 100 });
+    expect(f.deferUpdate).not.toHaveBeenCalled();
+    expect(f.editReply).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it('revalidates modal submission and renames the same persisted channel with trimmed input', async () => {
+    const f = fixture('rename', 'modal');
+    if (f.interaction.isModalSubmit()) vi.mocked(f.interaction.fields.getTextInputValue).mockReturnValue('  Novo nome  ');
+    await f.handler.execute(f.interaction);
+    expect(f.renameVoiceChannel).toHaveBeenCalledExactlyOnceWith(first.creatorChannelDiscordId, 'Novo nome');
+    expect(f.deferUpdate).toHaveBeenCalledOnce();
+    expect(payload(f).embeds[0].title).toBe('Configuração do Charon');
+  });
+
+  it('requires explicit delete confirmation and explains that channels/rooms are preserved', async () => {
+    const f = fixture('delete');
+    await f.handler.execute(f.interaction);
+    const result = payload(f);
+    expect(JSON.stringify(result)).toContain('preservados');
+    expect(result.components[0].components).toEqual(expect.arrayContaining([
+      expect.objectContaining({ custom_id: `setup:v1:confirm-delete:${first.id}`, style: 4 }),
+      expect.objectContaining({ custom_id: `setup:v1:cancel:${first.id}` }),
+    ]));
+    expectNoMutation(f);
+  });
+
+  it('confirms logical removal even when both Discord targets were externally deleted', async () => {
+    const f = fixture('confirm-delete');
+    f.getVoiceChannel.mockResolvedValue(null as never);
+    f.getCategory.mockResolvedValue(null as never);
+    await f.handler.execute(f.interaction);
+    expect(f.remove).toHaveBeenCalledExactlyOnceWith(first.id);
+    expect(payload(f).components[0].components[0].options).not.toContainEqual(expect.objectContaining({ value: first.id }));
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it('cancels delete and restores the same selected dashboard without mutations', async () => {
+    const f = fixture('cancel', 'button', [], second.id);
+    await f.handler.execute(f.interaction);
+    expect(payload(f).components[0].components[0].options).toContainEqual(expect.objectContaining({ value: second.id, default: true }));
+    expectNoMutation(f);
+  });
+
+  it.each(['select', 'cancel'])('warns for missing persisted targets while keeping recovery controls: %s', async (action) => {
+    const f = fixture(action, action === 'select' ? 'string' : 'button', [first.id]);
+    f.getVoiceChannel.mockResolvedValue(null as never);
+    f.getCategory.mockResolvedValue(null as never);
+    await f.handler.execute(f.interaction);
+    expect(payload(f).embeds[0].fields).toContainEqual(expect.objectContaining({ name: 'Atenção' }));
+    expect(JSON.stringify(payload(f))).toContain(`setup:v1:delete:${first.id}`);
+    expectNoMutation(f);
+  });
+
+  it.each(['delete', 'confirm-delete', 'cancel', 'toggle-commands', 'rename', 'change-category', 'select'])('rejects a forged foreign-guild configuration on every action: %s', async (action) => {
+    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
+    f.configurations[0]!.guildDiscordId = '92345678901234567';
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.showModal).not.toHaveBeenCalled();
+    expect(f.getVoiceChannel).not.toHaveBeenCalled();
+    expect(f.listByGuild).toHaveBeenCalledWith(guildId);
+    expect(JSON.stringify(f.editReply.mock.calls.concat(f.reply.mock.calls))).toContain('configuração');
+  });
+
+  it('rejects a forged select value even if the custom ID belongs to this guild', async () => {
+    const f = fixture('select', 'string', ['123e4567-e89b-42d3-a456-426614174099']);
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.getVoiceChannel).not.toHaveBeenCalled();
+  });
+
+  it('rejects a foreign-guild select value even when the source creator is owned', async () => {
+    const f = fixture('select', 'string', [second.id]);
+    f.configurations[1]!.guildDiscordId = '92345678901234567';
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.getVoiceChannel).not.toHaveBeenCalled();
+    expect(payload(f).content).toContain('configuração');
+  });
+
+  it.each(['delete', 'confirm-delete', 'cancel', 'toggle-commands', 'rename', 'change-category', 'select'])('rejects an expired or logically deleted configuration: %s', async (action) => {
+    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
+    f.configurations[0]!.deletedAt = new Date();
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.showModal).not.toHaveBeenCalled();
+    expect(f.listByGuild).toHaveBeenCalledWith(guildId);
+  });
+
+  it.each(['missing', 'foreign'] as const)('rechecks persisted ownership on modal submit: %s', async (state) => {
+    const f = fixture('rename', 'modal');
+    if (state === 'missing') f.configurations.splice(0, 1);
+    else f.configurations[0]!.guildDiscordId = '92345678901234567';
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(payload(f).content).toContain('configuração');
+  });
+
+  it('refreshes another page from the existing real-UUID navigation contract', async () => {
+    const f = fixture('select', 'string', ['123e4567-e89b-42d3-a456-426614174024']);
+    for (let index = 2; index < 30; index++) {
+      f.configurations.push({ ...first, id: `123e4567-e89b-42d3-a456-${String(426614174000 + index)}`, creatorChannelDiscordId: String(62345678901234567n + BigInt(index)) });
+    }
+    await f.handler.execute(f.interaction);
+    expect(payload(f).embeds[0].footer.text).toContain('Página 2 de 2');
+    expect(payload(f).components[0].components[0].options).toContainEqual(expect.objectContaining({ value: '123e4567-e89b-42d3-a456-426614174024', default: true }));
+    expectNoMutation(f);
+  });
+
+  it('rechecks permissions on modal submission after a valid rename button was opened', async () => {
+    const f = fixture('rename');
+    await f.handler.execute(f.interaction);
+    expect(f.showModal).toHaveBeenCalledOnce();
+    Object.assign(f.interaction, { isButton: () => false, isModalSubmit: () => true });
+    f.getVoiceChannel.mockRejectedValue(new SetupDiscordError('Permissões insuficientes.'));
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(payload(f).content).toContain('Permissões');
+  });
+
+  it('rejects modal submissions with no name field safely', async () => {
+    const f = fixture('rename', 'modal');
+    if (f.interaction.isModalSubmit()) vi.mocked(f.interaction.fields.getTextInputValue).mockImplementation(() => { throw new Error('field missing'); });
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+  });
+
+  it.each(['setup:v1:delete:not-a-uuid', `setup:v1:delete:${first.id}:extra`, 'setup:v2:add', 'setup:v1:unknown'])('rejects malformed IDs privately: %s', async (customId) => {
+    const f = fixture();
+    Object.assign(f.interaction, { customId });
+    await f.handler.execute(f.interaction);
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+    expect(f.listByGuild).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it.each([
+    ['add', 'button', []], ['add', 'role', ['62345678901234567']], ['add', 'channel', []],
+    ['add', 'channel', ['1']], ['add', 'channel', ['62345678901234567', '72345678901234567']],
+    ['select', 'channel', [second.id]], ['select', 'string', ['invalid']],
+    ['change-category', 'channel', [second.id]], ['toggle-commands', 'modal', []],
+    ['confirm-delete', 'channel', []], ['add-category', 'string', ['72345678901234567']],
+  ] as [string, Kind, string[]][])('rejects invalid action/component/value combinations: %s %s %j', async (action, kind, values) => {
+    const f = fixture(action, kind, values, action === 'add-category' ? '62345678901234567' : first.id);
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.listByGuild).not.toHaveBeenCalled();
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+  });
+
+  it.each(['', '  ', 'x'.repeat(101)])('rejects invalid modal names without any mutation: %j', async (name) => {
+    const f = fixture('rename', 'modal');
+    if (f.interaction.isModalSubmit()) vi.mocked(f.interaction.fields.getTextInputValue).mockReturnValue(name);
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+  });
+
+  it.each([null, 0n, PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageChannels])('rechecks user permissions after opening: %s', async (bits) => {
+    const f = fixture();
+    Object.assign(f.interaction, { memberPermissions: bits === null ? null : new PermissionsBitField(bits) });
+    await f.handler.execute(f.interaction);
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+    expect(f.factory).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it('accepts the ManageGuild AND ManageChannels alternative', async () => {
+    const f = fixture();
+    Object.assign(f.interaction, { memberPermissions: new PermissionsBitField([PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageChannels]) });
+    await f.handler.execute(f.interaction);
+    expect(f.setRoomCommandsEnabled).toHaveBeenCalledExactlyOnceWith(first.id, false);
+  });
+
+  it.each([{ inGuild: () => false, guild: null, guildId: null }, { guild: null }, { guild: { id: '92345678901234567' } }])('rejects missing or mismatched guild context privately', async (overrides) => {
+    const f = fixture();
+    Object.assign(f.interaction, overrides);
+    await f.handler.execute(f.interaction);
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+    expect(f.factory).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it.each(['button', 'modal'] as const)('never updates a public or absent source message: %s', async (kind) => {
+    const f = fixture('rename', kind);
+    Object.assign(f.interaction, { message: { flags: new MessageFlagsBitField() } });
+    await f.handler.execute(f.interaction);
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+    expect(f.deferUpdate).not.toHaveBeenCalled();
+    expect(f.editReply).not.toHaveBeenCalled();
+    expect(f.factory).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it('rejects modal submits not attached to a message', async () => {
+    const f = fixture('rename', 'modal');
+    Object.assign(f.interaction, { message: null, isFromMessage: () => false });
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.deferUpdate).not.toHaveBeenCalled();
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+  });
+
+  it.each(['preflight', 'voice', 'category'])('denies lost effective bot permissions before mutation: %s', async (target) => {
+    const f = fixture();
+    const request = target === 'preflight' ? f.assertCanConfigure : target === 'voice' ? f.getVoiceChannel : f.getCategory;
+    request.mockRejectedValue(new SetupDiscordError('Permissões insuficientes.'));
+    await f.handler.execute(f.interaction);
+    expect(payload(f).content).toContain('Permissões');
+    expectNoMutation(f);
+  });
+
+  it.each(['add', 'add-category', 'rename', 'toggle-commands', 'change-category'])('denies a missing live voice target for actual changes: %s', async (action) => {
+    const f = fixture(action, action === 'add' || action === 'add-category' || action === 'change-category' ? 'channel' : action === 'rename' ? 'modal' : 'button', ['72345678901234567'], action === 'add-category' ? '62345678901234567' : first.id);
+    f.getVoiceChannel.mockResolvedValue(null as never);
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(payload(f).content).toContain('indisponível');
+  });
+
+  it.each(['add-category', 'change-category', 'toggle-commands', 'rename'])('denies missing required destination categories: %s', async (action) => {
+    const f = fixture(action, action === 'add-category' || action === 'change-category' ? 'channel' : 'button', ['72345678901234567'], action === 'add-category' ? '62345678901234567' : first.id);
+    f.getCategory.mockResolvedValue(null as never);
+    await f.handler.execute(f.interaction);
+    expectNoMutation(f);
+    expect(f.showModal).not.toHaveBeenCalled();
+  });
+
+  it.each([new VoiceCreatorAlreadyConfiguredError(), new VoiceCreatorNotFoundError()])('renders safe domain failures rather than raw storage details', async (error) => {
+    const f = fixture('add-category', 'channel', ['72345678901234567'], '62345678901234567');
+    f.create.mockRejectedValue(error);
+    await f.handler.execute(f.interaction);
+    expect(payload(f).content).toEqual(expect.any(String));
+    expect(payload(f).content).not.toContain(error.message);
+    expect(f.reply).not.toHaveBeenCalled();
+  });
+
+  it('propagates unexpected errors to the existing central registry', async () => {
+    const f = fixture();
+    f.listByGuild.mockRejectedValue(new Error('database offline'));
+    await expect(f.handler.execute(f.interaction)).rejects.toThrow('database offline');
+    expectNoMutation(f);
+  });
+});

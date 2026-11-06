@@ -80,7 +80,23 @@ export class PrismaVoiceCreatorRepository implements VoiceCreatorRepository {
       return await this.prisma.voiceCreator.create({ data: input });
     } catch (error: unknown) {
       if (isPrismaErrorWithCode(error, 'P2002')) {
-        throw new VoiceCreatorAlreadyConfiguredError();
+        try {
+          // Re-adding a logically deleted channel restores its identity/history.
+          // The conditional write never overwrites an active or foreign-guild row.
+          return await this.prisma.voiceCreator.update({
+            where: {
+              creatorChannelDiscordId: input.creatorChannelDiscordId,
+              guildDiscordId: input.guildDiscordId,
+              deletedAt: { not: null },
+            },
+            data: { deletedAt: null, categoryDiscordId: input.categoryDiscordId },
+          });
+        } catch (restoreError: unknown) {
+          if (isPrismaErrorWithCode(restoreError, 'P2025')) {
+            throw new VoiceCreatorAlreadyConfiguredError();
+          }
+          throw restoreError;
+        }
       }
 
       throw error;

@@ -100,6 +100,11 @@ describe('PrismaVoiceCreatorRepository', () => {
 
   it('translates duplicate channel failures without exposing Prisma details', async () => {
     const prisma = createPrismaDouble();
+    prisma.voiceCreator.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('No deleted configuration', {
+        code: 'P2025', clientVersion: '7.10.1',
+      }),
+    );
     prisma.voiceCreator.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError(
         'postgresql://charon:database-secret@db.example.com/charon',
@@ -120,6 +125,43 @@ describe('PrismaVoiceCreatorRepository', () => {
 
     expect(error).toBeInstanceOf(VoiceCreatorAlreadyConfiguredError);
     expect((error as Error).message).not.toContain('database-secret');
+  });
+
+  it('restores a logically deleted channel in the same guild without replacing identity or historical rooms', async () => {
+    const prisma = createPrismaDouble();
+    prisma.voiceCreator.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Duplicate channel', {
+        code: 'P2002', clientVersion: '7.10.1',
+      }),
+    );
+    prisma.voiceCreator.update.mockResolvedValue({ ...firstCreator, categoryDiscordId: '62345678901234567' });
+    const repository = new PrismaVoiceCreatorRepository(prisma as unknown as PrismaClient);
+
+    await expect(repository.create({
+      guildDiscordId: firstCreator.guildDiscordId,
+      creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
+      categoryDiscordId: '62345678901234567',
+    })).resolves.toMatchObject({ id: firstCreator.id, deletedAt: null, categoryDiscordId: '62345678901234567' });
+    expect(prisma.voiceCreator.update).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
+        guildDiscordId: firstCreator.guildDiscordId,
+        deletedAt: { not: null },
+      },
+      data: { deletedAt: null, categoryDiscordId: '62345678901234567' },
+    });
+  });
+
+  it('does not hide unexpected restoration failures as duplicate errors', async () => {
+    const prisma = createPrismaDouble();
+    prisma.voiceCreator.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('Duplicate channel', { code: 'P2002', clientVersion: '7.10.1' }));
+    prisma.voiceCreator.update.mockRejectedValue(new Error('database offline'));
+    const repository = new PrismaVoiceCreatorRepository(prisma as unknown as PrismaClient);
+    await expect(repository.create({
+      guildDiscordId: firstCreator.guildDiscordId,
+      creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
+      categoryDiscordId: firstCreator.categoryDiscordId,
+    })).rejects.toThrow('database offline');
   });
 
   it('excludes deleted configurations from ID and channel lookups', async () => {
