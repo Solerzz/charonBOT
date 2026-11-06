@@ -365,6 +365,18 @@
     "ast_hash": "9c42c08e55b55713101dca05d32967f3",
     "semantic_hash": ""
   },
+  "src/modules/calls/call-panel.view.ts": {
+    "mtime": 1793948439.4410098,
+    "seen": 1793948496.9857025,
+    "ast_hash": "03609c87104d71af47da0473ae4dcdce",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/call-panel.view.test.ts": {
+    "mtime": 1793948477.37831,
+    "seen": 1793948496.990735,
+    "ast_hash": "cc00c6bb176931d70923dd9ff0f1b19f",
+    "semantic_hash": ""
+  },
   "package-lock.json": {
     "mtime": 1793919920.248031,
     "seen": 1793920568.4475248,
