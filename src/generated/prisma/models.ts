@@ -8,4 +8,6 @@
  *
  * 🟢 You can import this file directly.
  */
+export type * from './models/VoiceCreator.js'
+export type * from './models/TemporaryRoom.js'
 export type * from './commonInputTypes.js'

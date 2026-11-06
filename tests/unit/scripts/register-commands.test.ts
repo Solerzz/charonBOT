@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { Routes } from 'discord.js';
 
 import type { AppConfig } from '../../../src/core/config/env.js';
+import { setupCommandData } from '../../../src/modules/setup/setup.command.js';
 import {
   commandDefinitions,
   registerCommands,
@@ -20,13 +21,15 @@ const config: AppConfig = {
 };
 
 describe('commandDefinitions', () => {
-  it('contains the public status command', () => {
+  it('contains exactly status and standalone setup definitions', () => {
     expect(commandDefinitions).toEqual([
       expect.objectContaining({
         name: 'status',
         description: 'Mostra o estado atual do Charon.',
       }),
+      setupCommandData.toJSON(),
     ]);
+    expect(commandDefinitions.map(({ name }) => name)).toEqual(['status', 'setup']);
   });
 
   it('registers definitions globally for the configured application', async () => {
