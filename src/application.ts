@@ -85,9 +85,25 @@ export function createApplication(
   let startPromise: Promise<void> | undefined;
   let stopPromise: Promise<void> | undefined;
   let closePromise: Promise<void> | undefined;
+  const inFlight = new Set<Promise<unknown>>();
+
+  const acceptDispatch = (
+    operation: () => Promise<unknown>,
+    onFailure: (error: unknown) => void,
+  ): void => {
+    if (state !== 'starting' && state !== 'running') return;
+    // Register synchronously, before the dispatcher gets its first microtask.
+    const work = Promise.resolve()
+      .then(operation)
+      .catch(onFailure)
+      .finally(() => { inFlight.delete(work); });
+    inFlight.add(work);
+  };
 
   const closeResources = (): Promise<void> => {
     closePromise ??= (async () => {
+      // Callers have already closed admission by entering stopping/failed.
+      await Promise.allSettled(inFlight);
       discord.destroy();
       await disconnectDatabase(database);
     })();
@@ -117,9 +133,9 @@ export function createApplication(
           }
 
           discord.on(Events.InteractionCreate, (interaction) => {
-            void Promise.resolve()
-              .then(() => dispatcher.dispatch(interaction))
-              .catch((error: unknown) => {
+            acceptDispatch(
+              () => dispatcher.dispatch(interaction),
+              (error: unknown) => {
                 logger.error(
                   {
                     interactionId: interaction.id,
@@ -127,12 +143,13 @@ export function createApplication(
                   },
                   'Interaction dispatch failed',
                 );
-              });
+              },
+            );
           });
           discord.on(Events.VoiceStateUpdate, (oldState, newState) => {
-            void Promise.resolve()
-              .then(() => voiceDispatcher.dispatch(oldState, newState))
-              .catch((error: unknown) => {
+            acceptDispatch(
+              () => voiceDispatcher.dispatch(oldState, newState),
+              (error: unknown) => {
                 logger.error(
                   {
                     guildDiscordId: newState.guild.id,
@@ -143,7 +160,8 @@ export function createApplication(
                   },
                   'Voice state dispatch failed',
                 );
-              });
+              },
+            );
           });
           await discord.login(config.discord.token);
           if (state !== 'starting') {

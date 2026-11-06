@@ -69,6 +69,36 @@ function dependencies(events: string[]): {
   };
 }
 
+function shutdownFixture() {
+  const events: string[] = [];
+  const ports = dependencies(events);
+  let interactionListener!: (interaction: Interaction) => void;
+  let voiceListener!: (oldState: VoiceState, newState: VoiceState) => void;
+  ports.discord.on = (event, listener) => {
+    if (event === Events.InteractionCreate) {
+      interactionListener = listener as typeof interactionListener;
+    } else {
+      voiceListener = listener as typeof voiceListener;
+    }
+  };
+  const oldState = {
+    id: '52345678901234567', guild: { id: '12345678901234567' },
+    channelId: '22345678901234567',
+  } as VoiceState;
+  const emit = (kind: 'interaction' | 'voice') => {
+    if (kind === 'interaction') interactionListener({ id: '72345678901234567' } as Interaction);
+    else voiceListener(oldState, { ...oldState, channelId: null } as VoiceState);
+  };
+  const app = createApplication(config, { ...ports, logger: createLogger({ level: 'silent' }) });
+  return { events, ports, emit, app };
+}
+
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
 describe('application lifecycle', () => {
   it('checks the database and attaches listeners before Discord login', async () => {
     const events: string[] = [];
@@ -229,6 +259,123 @@ describe('application lifecycle', () => {
 
     expect(events).toEqual(['discord:destroy', 'database:disconnect']);
   });
+
+  it.each(['interaction', 'voice'] as const)(
+    'drains accepted %s work, including work queued before stop, and ignores later events',
+    async (kind) => {
+      const f = shutdownFixture();
+      const held = gate();
+      const operation = vi.fn(async () => {
+        f.events.push(`${kind}:started`);
+        await held.promise;
+        f.events.push(`${kind}:completed`);
+        return true;
+      });
+      f.ports.dispatcher.dispatch = operation;
+      f.ports.voiceDispatcher.dispatch = async () => { await operation(); };
+      await f.app.start();
+      f.events.length = 0;
+
+      // Acceptance happens synchronously even though dispatch starts in a microtask.
+      f.emit(kind);
+      let stopped = false;
+      const stopping = f.app.stop('SIGTERM').then(() => { stopped = true; });
+      const stoppingAgain = f.app.stop('SIGINT');
+      f.emit('interaction');
+      f.emit('voice');
+      try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(f.events).toEqual([`${kind}:started`]);
+        expect(stopped).toBe(false);
+        expect(operation).toHaveBeenCalledOnce();
+      } finally {
+        held.release();
+        await Promise.all([stopping, stoppingAgain]);
+      }
+      expect(f.events).toEqual([`${kind}:started`, `${kind}:completed`, 'discord:destroy', 'database:disconnect']);
+      f.emit('interaction');
+      f.emit('voice');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(operation).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('waits for both dispatch types and contains rejection without blocking the drain', async () => {
+    const f = shutdownFixture();
+    const interactionGate = gate();
+    const voiceGate = gate();
+    f.ports.dispatcher.dispatch = async () => {
+      f.events.push('interaction:started');
+      await interactionGate.promise;
+      f.events.push('interaction:rejected');
+      throw new Error('private-dispatch-error');
+    };
+    f.ports.voiceDispatcher.dispatch = async () => {
+      f.events.push('voice:started');
+      await voiceGate.promise;
+      f.events.push('voice:completed');
+    };
+    await f.app.start();
+    f.events.length = 0;
+    f.emit('interaction');
+    f.emit('voice');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const stopping = f.app.stop('SIGTERM');
+    interactionGate.release();
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.events).toEqual(['interaction:started', 'voice:started', 'interaction:rejected']);
+    } finally {
+      voiceGate.release();
+      await stopping;
+    }
+    expect(f.events).toEqual(['interaction:started', 'voice:started', 'interaction:rejected', 'voice:completed', 'discord:destroy', 'database:disconnect']);
+  });
+
+  it.each([
+    ['interaction', false], ['voice', false],
+    ['interaction', true], ['voice', true],
+  ] as const)(
+    'drains rejected %s work before startup rollback (concurrent stop: %s)',
+    async (kind, concurrentStop) => {
+      const f = shutdownFixture();
+      const loginGate = gate();
+      const workGate = gate();
+      f.ports.discord.login = async () => {
+        f.emit(kind);
+        await loginGate.promise;
+        throw new Error('login failed');
+      };
+      const operation = async () => {
+        f.events.push(`${kind}:started`);
+        await workGate.promise;
+        f.events.push(`${kind}:rejected`);
+        throw new TypeError('private-dispatch-error');
+      };
+      f.ports.dispatcher.dispatch = operation;
+      f.ports.voiceDispatcher.dispatch = operation;
+      const starting = f.app.start();
+      const startupFailure = expect(starting).rejects.toThrow('login failed');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      f.events.length = 0;
+      const stopping = concurrentStop ? f.app.stop('SIGTERM') : Promise.resolve();
+      loginGate.release();
+      try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        // Rollback itself closes admission, even without an explicit stop.
+        f.emit('interaction');
+        f.emit('voice');
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(f.events).toEqual([]);
+      } finally {
+        workGate.release();
+        await Promise.all([startupFailure, stopping]);
+      }
+      expect(f.events).toEqual([`${kind}:rejected`, 'discord:destroy', 'database:disconnect']);
+      await f.app.stop('SIGINT');
+      expect(f.events).toHaveLength(3);
+    },
+  );
 
   it.each([false, true])('contains voice dispatch failure (synchronous: %s) with ID-only logs', async (synchronous) => {
     const lines: string[] = [];
