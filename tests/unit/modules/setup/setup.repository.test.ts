@@ -186,6 +186,51 @@ describe('PrismaVoiceCreatorRepository', () => {
     });
   });
 
+  it('updates only an active configuration category and returns the updated configuration', async () => {
+    const prisma = createPrismaDouble();
+    const updatedCreator: VoiceCreator = {
+      ...firstCreator,
+      categoryDiscordId: '62345678901234567',
+      updatedAt: new Date('2026-11-05T12:00:00.000Z'),
+    };
+    prisma.voiceCreator.update.mockResolvedValue(updatedCreator);
+    const repository = new PrismaVoiceCreatorRepository(
+      prisma as unknown as PrismaClient,
+    );
+
+    await expect(
+      repository.updateCategory(firstCreator.id, '62345678901234567'),
+    ).resolves.toEqual(updatedCreator);
+    expect(prisma.voiceCreator.update).toHaveBeenCalledExactlyOnceWith({
+      where: { id: firstCreator.id, deletedAt: null },
+      data: { categoryDiscordId: '62345678901234567' },
+    });
+  });
+
+  it.each([true, false])(
+    'sets room commands to %s only for an active configuration and returns the updated configuration',
+    async (enabled) => {
+      const prisma = createPrismaDouble();
+      const updatedCreator: VoiceCreator = {
+        ...firstCreator,
+        roomCommandsEnabled: enabled,
+        updatedAt: new Date('2026-11-05T12:00:00.000Z'),
+      };
+      prisma.voiceCreator.update.mockResolvedValue(updatedCreator);
+      const repository = new PrismaVoiceCreatorRepository(
+        prisma as unknown as PrismaClient,
+      );
+
+      await expect(
+        repository.setRoomCommandsEnabled(firstCreator.id, enabled),
+      ).resolves.toEqual(updatedCreator);
+      expect(prisma.voiceCreator.update).toHaveBeenCalledExactlyOnceWith({
+        where: { id: firstCreator.id, deletedAt: null },
+        data: { roomCommandsEnabled: enabled },
+      });
+    },
+  );
+
   it('logically deletes a configuration without deleting historical rooms', async () => {
     const prisma = createPrismaDouble();
     prisma.voiceCreator.update.mockResolvedValue({
