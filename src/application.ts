@@ -1,4 +1,4 @@
-import { Events, type Interaction } from 'discord.js';
+import { Events, type Interaction, type VoiceState } from 'discord.js';
 import type { Logger } from 'pino';
 
 import type { AppConfig } from './core/config/env.js';
@@ -11,12 +11,29 @@ import {
 import { createDiscordClient } from './core/discord/client.js';
 import { InteractionRegistry } from './core/discord/interactions/interaction-registry.js';
 import { createLogger } from './core/logger/logger.js';
+import type { PrismaClient } from './generated/prisma/client.js';
+import { PrismaTemporaryRoomRepository } from './modules/calls/call.repository.js';
+import { CallService } from './modules/calls/call.service.js';
+import {
+  VoiceStateHandler,
+  type VoiceStateDispatcher,
+} from './modules/calls/voice-state.handler.js';
+import { SetupCommand } from './modules/setup/setup.command.js';
+import { DiscordSetupGateway } from './modules/setup/setup.discord.js';
+import { SetupInteractions } from './modules/setup/setup.interactions.js';
+import { PrismaVoiceCreatorRepository } from './modules/setup/setup.repository.js';
+import { SetupService } from './modules/setup/setup.service.js';
 import { StatusCommand } from './modules/status/status.command.js';
+import { KeyedMutex } from './shared/keyed-mutex.js';
 
 export interface DiscordClientPort {
   on(
     event: typeof Events.InteractionCreate,
     listener: (interaction: Interaction) => void,
+  ): unknown;
+  on(
+    event: typeof Events.VoiceStateUpdate,
+    listener: (oldState: VoiceState, newState: VoiceState) => void,
   ): unknown;
   login(token: string): Promise<unknown>;
   destroy(): void;
@@ -40,6 +57,7 @@ interface ApplicationOverrides {
   readonly database?: DatabaseClient;
   readonly discord?: DiscordClientPort;
   readonly dispatcher?: InteractionDispatcher;
+  readonly voiceDispatcher?: VoiceStateDispatcher;
 }
 
 export function createApplication(
@@ -48,8 +66,20 @@ export function createApplication(
 ): Application {
   const logger = overrides.logger ?? createLogger({ level: config.logLevel });
   const database = overrides.database ?? createPrismaClient(config.database);
-  const discord = overrides.discord ?? createDiscordClient();
-  const dispatcher = overrides.dispatcher ?? createDefaultDispatcher(logger);
+  const discord: DiscordClientPort = overrides.discord ?? createDiscordClient();
+  // Lifecycle doubles remain health-only when explicit dispatchers are supplied.
+  const runtimeDatabase = (): PrismaClient => {
+    if (!hasRuntimeRepositories(database)) {
+      throw new Error(
+        'Default dispatchers require a PrismaClient; supply both dispatchers for a health-only database',
+      );
+    }
+    return database;
+  };
+  const dispatcher =
+    overrides.dispatcher ?? createDefaultDispatcher(logger, runtimeDatabase());
+  const voiceDispatcher =
+    overrides.voiceDispatcher ?? createDefaultVoiceDispatcher(logger, runtimeDatabase());
   let state: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed' =
     'idle';
   let startPromise: Promise<void> | undefined;
@@ -87,15 +117,33 @@ export function createApplication(
           }
 
           discord.on(Events.InteractionCreate, (interaction) => {
-            void dispatcher.dispatch(interaction).catch((error: unknown) => {
-              logger.error(
-                {
-                  interactionId: interaction.id,
-                  errorName: error instanceof Error ? error.name : 'UnknownError',
-                },
-                'Interaction dispatch failed',
-              );
-            });
+            void Promise.resolve()
+              .then(() => dispatcher.dispatch(interaction))
+              .catch((error: unknown) => {
+                logger.error(
+                  {
+                    interactionId: interaction.id,
+                    errorName: error instanceof Error ? error.name : 'UnknownError',
+                  },
+                  'Interaction dispatch failed',
+                );
+              });
+          });
+          discord.on(Events.VoiceStateUpdate, (oldState, newState) => {
+            void Promise.resolve()
+              .then(() => voiceDispatcher.dispatch(oldState, newState))
+              .catch((error: unknown) => {
+                logger.error(
+                  {
+                    guildDiscordId: newState.guild.id,
+                    memberDiscordId: newState.id,
+                    oldChannelDiscordId: oldState.channelId,
+                    newChannelDiscordId: newState.channelId,
+                    errorName: error instanceof Error ? error.name : 'UnknownError',
+                  },
+                  'Voice state dispatch failed',
+                );
+              });
           });
           await discord.login(config.discord.token);
           if (state !== 'starting') {
@@ -145,6 +193,11 @@ export function createApplication(
   };
 }
 
+function hasRuntimeRepositories(database: DatabaseClient): database is PrismaClient {
+  // Prisma's generated proxy does not preserve instanceof PrismaClient.
+  return 'voiceCreator' in database && 'temporaryRoom' in database;
+}
+
 export function registerShutdownSignals(
   application: Application,
   source: SignalSource = process,
@@ -160,8 +213,33 @@ export function registerShutdownSignals(
   }
 }
 
-function createDefaultDispatcher(logger: Logger): InteractionRegistry {
+export function createDefaultDispatcher(
+  logger: Logger,
+  database: PrismaClient,
+): InteractionRegistry {
+  const setupService = new SetupService(new PrismaVoiceCreatorRepository(database));
   const registry = new InteractionRegistry(logger);
   registry.register(new StatusCommand());
+  registry.register(new SetupCommand(setupService));
+  registry.register(
+    new SetupInteractions(
+      setupService,
+      (interaction) => new DiscordSetupGateway(interaction.guild),
+    ),
+  );
   return registry;
+}
+
+export function createDefaultVoiceDispatcher(
+  logger: Logger,
+  database: PrismaClient,
+): VoiceStateHandler {
+  // One service/mutex per application dispatcher, never per event or member.
+  const service = new CallService(
+    new PrismaVoiceCreatorRepository(database),
+    new PrismaTemporaryRoomRepository(database),
+    new KeyedMutex(),
+    logger,
+  );
+  return new VoiceStateHandler(service, logger);
 }

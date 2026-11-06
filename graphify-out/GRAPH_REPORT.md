@@ -1,17 +1,17 @@
 # Graph Report - feature-etapa-1-infraestrutura  (2026-11-06)
 
 ## Corpus Check
-- 73 files · ~44,175 words
+- 75 files · ~46,032 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
 ## Summary
-- 911 nodes · 1471 edges · 41 communities (36 shown, 5 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 95 edges (avg confidence: 0.88)
+- 921 nodes · 1563 edges · 34 communities (29 shown, 5 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 96 edges (avg confidence: 0.88)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `5e3ad859`
+- Built from commit: `4176601e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -21,7 +21,7 @@
 - discord.js
 - prismaNamespaceBrowser.ts
 - package.json
-- DiscordSetupGateway
+- DiscordClientPort
 - steps
 - Arquitetura do Charon
 - class.ts
@@ -35,7 +35,6 @@
 - pull_request_template.md
 - PrismaClientBaseOptions
 - VoiceCreator.ts
-- SetupService
 - commonInputTypes.ts
 - Charon v0.2.0 — Setup e Join-to-Create
 - vitest
@@ -48,39 +47,33 @@
 - Prisma__TemporaryRoomClient
 - Prisma__VoiceCreatorClient
 - InteractionRegistry
+- SetupInteractions
 - logger.ts
-- interaction-registry.test.ts
-- File Structure
-- register-commands.ts
-- .execute
-- setup.command.test.ts
-- enums.ts
-- setup.interactions.test.ts
-- PrismaVoiceCreatorRepository
+- prisma/client.ts
 
 ## God Nodes (most connected - your core abstractions)
-1. `vitest` - 26 edges
-2. `discord.js` - 24 edges
-3. `SetupService` - 20 edges
-4. `VoiceCreatorRepository` - 19 edges
-5. `TemporaryRoomDelegate` - 18 edges
-6. `VoiceCreatorDelegate` - 18 edges
-7. `DiscordCallGateway` - 16 edges
-8. `VoiceCreatorConfiguration` - 16 edges
-9. `CallDiscordGateway` - 16 edges
-10. `SetupDiscordError` - 15 edges
+1. `vitest` - 27 edges
+2. `discord.js` - 26 edges
+3. `SetupService` - 22 edges
+4. `DiscordCallGateway` - 19 edges
+5. `VoiceCreatorRepository` - 19 edges
+6. `TemporaryRoomDelegate` - 18 edges
+7. `VoiceCreatorDelegate` - 18 edges
+8. `CallService` - 17 edges
+9. `DiscordSetupGateway` - 16 edges
+10. `PrismaVoiceCreatorRepository` - 16 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Interações` --references--> `InteractionRegistry`  [INFERRED]
   docs/architecture.md → src/core/discord/interactions/interaction-registry.ts
 - `Global Constraints` --references--> `InteractionRegistry`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/core/discord/interactions/interaction-registry.ts
-- `Arquitetura` --references--> `InteractionRegistry`  [INFERRED]
-  docs/superpowers/specs/2026-11-05-charon-v0.2.0-setup-join-to-create-design.md → src/core/discord/interactions/interaction-registry.ts
 - `Task 4: Handle Setup Buttons, Selects, and Modals` --references--> `SetupService`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/modules/setup/setup.service.ts
 - `Task 6: Implement Temporary Room Lifecycle and Compensation` --references--> `VoiceCreatorRepository`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/modules/setup/setup.repository.ts
+- `Task 3: Structured logger` --references--> `createLogger()`  [INFERRED]
+  docs/superpowers/plans/2026-11-05-charon-stage-1-infrastructure.md → src/core/logger/logger.ts
 
 ## Import Cycles
 - None detected.
@@ -88,7 +81,7 @@
 ## Hyperedges (group relationships)
 - **Graphify Maintenance and Usage Workflow** — agents_graphify_command, agents_graphify_query, agents_graphify_update, agents_graph_json, agents_graph_report, agents_wiki_index [INFERRED 0.75]
 
-## Communities (41 total, 5 thin omitted)
+## Communities (34 total, 5 thin omitted)
 
 ### Community 0 - "Graphify Knowledge Graph (graphify-out)"
 Cohesion: 0.33
@@ -99,20 +92,16 @@ Cohesion: 0.02
 Nodes (117): AnyNull, Args, At, AtLeast, AtLoose, AtStrict, BatchPayload, Boolean (+109 more)
 
 ### Community 2 - "discord.js"
-Cohesion: 0.16
-Nodes (8): Task 5: Discord client and interaction registry, discord.js, pino, createDefaultDispatcher(), InteractionHandler, InteractionRegistry, safeFailureResponse, StatusCommand
+Cohesion: 0.17
+Nodes (7): discord.js, commandDefinitions, CommandRegistrar, registerCommands(), setupCommandData, StatusCommand, config
 
 ### Community 3 - "prismaNamespaceBrowser.ts"
-Cohesion: 0.12
-Nodes (14): @prisma/client@7.10.1, @prisma/client, AnyNull, DbNull, Decimal, JsonNull, ModelName, NullsOrder (+6 more)
+Cohesion: 0.06
+Nodes (30): Calls module, Charon v0.2.0 Setup and Join-to-Create Implementation Plan, Composition, registration, and documentation, File Structure, Global Constraints, Persistence and shared utilities, Review Focus, Setup module (+22 more)
 
 ### Community 4 - "package.json"
 Cohesion: 0.06
-Nodes (38): dependencies, discord.js@14.28.1, dotenv@18.0.9, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, zod@4.6.7, devDependencies (+30 more)
-
-### Community 5 - "DiscordSetupGateway"
-Cohesion: 0.29
-Nodes (4): discordErrorCode(), DiscordSetupGateway, allPermissions, fixture()
+Nodes (40): dependencies, discord.js@14.28.1, dotenv@18.0.9, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, @prisma/client@7.10.1, zod@4.6.7 (+32 more)
 
 ### Community 6 - "steps"
 Cohesion: 0.11
@@ -143,8 +132,8 @@ Cohesion: 0.02
 Nodes (83): AggregateTemporaryRoom, EnumRoomVisibilityFieldUpdateOperationsInput, EnumTemporaryRoomStatusFieldUpdateOperationsInput, GetTemporaryRoomAggregateType, GetTemporaryRoomGroupByPayload, IntFieldUpdateOperationsInput, NullableStringFieldUpdateOperationsInput, TemporaryRoomAggregateArgs (+75 more)
 
 ### Community 13 - "setup.interactions.ts"
-Cohesion: 0.17
-Nodes (20): SetupCategory, SetupVoiceChannel, voicePermissions, GuildBasedInteraction, VoiceCreatorConfiguration, decodeSetupCustomId(), discordIdSchema, encodeSetupCustomId() (+12 more)
+Cohesion: 0.05
+Nodes (45): Task 2: Add Voice Creator Repository and Setup Service, Task 3: Build the Private Setup Dashboard, discordErrorCode(), DiscordSetupGateway, SetupCategory, SetupDiscordError, SetupDiscordGateway, SetupVoiceChannel (+37 more)
 
 ### Community 14 - "Changelog"
 Cohesion: 0.40
@@ -166,93 +155,69 @@ Nodes (3): PrismaClientBaseOptions, PrismaClientOptionsWithAccelerateUrl, Prisma
 Cohesion: 0.03
 Nodes (74): AggregateVoiceCreator, BoolFieldUpdateOperationsInput, DateTimeFieldUpdateOperationsInput, GetVoiceCreatorAggregateType, GetVoiceCreatorGroupByPayload, NullableDateTimeFieldUpdateOperationsInput, StringFieldUpdateOperationsInput, VoiceCreator$temporaryRoomsArgs (+66 more)
 
-### Community 19 - "SetupService"
-Cohesion: 0.16
-Nodes (6): Task 2: Add Voice Creator Repository and Setup Service, CreateVoiceCreatorInput, VoiceCreatorNotFoundError, VoiceCreatorRepository, SetupChannelGateway, configuration
-
 ### Community 20 - "commonInputTypes.ts"
 Cohesion: 0.05
 Nodes (39): BoolFilter, BoolWithAggregatesFilter, DateTimeFilter, DateTimeNullableFilter, DateTimeNullableWithAggregatesFilter, DateTimeWithAggregatesFilter, EnumRoomVisibilityFilter, EnumRoomVisibilityWithAggregatesFilter (+31 more)
 
 ### Community 21 - "Charon v0.2.0 — Setup e Join-to-Create"
 Cohesion: 0.08
-Nodes (25): 1. Painel administrativo persistente no canal, 2. Painel administrativo privado temporário — escolhida, 3. Assistente linear passo a passo, Abordagens consideradas, Antiobjetivos, Arquitetura, Charon v0.2.0 — Setup e Join-to-Create, Compensação de falhas (+17 more)
+Nodes (24): 1. Painel administrativo persistente no canal, 2. Painel administrativo privado temporário — escolhida, 3. Assistente linear passo a passo, Abordagens consideradas, Antiobjetivos, Charon v0.2.0 — Setup e Join-to-Create, Compensação de falhas, Criação e ciclo de vida da sala (+16 more)
 
 ### Community 22 - "vitest"
-Cohesion: 0.18
-Nodes (7): CallDiscordGateway, TemporaryRoomRecord, TemporaryRoomRepository, VoiceTransition, CallService, KeyedMutex, fixture()
+Cohesion: 0.19
+Nodes (5): CallDiscordGateway, TemporaryRoomRecord, TemporaryRoomRepository, VoiceTransition, CallService
 
 ### Community 25 - "application.ts"
-Cohesion: 0.18
-Nodes (8): Task 2: Validated configuration, Application, registerShutdownSignals(), environmentSchema, loadConfig(), postgresUrl, start(), validEnvironment
+Cohesion: 0.22
+Nodes (7): Application, registerShutdownSignals(), environmentSchema, loadConfig(), postgresUrl, start(), validEnvironment
 
 ### Community 26 - "application.test.ts"
-Cohesion: 0.15
-Nodes (5): Task 7: Wire Setup and Voice Events into the Application, DiscordClientPort, InteractionDispatcher, SignalSource, config
+Cohesion: 0.21
+Nodes (9): createApplication(), createDefaultVoiceDispatcher(), hasRuntimeRepositories(), InteractionDispatcher, SignalSource, createDiscordClient(), VoiceStateDispatcher, VoiceStateHandler (+1 more)
 
 ### Community 27 - "call.fixtures.ts"
-Cohesion: 0.05
-Nodes (40): createPrismaClient(), disconnectedClients, $Enums, PrismaClient, TemporaryRoom, VoiceCreator, botRoomPermissions, CallDiscordError (+32 more)
+Cohesion: 0.07
+Nodes (35): vitest, createLogger(), TemporaryRoom, botRoomPermissions, CallDiscordError, CallMoveUnconfirmedError, CreatedDiscordRoom, CreateDiscordRoomInput (+27 more)
 
 ### Community 28 - "application.ts"
-Cohesion: 0.26
-Nodes (7): Task 4: Prisma adapter, ApplicationOverrides, createApplication(), checkDatabase(), DatabaseClient, disconnectDatabase(), createDiscordClient()
+Cohesion: 0.27
+Nodes (7): Task 4: Prisma adapter, ApplicationOverrides, checkDatabase(), createPrismaClient(), DatabaseClient, disconnectDatabase(), disconnectedClients
 
 ### Community 31 - "InteractionRegistry"
 Cohesion: 0.25
 Nodes (7): Charon Stage 1 Infrastructure Implementation Plan, Global Constraints, Review Focus, Task 1: Project foundation, Task 3: Structured logger, Task 6: Application lifecycle and status command, Task 7: CI, documentation, and release readiness
 
-### Community 32 - "logger.ts"
-Cohesion: 0.40
-Nodes (5): AppConfig, LoggerOptions, redactedPaths, sanitizeLogValue(), sensitiveKeys
+### Community 32 - "SetupInteractions"
+Cohesion: 0.13
+Nodes (8): Task 5: Discord client and interaction registry, Arquitetura, createDefaultDispatcher(), InteractionHandler, InteractionRegistry, safeFailureResponse, SetupCommand, SetupInteractions
 
-### Community 33 - "interaction-registry.test.ts"
-Cohesion: 0.25
-Nodes (4): vitest, createLogger(), createSilentLogger(), captureLogger()
-
-### Community 34 - "File Structure"
-Cohesion: 0.14
-Nodes (13): Calls module, Charon v0.2.0 Setup and Join-to-Create Implementation Plan, Composition, registration, and documentation, File Structure, Global Constraints, Persistence and shared utilities, Review Focus, Setup module (+5 more)
-
-### Community 35 - "register-commands.ts"
-Cohesion: 0.27
-Nodes (4): commandDefinitions, CommandRegistrar, registerCommands(), config
-
-### Community 36 - ".execute"
-Cohesion: 0.24
-Nodes (4): SetupDiscordError, SetupDiscordGateway, isGuildBased(), SetupInteractions
-
-### Community 37 - "setup.command.test.ts"
-Cohesion: 0.19
-Nodes (6): SetupCommand, setupCommandData, SetupService, botPermissions, configuration, fixture()
-
-### Community 38 - "enums.ts"
+### Community 33 - "logger.ts"
 Cohesion: 0.29
-Nodes (6): Task 1: Persist Voice Creator and Temporary Room State, $Enums, TemporaryRoom, VoiceCreator, RoomVisibility, TemporaryRoomStatus
+Nodes (7): Task 2: Validated configuration, pino, AppConfig, LoggerOptions, redactedPaths, sanitizeLogValue(), sensitiveKeys
 
-### Community 39 - "setup.interactions.test.ts"
-Cohesion: 0.18
-Nodes (7): SetupDiscordGatewayFactory, SetupInteraction, VoiceCreatorAlreadyConfiguredError, first, fixture(), Kind, second
+### Community 40 - "prisma/client.ts"
+Cohesion: 0.07
+Nodes (12): $Enums, PrismaClient, VoiceCreator, CreateTemporaryRoomInput, PrismaTemporaryRoomRepository, TemporaryRoomTransitionError, trackedStatuses, isPrismaErrorWithCode() (+4 more)
 
 ## Knowledge Gaps
 - **3 isolated node(s):** `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md`
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 582 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 583 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **5 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `@prisma/client` connect `prismaNamespaceBrowser.ts` to `prismaNamespace.ts`, `package.json`, `class.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `commonInputTypes.ts`, `call.fixtures.ts`?**
-  _High betweenness centrality (0.195) - this node is a cross-community bridge._
+- **Why does `@prisma/client` connect `package.json` to `prismaNamespace.ts`, `prismaNamespaceBrowser.ts`, `prisma/client.ts`, `class.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `commonInputTypes.ts`?**
+  _High betweenness centrality (0.162) - this node is a cross-community bridge._
 - **Are the 3 inferred relationships involving `SetupService` (e.g. with `Task 2: Add Voice Creator Repository and Setup Service` and `Task 3: Build the Private Setup Dashboard`) actually correct?**
   _`SetupService` has 3 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md` to the rest of the system?**
   _3 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `prismaNamespace.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.01694915254237288 - nodes in this community are weakly interconnected._
-- **Why does `InteractionRegistry` connect `discord.js` to `interaction-registry.test.ts`, `File Structure`, `Arquitetura do Charon`, `Charon v0.2.0 — Setup e Join-to-Create`, `application.ts`?**
-  _High betweenness centrality (0.091) - this node is a cross-community bridge._
+- **Why does `InteractionRegistry` connect `SetupInteractions` to `application.test.ts`, `prismaNamespaceBrowser.ts`, `Arquitetura do Charon`?**
+  _High betweenness centrality (0.093) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `VoiceCreatorRepository` (e.g. with `Task 2: Add Voice Creator Repository and Setup Service` and `Task 6: Implement Temporary Room Lifecycle and Compensation`) actually correct?**
   _`VoiceCreatorRepository` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Should `prismaNamespaceBrowser.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.125 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.058823529411764705 - nodes in this community are weakly interconnected._

@@ -6,13 +6,17 @@ import { REST, Routes } from 'discord.js';
 
 import { loadConfig, type AppConfig } from '../src/core/config/env.js';
 import { StatusCommand } from '../src/modules/status/status.command.js';
+import { setupCommandData } from '../src/modules/setup/setup.command.js';
 
 export interface CommandRegistrar {
   setToken(token: string): CommandRegistrar;
   put(route: string, options: { body: unknown }): Promise<unknown>;
 }
 
-export const commandDefinitions = [new StatusCommand().data.toJSON()];
+export const commandDefinitions = [
+  new StatusCommand().data.toJSON(),
+  setupCommandData.toJSON(),
+];
 
 export async function registerCommands(
   config: AppConfig,

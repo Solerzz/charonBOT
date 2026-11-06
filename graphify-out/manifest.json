@@ -24,15 +24,15 @@
     "semantic_hash": ""
   },
   "scripts/register-commands.ts": {
-    "mtime": 1793920348.788599,
-    "seen": 1793920568.4470243,
-    "ast_hash": "17f697243a77bb095175fc3e665bb4c3",
+    "mtime": 1793951184.3903248,
+    "seen": 1793951209.407263,
+    "ast_hash": "837f78a8266b839ad2f0c0e72c1a45b0",
     "semantic_hash": ""
   },
   "src/application.ts": {
-    "mtime": 1793921014.060991,
-    "seen": 1793921070.1878886,
-    "ast_hash": "f88bfecf9d6e607f0ddd8728e3a2f1d1",
+    "mtime": 1793951318.0316198,
+    "seen": 1793951361.2365508,
+    "ast_hash": "abe49e30f665d1893436a9f09d1aabd9",
     "semantic_hash": ""
   },
   "src/core/config/env.ts": {
@@ -138,9 +138,9 @@
     "semantic_hash": ""
   },
   "tests/unit/application.test.ts": {
-    "mtime": 1793920933.0010529,
-    "seen": 1793921070.1878886,
-    "ast_hash": "0ab928f28ab449626a079f20451e5a9b",
+    "mtime": 1793951250.3693023,
+    "seen": 1793951265.9468493,
+    "ast_hash": "6e6aaa84c4681c91fdf2d17dc0b8024f",
     "semantic_hash": ""
   },
   "tests/unit/bootstrap.test.ts": {
@@ -180,9 +180,9 @@
     "semantic_hash": ""
   },
   "tests/unit/scripts/register-commands.test.ts": {
-    "mtime": 1793920313.391965,
-    "seen": 1793920568.4470243,
-    "ast_hash": "549b8b45f8dcd7bd05f68ac181d9eca4",
+    "mtime": 1793950920.0300295,
+    "seen": 1793951209.420195,
+    "ast_hash": "06d21eead23b6c44165bb04226510518",
     "semantic_hash": ""
   },
   "tsconfig.build.json": {
@@ -429,6 +429,18 @@
     "mtime": 1793948950.523678,
     "seen": 1793949575.7538064,
     "ast_hash": "131c3f308761529fbaa4d7db5f08f9f2",
+    "semantic_hash": ""
+  },
+  "src/modules/calls/voice-state.handler.ts": {
+    "mtime": 1793951184.3903248,
+    "seen": 1793951209.407263,
+    "ast_hash": "f127df810471278082736cf1a4c2de34",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/voice-state.handler.test.ts": {
+    "mtime": 1793951087.820416,
+    "seen": 1793951209.407263,
+    "ast_hash": "e518fae8252dc3dd08a6b36dc79f736d",
     "semantic_hash": ""
   },
   "package-lock.json": {
