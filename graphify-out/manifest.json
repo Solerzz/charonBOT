@@ -317,6 +317,42 @@
     "ast_hash": "65fdab48379d0f089d5364922efe97fb",
     "semantic_hash": ""
   },
+  "src/modules/setup/setup.command.ts": {
+    "mtime": 1793946601.3223522,
+    "seen": 1793946646.727548,
+    "ast_hash": "3c3f42d3fca8194b61361dee6c68ecaf",
+    "semantic_hash": ""
+  },
+  "src/modules/setup/setup.discord.ts": {
+    "mtime": 1793946601.3238578,
+    "seen": 1793946646.727548,
+    "ast_hash": "c67f5b45e15ea5649550a1140517ac5b",
+    "semantic_hash": ""
+  },
+  "src/modules/setup/setup.views.ts": {
+    "mtime": 1793946718.6776087,
+    "seen": 1793946846.4457812,
+    "ast_hash": "2572756c7fb6119665e70df191820391",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/setup/setup.command.test.ts": {
+    "mtime": 1793946464.4505115,
+    "seen": 1793946646.7305973,
+    "ast_hash": "eaccd5c93a7dd9e1c50422d626687ce6",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/setup/setup.discord.test.ts": {
+    "mtime": 1793946564.5394235,
+    "seen": 1793946646.7305973,
+    "ast_hash": "3cef8e535b1c7fcf28a65f74775fb475",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/setup/setup.views.test.ts": {
+    "mtime": 1793946695.5327952,
+    "seen": 1793946846.4497874,
+    "ast_hash": "d1562f2e071ee735f9117636166845a3",
+    "semantic_hash": ""
+  },
   "package-lock.json": {
     "mtime": 1793919920.248031,
     "seen": 1793920568.4475248,
