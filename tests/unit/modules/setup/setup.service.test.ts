@@ -103,6 +103,23 @@ describe('SetupService', () => {
     );
   });
 
+  it.each([
+    ['an empty name', '   '],
+    ['an oversized name', 'x'.repeat(101)],
+  ])('rejects %s before calling rename dependencies', async (_case, name) => {
+    const repository = createRepositoryDouble();
+    const gateway: SetupChannelGateway = {
+      renameVoiceChannel: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new SetupService(repository);
+
+    await expect(
+      service.rename(configuration.id, name, gateway),
+    ).rejects.toThrow();
+    expect(repository.findById).not.toHaveBeenCalled();
+    expect(gateway.renameVoiceChannel).not.toHaveBeenCalled();
+  });
+
   it('does not call the rename gateway when the configuration is missing', async () => {
     const repository = createRepositoryDouble({
       findById: vi.fn().mockResolvedValue(null),

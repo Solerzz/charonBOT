@@ -1,17 +1,17 @@
 # Graph Report - feature-etapa-1-infraestrutura  (2026-11-06)
 
 ## Corpus Check
-- 54 files · ~31,189 words
+- 54 files · ~31,291 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
 ## Summary
-- 757 nodes · 988 edges · 32 communities (27 shown, 5 thin omitted)
+- 758 nodes · 991 edges · 32 communities (27 shown, 5 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 48 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b05f575a`
+- Built from commit: `8903042a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -58,20 +58,20 @@
 6. `PrismaVoiceCreatorRepository` - 13 edges
 7. `File Structure` - 13 edges
 8. `Charon v1 — Design` - 13 edges
-9. `PrismaClient` - 12 edges
-10. `SetupService` - 12 edges
+9. `SetupService` - 12 edges
+10. `InteractionRegistry` - 12 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `Interações` --references--> `InteractionRegistry`  [INFERRED]
+  docs/architecture.md → src/core/discord/interactions/interaction-registry.ts
 - `Global Constraints` --references--> `InteractionRegistry`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/core/discord/interactions/interaction-registry.ts
 - `Arquitetura` --references--> `InteractionRegistry`  [INFERRED]
   docs/superpowers/specs/2026-11-05-charon-v0.2.0-setup-join-to-create-design.md → src/core/discord/interactions/interaction-registry.ts
-- `Interações` --references--> `InteractionRegistry`  [INFERRED]
-  docs/architecture.md → src/core/discord/interactions/interaction-registry.ts
 - `Task 3: Structured logger` --references--> `createLogger()`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-stage-1-infrastructure.md → src/core/logger/logger.ts
-- `Task 6: Implement Temporary Room Lifecycle and Compensation` --references--> `VoiceCreatorRepository`  [INFERRED]
-  docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/modules/setup/setup.repository.ts
+- `Task 4: Handle Setup Buttons, Selects, and Modals` --references--> `SetupService`  [INFERRED]
+  docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/modules/setup/setup.service.ts
 
 ## Import Cycles
 - None detected.
@@ -98,8 +98,8 @@ Cohesion: 0.11
 Nodes (15): $Enums, TemporaryRoom, VoiceCreator, AnyNull, DbNull, Decimal, JsonNull, ModelName (+7 more)
 
 ### Community 4 - "package.json"
-Cohesion: 0.05
-Nodes (40): dependencies, discord.js@14.28.1, dotenv@18.0.9, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, @prisma/client@7.10.1, devDependencies (+32 more)
+Cohesion: 0.06
+Nodes (38): dependencies, discord.js@14.28.1, dotenv@18.0.9, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, @prisma/client@7.10.1, devDependencies (+30 more)
 
 ### Community 5 - "application.ts"
 Cohesion: 0.27
@@ -158,8 +158,8 @@ Cohesion: 0.03
 Nodes (74): AggregateVoiceCreator, BoolFieldUpdateOperationsInput, DateTimeFieldUpdateOperationsInput, GetVoiceCreatorAggregateType, GetVoiceCreatorGroupByPayload, NullableDateTimeFieldUpdateOperationsInput, StringFieldUpdateOperationsInput, VoiceCreator$temporaryRoomsArgs (+66 more)
 
 ### Community 19 - "setup.repository.ts"
-Cohesion: 0.06
-Nodes (27): Calls module, Charon v0.2.0 Setup and Join-to-Create Implementation Plan, Composition, registration, and documentation, File Structure, Global Constraints, Persistence and shared utilities, Review Focus, Setup module (+19 more)
+Cohesion: 0.05
+Nodes (29): Calls module, Charon v0.2.0 Setup and Join-to-Create Implementation Plan, Composition, registration, and documentation, File Structure, Global Constraints, Persistence and shared utilities, Review Focus, Setup module (+21 more)
 
 ### Community 20 - "commonInputTypes.ts"
 Cohesion: 0.05
@@ -170,8 +170,8 @@ Cohesion: 0.08
 Nodes (25): 1. Painel administrativo persistente no canal, 2. Painel administrativo privado temporário — escolhida, 3. Assistente linear passo a passo, Abordagens consideradas, Antiobjetivos, Arquitetura, Charon v0.2.0 — Setup e Join-to-Create, Compensação de falhas (+17 more)
 
 ### Community 22 - "setup.schemas.ts"
-Cohesion: 0.13
-Nodes (17): Task 7: Wire Setup and Voice Events into the Application, zod@4.6.7, zod, DiscordClientPort, buildInitialRoomName(), graphemes(), segmenter, temporaryRoomNameSchema (+9 more)
+Cohesion: 0.12
+Nodes (18): Task 7: Wire Setup and Voice Events into the Application, zod@4.6.7, zod, DiscordClientPort, buildInitialRoomName(), graphemes(), segmenter, temporaryRoomNameSchema (+10 more)
 
 ### Community 25 - "env.ts"
 Cohesion: 0.18
@@ -197,7 +197,7 @@ Nodes (4): commandDefinitions, CommandRegistrar, registerCommands(), config
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `@prisma/client` connect `package.json` to `prismaNamespace.ts`, `class.ts`, `class.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `commonInputTypes.ts`?**
+- **Why does `@prisma/client` connect `package.json` to `prismaNamespace.ts`, `class.ts`, `class.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `setup.repository.ts`, `commonInputTypes.ts`?**
   _High betweenness centrality (0.222) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `VoiceCreatorRepository` (e.g. with `Task 2: Add Voice Creator Repository and Setup Service` and `Task 6: Implement Temporary Room Lifecycle and Compensation`) actually correct?**
   _`VoiceCreatorRepository` has 2 INFERRED edges - model-reasoned connections that need verification._
@@ -210,4 +210,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `class.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.1111111111111111 - nodes in this community are weakly interconnected._
 - **Why does `vitest` connect `vitest` to `discord.js`, `package.json`, `application.ts`, `setup.repository.ts`, `setup.schemas.ts`, `env.ts`, `application.test.ts`, `register-commands.ts`?**
-  _High betweenness centrality (0.074) - this node is a cross-community bridge._
+  _High betweenness centrality (0.075) - this node is a cross-community bridge._

@@ -4,7 +4,11 @@ import {
   VoiceCreatorNotFoundError,
   type VoiceCreatorRepository,
 } from './setup.repository.js';
-import { discordIdSchema, voiceCreatorIdSchema } from './setup.schemas.js';
+import {
+  discordIdSchema,
+  setupChannelNameSchema,
+  voiceCreatorIdSchema,
+} from './setup.schemas.js';
 
 export interface SetupChannelGateway {
   renameVoiceChannel(channelDiscordId: string, name: string): Promise<void>;
@@ -44,6 +48,7 @@ export class SetupService {
     name: string,
     gateway: SetupChannelGateway,
   ): Promise<void> {
+    const parsedName = setupChannelNameSchema.parse(name);
     const configuration = await this.repository.findById(
       voiceCreatorIdSchema.parse(id),
     );
@@ -53,7 +58,7 @@ export class SetupService {
 
     await gateway.renameVoiceChannel(
       discordIdSchema.parse(configuration.creatorChannelDiscordId),
-      name,
+      parsedName,
     );
   }
 

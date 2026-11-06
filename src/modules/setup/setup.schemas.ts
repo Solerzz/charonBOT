@@ -8,6 +8,12 @@ export const voiceCreatorIdSchema: z.ZodString = z
   .string()
   .uuid('Invalid Voice Creator ID');
 
+export const setupChannelNameSchema: z.ZodString = z
+  .string()
+  .trim()
+  .min(1, 'Setup channel name is required')
+  .max(100, 'Setup channel name must contain at most 100 characters');
+
 type VoiceCreatorAction =
   | 'select'
   | 'change-category'

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   discordIdSchema,
   encodeSetupCustomId,
+  setupChannelNameSchema,
   setupCustomIdSchema,
   voiceCreatorIdSchema,
 } from '../../../../src/modules/setup/setup.schemas.js';
@@ -34,6 +35,16 @@ describe('setup schemas', () => {
         'Invalid Voice Creator ID',
       );
     }
+  });
+
+  it('trims setup channel names and enforces Discord length limits', () => {
+    expect(setupChannelNameSchema.parse('  Create your room  ')).toBe(
+      'Create your room',
+    );
+    expect(setupChannelNameSchema.safeParse('   ').success).toBe(false);
+    expect(setupChannelNameSchema.safeParse('x'.repeat(101)).success).toBe(
+      false,
+    );
   });
 
   it('decodes and encodes versioned setup custom IDs', () => {
