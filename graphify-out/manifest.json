@@ -377,6 +377,60 @@
     "ast_hash": "cc00c6bb176931d70923dd9ff0f1b19f",
     "semantic_hash": ""
   },
+  "src/modules/calls/call.discord.ts": {
+    "mtime": 1793949941.5522568,
+    "seen": 1793949956.9280617,
+    "ast_hash": "296ef20acd91cbebee5844521b7552f5",
+    "semantic_hash": ""
+  },
+  "src/modules/calls/call.repository.ts": {
+    "mtime": 1793949442.761604,
+    "seen": 1793949575.746285,
+    "ast_hash": "6f66b62102eda091520bcf87c33056ca",
+    "semantic_hash": ""
+  },
+  "src/modules/calls/call.service.ts": {
+    "mtime": 1793949941.5522568,
+    "seen": 1793949956.9280617,
+    "ast_hash": "a1654ce984d9886cec4def7137472c3e",
+    "semantic_hash": ""
+  },
+  "src/shared/keyed-mutex.ts": {
+    "mtime": 1793949123.0626528,
+    "seen": 1793949575.749285,
+    "ast_hash": "d06a7b3a699399edfcf41f40fa37b446",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/call.discord.test.ts": {
+    "mtime": 1793949920.830471,
+    "seen": 1793949956.9280617,
+    "ast_hash": "0566a20f8afa415d51c543c253f7baa6",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/call.fixtures.ts": {
+    "mtime": 1793949158.763521,
+    "seen": 1793949575.751285,
+    "ast_hash": "113aa4eb0b69c046b3e80d2e390d4289",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/call.repository.test.ts": {
+    "mtime": 1793949442.7631774,
+    "seen": 1793949575.751285,
+    "ast_hash": "2599b24abac2d5ac5a996871052ba077",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/call.service.test.ts": {
+    "mtime": 1793949920.830471,
+    "seen": 1793949956.9280617,
+    "ast_hash": "231689a3a17281f291be223e09228722",
+    "semantic_hash": ""
+  },
+  "tests/unit/shared/keyed-mutex.test.ts": {
+    "mtime": 1793948950.523678,
+    "seen": 1793949575.7538064,
+    "ast_hash": "131c3f308761529fbaa4d7db5f08f9f2",
+    "semantic_hash": ""
+  },
   "package-lock.json": {
     "mtime": 1793919920.248031,
     "seen": 1793920568.4475248,
