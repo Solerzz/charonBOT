@@ -9,7 +9,19 @@
 * 🟢 You can import this file directly.
 */
 
+export const RoomVisibility = {
+  PUBLIC: 'PUBLIC',
+  PRIVATE: 'PRIVATE'
+} as const
+
+export type RoomVisibility = (typeof RoomVisibility)[keyof typeof RoomVisibility]
 
 
-// This file is empty because there are no enums in the schema.
-export {}
+export const TemporaryRoomStatus = {
+  CREATING: 'CREATING',
+  ACTIVE: 'ACTIVE',
+  CLOSING: 'CLOSING',
+  CLOSED: 'CLOSED'
+} as const
+
+export type TemporaryRoomStatus = (typeof TemporaryRoomStatus)[keyof typeof TemporaryRoomStatus]

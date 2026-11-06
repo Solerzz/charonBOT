@@ -397,7 +397,8 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 
 
 export const ModelName = {
-
+  VoiceCreator: 'VoiceCreator',
+  TemporaryRoom: 'TemporaryRoom'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -413,10 +414,159 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: never
+    modelProps: "voiceCreator" | "temporaryRoom"
     txIsolationLevel: TransactionIsolationLevel
   }
-  model: {}
+  model: {
+    VoiceCreator: {
+      payload: Prisma.$VoiceCreatorPayload<ExtArgs>
+      fields: Prisma.VoiceCreatorFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.VoiceCreatorFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.VoiceCreatorFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>
+        }
+        findFirst: {
+          args: Prisma.VoiceCreatorFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.VoiceCreatorFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>
+        }
+        findMany: {
+          args: Prisma.VoiceCreatorFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>[]
+        }
+        create: {
+          args: Prisma.VoiceCreatorCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>
+        }
+        createMany: {
+          args: Prisma.VoiceCreatorCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.VoiceCreatorCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>[]
+        }
+        delete: {
+          args: Prisma.VoiceCreatorDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>
+        }
+        update: {
+          args: Prisma.VoiceCreatorUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>
+        }
+        deleteMany: {
+          args: Prisma.VoiceCreatorDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.VoiceCreatorUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.VoiceCreatorUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>[]
+        }
+        upsert: {
+          args: Prisma.VoiceCreatorUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$VoiceCreatorPayload>
+        }
+        aggregate: {
+          args: Prisma.VoiceCreatorAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateVoiceCreator>
+        }
+        groupBy: {
+          args: Prisma.VoiceCreatorGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.VoiceCreatorGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.VoiceCreatorCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.VoiceCreatorCountAggregateOutputType> | number
+        }
+      }
+    }
+    TemporaryRoom: {
+      payload: Prisma.$TemporaryRoomPayload<ExtArgs>
+      fields: Prisma.TemporaryRoomFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.TemporaryRoomFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.TemporaryRoomFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>
+        }
+        findFirst: {
+          args: Prisma.TemporaryRoomFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.TemporaryRoomFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>
+        }
+        findMany: {
+          args: Prisma.TemporaryRoomFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>[]
+        }
+        create: {
+          args: Prisma.TemporaryRoomCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>
+        }
+        createMany: {
+          args: Prisma.TemporaryRoomCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.TemporaryRoomCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>[]
+        }
+        delete: {
+          args: Prisma.TemporaryRoomDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>
+        }
+        update: {
+          args: Prisma.TemporaryRoomUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>
+        }
+        deleteMany: {
+          args: Prisma.TemporaryRoomDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.TemporaryRoomUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.TemporaryRoomUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>[]
+        }
+        upsert: {
+          args: Prisma.TemporaryRoomUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TemporaryRoomPayload>
+        }
+        aggregate: {
+          args: Prisma.TemporaryRoomAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateTemporaryRoom>
+        }
+        groupBy: {
+          args: Prisma.TemporaryRoomGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.TemporaryRoomGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.TemporaryRoomCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.TemporaryRoomCountAggregateOutputType> | number
+        }
+      }
+    }
+  }
 } & {
   other: {
     payload: any
@@ -455,7 +605,158 @@ export const TransactionIsolationLevel = runtime.makeStrictEnum({
 export type TransactionIsolationLevel = (typeof TransactionIsolationLevel)[keyof typeof TransactionIsolationLevel]
 
 
+export const VoiceCreatorScalarFieldEnum = {
+  id: 'id',
+  guildDiscordId: 'guildDiscordId',
+  creatorChannelDiscordId: 'creatorChannelDiscordId',
+  categoryDiscordId: 'categoryDiscordId',
+  roomCommandsEnabled: 'roomCommandsEnabled',
+  deletedAt: 'deletedAt',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
 
+export type VoiceCreatorScalarFieldEnum = (typeof VoiceCreatorScalarFieldEnum)[keyof typeof VoiceCreatorScalarFieldEnum]
+
+
+export const TemporaryRoomScalarFieldEnum = {
+  id: 'id',
+  guildDiscordId: 'guildDiscordId',
+  voiceCreatorId: 'voiceCreatorId',
+  channelDiscordId: 'channelDiscordId',
+  ownerDiscordId: 'ownerDiscordId',
+  controlMessageDiscordId: 'controlMessageDiscordId',
+  name: 'name',
+  userLimit: 'userLimit',
+  visibility: 'visibility',
+  status: 'status',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  closedAt: 'closedAt'
+} as const
+
+export type TemporaryRoomScalarFieldEnum = (typeof TemporaryRoomScalarFieldEnum)[keyof typeof TemporaryRoomScalarFieldEnum]
+
+
+export const SortOrder = {
+  asc: 'asc',
+  desc: 'desc'
+} as const
+
+export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const QueryMode = {
+  default: 'default',
+  insensitive: 'insensitive'
+} as const
+
+export type QueryMode = (typeof QueryMode)[keyof typeof QueryMode]
+
+
+export const NullsOrder = {
+  first: 'first',
+  last: 'last'
+} as const
+
+export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+
+/**
+ * Field references
+ */
+
+
+/**
+ * Reference to a field of type 'String'
+ */
+export type StringFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'String'>
+    
+
+
+/**
+ * Reference to a field of type 'String[]'
+ */
+export type ListStringFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'String[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Boolean'
+ */
+export type BooleanFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Boolean'>
+    
+
+
+/**
+ * Reference to a field of type 'DateTime'
+ */
+export type DateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DateTime'>
+    
+
+
+/**
+ * Reference to a field of type 'DateTime[]'
+ */
+export type ListDateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DateTime[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Int'
+ */
+export type IntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int'>
+    
+
+
+/**
+ * Reference to a field of type 'Int[]'
+ */
+export type ListIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int[]'>
+    
+
+
+/**
+ * Reference to a field of type 'RoomVisibility'
+ */
+export type EnumRoomVisibilityFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'RoomVisibility'>
+    
+
+
+/**
+ * Reference to a field of type 'RoomVisibility[]'
+ */
+export type ListEnumRoomVisibilityFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'RoomVisibility[]'>
+    
+
+
+/**
+ * Reference to a field of type 'TemporaryRoomStatus'
+ */
+export type EnumTemporaryRoomStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'TemporaryRoomStatus'>
+    
+
+
+/**
+ * Reference to a field of type 'TemporaryRoomStatus[]'
+ */
+export type ListEnumTemporaryRoomStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'TemporaryRoomStatus[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Float'
+ */
+export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float'>
+    
+
+
+/**
+ * Reference to a field of type 'Float[]'
+ */
+export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
+    
 
 /**
  * Batch Payload for updateMany & deleteMany & createMany
@@ -607,7 +908,10 @@ export interface PrismaClientOptionsWithAdapter extends PrismaClientBaseOptions 
  * Learn more about driver adapters: https://pris.ly/d/driver-adapters
  */
 export type PrismaClientOptions = PrismaClientOptionsWithAccelerateUrl | PrismaClientOptionsWithAdapter
-export type GlobalOmitConfig = {}
+export type GlobalOmitConfig = {
+  voiceCreator?: Prisma.VoiceCreatorOmit
+  temporaryRoom?: Prisma.TemporaryRoomOmit
+}
 
 /* Types for Logging */
 export type LogLevel = 'info' | 'query' | 'warn' | 'error'

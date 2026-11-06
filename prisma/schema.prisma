@@ -6,3 +6,50 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum RoomVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum TemporaryRoomStatus {
+  CREATING
+  ACTIVE
+  CLOSING
+  CLOSED
+}
+
+model VoiceCreator {
+  id                      String          @id @default(uuid()) @db.Uuid
+  guildDiscordId          String
+  creatorChannelDiscordId String          @unique
+  categoryDiscordId       String
+  roomCommandsEnabled     Boolean         @default(true)
+  deletedAt               DateTime?       @db.Timestamptz(3)
+  createdAt               DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime        @updatedAt @db.Timestamptz(3)
+  temporaryRooms          TemporaryRoom[]
+
+  @@index([guildDiscordId])
+  @@index([deletedAt])
+}
+
+model TemporaryRoom {
+  id                      String              @id @default(uuid()) @db.Uuid
+  guildDiscordId          String
+  voiceCreatorId          String              @db.Uuid
+  channelDiscordId        String              @unique
+  ownerDiscordId          String?
+  controlMessageDiscordId String?
+  name                    String
+  userLimit               Int                 @default(0)
+  visibility              RoomVisibility      @default(PUBLIC)
+  status                  TemporaryRoomStatus @default(CREATING)
+  createdAt               DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime            @updatedAt @db.Timestamptz(3)
+  closedAt                DateTime?           @db.Timestamptz(3)
+  voiceCreator            VoiceCreator        @relation(fields: [voiceCreatorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([guildDiscordId, ownerDiscordId, status])
+  @@index([channelDiscordId, status])
+}
