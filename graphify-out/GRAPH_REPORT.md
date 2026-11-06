@@ -1,17 +1,17 @@
 # Graph Report - feature-etapa-1-infraestrutura  (2026-11-06)
 
 ## Corpus Check
-- 73 files · ~43,822 words
+- 73 files · ~44,175 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
 ## Summary
-- 911 nodes · 1468 edges · 41 communities (36 shown, 5 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 93 edges (avg confidence: 0.88)
+- 911 nodes · 1471 edges · 41 communities (36 shown, 5 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 95 edges (avg confidence: 0.88)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7a59922b`
+- Built from commit: `5e3ad859`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -44,11 +44,11 @@
 - application.ts
 - application.test.ts
 - call.fixtures.ts
-- DiscordCallGateway
+- application.ts
 - Prisma__TemporaryRoomClient
 - Prisma__VoiceCreatorClient
 - InteractionRegistry
-- env.ts
+- logger.ts
 - interaction-registry.test.ts
 - File Structure
 - register-commands.ts
@@ -56,7 +56,7 @@
 - setup.command.test.ts
 - enums.ts
 - setup.interactions.test.ts
-- InteractionRegistry
+- PrismaVoiceCreatorRepository
 
 ## God Nodes (most connected - your core abstractions)
 1. `vitest` - 26 edges
@@ -65,9 +65,9 @@
 4. `VoiceCreatorRepository` - 19 edges
 5. `TemporaryRoomDelegate` - 18 edges
 6. `VoiceCreatorDelegate` - 18 edges
-7. `CallDiscordGateway` - 16 edges
-8. `DiscordCallGateway` - 16 edges
-9. `VoiceCreatorConfiguration` - 16 edges
+7. `DiscordCallGateway` - 16 edges
+8. `VoiceCreatorConfiguration` - 16 edges
+9. `CallDiscordGateway` - 16 edges
 10. `SetupDiscordError` - 15 edges
 
 ## Surprising Connections (you probably didn't know these)
@@ -99,8 +99,8 @@ Cohesion: 0.02
 Nodes (117): AnyNull, Args, At, AtLeast, AtLoose, AtStrict, BatchPayload, Boolean (+109 more)
 
 ### Community 2 - "discord.js"
-Cohesion: 0.24
-Nodes (4): discord.js, InteractionHandler, safeFailureResponse, StatusCommand
+Cohesion: 0.16
+Nodes (8): Task 5: Discord client and interaction registry, discord.js, pino, createDefaultDispatcher(), InteractionHandler, InteractionRegistry, safeFailureResponse, StatusCommand
 
 ### Community 3 - "prismaNamespaceBrowser.ts"
 Cohesion: 0.12
@@ -179,36 +179,36 @@ Cohesion: 0.08
 Nodes (25): 1. Painel administrativo persistente no canal, 2. Painel administrativo privado temporário — escolhida, 3. Assistente linear passo a passo, Abordagens consideradas, Antiobjetivos, Arquitetura, Charon v0.2.0 — Setup e Join-to-Create, Compensação de falhas (+17 more)
 
 ### Community 22 - "vitest"
-Cohesion: 0.10
-Nodes (19): botRoomPermissions, CallDiscordGateway, CallMoveUnconfirmedError, CreatedDiscordRoom, CreateDiscordRoomInput, buildCallPanel(), TemporaryRoomRecord, TemporaryRoomRepository (+11 more)
+Cohesion: 0.18
+Nodes (7): CallDiscordGateway, TemporaryRoomRecord, TemporaryRoomRepository, VoiceTransition, CallService, KeyedMutex, fixture()
 
 ### Community 25 - "application.ts"
-Cohesion: 0.26
-Nodes (6): Application, createApplication(), createDefaultDispatcher(), registerShutdownSignals(), SignalSource, start()
+Cohesion: 0.18
+Nodes (8): Task 2: Validated configuration, Application, registerShutdownSignals(), environmentSchema, loadConfig(), postgresUrl, start(), validEnvironment
 
 ### Community 26 - "application.test.ts"
-Cohesion: 0.18
-Nodes (4): Task 7: Wire Setup and Voice Events into the Application, DiscordClientPort, InteractionDispatcher, config
+Cohesion: 0.15
+Nodes (5): Task 7: Wire Setup and Voice Events into the Application, DiscordClientPort, InteractionDispatcher, SignalSource, config
 
 ### Community 27 - "call.fixtures.ts"
 Cohesion: 0.05
-Nodes (32): Task 4: Prisma adapter, ApplicationOverrides, checkDatabase(), createPrismaClient(), DatabaseClient, disconnectDatabase(), disconnectedClients, $Enums (+24 more)
+Nodes (40): createPrismaClient(), disconnectedClients, $Enums, PrismaClient, TemporaryRoom, VoiceCreator, botRoomPermissions, CallDiscordError (+32 more)
 
-### Community 28 - "DiscordCallGateway"
-Cohesion: 0.31
-Nodes (3): CallDiscordError, DiscordCallGateway, isUnknownChannel()
+### Community 28 - "application.ts"
+Cohesion: 0.26
+Nodes (7): Task 4: Prisma adapter, ApplicationOverrides, createApplication(), checkDatabase(), DatabaseClient, disconnectDatabase(), createDiscordClient()
 
 ### Community 31 - "InteractionRegistry"
 Cohesion: 0.25
 Nodes (7): Charon Stage 1 Infrastructure Implementation Plan, Global Constraints, Review Focus, Task 1: Project foundation, Task 3: Structured logger, Task 6: Application lifecycle and status command, Task 7: CI, documentation, and release readiness
 
-### Community 32 - "env.ts"
-Cohesion: 0.19
-Nodes (11): Task 2: Validated configuration, pino, AppConfig, environmentSchema, loadConfig(), postgresUrl, LoggerOptions, redactedPaths (+3 more)
+### Community 32 - "logger.ts"
+Cohesion: 0.40
+Nodes (5): AppConfig, LoggerOptions, redactedPaths, sanitizeLogValue(), sensitiveKeys
 
 ### Community 33 - "interaction-registry.test.ts"
-Cohesion: 0.22
-Nodes (5): vitest, createDiscordClient(), createLogger(), createSilentLogger(), captureLogger()
+Cohesion: 0.25
+Nodes (4): vitest, createLogger(), createSilentLogger(), captureLogger()
 
 ### Community 34 - "File Structure"
 Cohesion: 0.14
@@ -250,7 +250,7 @@ _Questions this graph is uniquely positioned to answer:_
   _3 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `prismaNamespace.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.01694915254237288 - nodes in this community are weakly interconnected._
-- **Why does `InteractionRegistry` connect `InteractionRegistry` to `interaction-registry.test.ts`, `File Structure`, `discord.js`, `Arquitetura do Charon`, `Charon v0.2.0 — Setup e Join-to-Create`, `application.ts`?**
+- **Why does `InteractionRegistry` connect `discord.js` to `interaction-registry.test.ts`, `File Structure`, `Arquitetura do Charon`, `Charon v0.2.0 — Setup e Join-to-Create`, `application.ts`?**
   _High betweenness centrality (0.091) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `VoiceCreatorRepository` (e.g. with `Task 2: Add Voice Creator Repository and Setup Service` and `Task 6: Implement Temporary Room Lifecycle and Compensation`) actually correct?**
   _`VoiceCreatorRepository` has 2 INFERRED edges - model-reasoned connections that need verification._

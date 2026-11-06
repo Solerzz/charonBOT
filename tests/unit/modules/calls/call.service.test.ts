@@ -108,6 +108,67 @@ describe('CallService', () => {
     expect(f.rooms.markClosed).not.toHaveBeenCalled();
   });
 
+  it.each(['beginClosing', 'deleteChannel'] as const)('clears the absent owner when another member joins while %s awaits', async (stage) => {
+    const f = fixture();
+    f.records.set(room.id, room); f.setMemberChannel(null);
+    const started = deferred(); const finish = deferred();
+    if (stage === 'beginClosing') {
+      const beginClosing = f.rooms.beginClosing.getMockImplementation()!;
+      f.rooms.beginClosing.mockImplementationOnce(async (id) => {
+        const closing = await beginClosing(id);
+        started.resolve();
+        await finish.promise;
+        return closing;
+      });
+    } else {
+      f.gateway.deleteChannel.mockImplementationOnce(async () => {
+        started.resolve();
+        await finish.promise;
+        throw new CallDiscordError(); // Adapter refuses deletion after its fetch sees a new occupant.
+      });
+    }
+    const leaving = f.handle(departure);
+    await started.promise;
+    f.counts.set(room.channelDiscordId, 1);
+    finish.resolve();
+    await leaving;
+    expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
+    expect(f.rooms.clearOwner).toHaveBeenCalledExactlyOnceWith(room.id, entry.memberDiscordId);
+    expect(f.rooms.markClosed).not.toHaveBeenCalled();
+    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Proprietário', value: 'Sem proprietário' });
+  });
+
+  it('does not redirect a former owner after deletion fails and another member later joins', async () => {
+    const f = fixture();
+    const retained = { ...room, id: '323e4567-e89b-42d3-a456-426614174000', channelDiscordId: '82345678901234567' };
+    f.records.set(retained.id, retained); f.setMemberChannel(null);
+    f.gateway.deleteChannel.mockRejectedValueOnce(new Error('permission'));
+    await f.handle({ ...departure, oldChannelDiscordId: retained.channelDiscordId });
+    f.counts.set(retained.channelDiscordId, 1);
+    f.setMemberChannel(retained.channelDiscordId);
+    await f.handle({ ...entry, memberDiscordId: '72345678901234567', newChannelDiscordId: retained.channelDiscordId });
+    expect(f.records.get(retained.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
+    f.setMemberChannel(creator.creatorChannelDiscordId);
+    await f.handle();
+    expect(f.gateway.createTemporaryChannel).toHaveBeenCalledTimes(1);
+    expect(f.gateway.moveMember).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, creator.creatorChannelDiscordId);
+  });
+
+  it('preserves ownership if the owner returns while closure awaits', async () => {
+    const f = fixture();
+    f.records.set(room.id, room); f.setMemberChannel(null);
+    const beginClosing = f.rooms.beginClosing.getMockImplementation()!;
+    f.rooms.beginClosing.mockImplementationOnce(async (id) => {
+      const closing = await beginClosing(id);
+      f.setMemberChannel(room.channelDiscordId); f.counts.set(room.channelDiscordId, 1);
+      return closing;
+    });
+    await f.handle(departure);
+    expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: entry.memberDiscordId });
+    expect(f.rooms.clearOwner).not.toHaveBeenCalled();
+    expect(f.gateway.deleteChannel).not.toHaveBeenCalled();
+  });
+
   it('compensates failed creating persistence by deleting the Discord channel', async () => {
     const f = fixture();
     f.rooms.createCreating.mockRejectedValueOnce(new Error('sensitive name'));
@@ -255,6 +316,28 @@ describe('CallService', () => {
     expect(f.gateway.moveMember).not.toHaveBeenCalled();
     expect(f.gateway.deleteChannel).not.toHaveBeenCalled();
     expect(f.records.get(room.id)).toMatchObject({ status: 'ACTIVE', ownerDiscordId: null });
+  });
+
+  it('clears the absent creator owner if cancelled creation cleanup becomes occupied while closing', async () => {
+    const f = fixture();
+    const create = f.rooms.createCreating.getMockImplementation()!;
+    f.rooms.createCreating.mockImplementationOnce(async (input) => {
+      const created = await create(input);
+      f.setMemberChannel(null);
+      return created;
+    });
+    const beginClosing = f.rooms.beginClosing.getMockImplementation()!;
+    f.rooms.beginClosing.mockImplementationOnce(async (id) => {
+      const closing = await beginClosing(id);
+      f.counts.set(room.channelDiscordId, 1);
+      return closing;
+    });
+    await f.handle();
+    expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
+    expect(f.rooms.clearOwner).toHaveBeenCalledExactlyOnceWith(room.id, entry.memberDiscordId);
+    expect(f.rooms.markActive).not.toHaveBeenCalled();
+    expect(f.gateway.moveMember).not.toHaveBeenCalled();
+    expect(f.gateway.deleteChannel).not.toHaveBeenCalled();
   });
 
   it('continues arrival processing after an old-room panel edit fails', async () => {

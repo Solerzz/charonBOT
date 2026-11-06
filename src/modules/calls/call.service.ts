@@ -166,15 +166,24 @@ export class CallService {
     const closing = await this.rooms.beginClosing(room.id);
     if (closing.status === 'CLOSED') return true;
     // beginClosing awaits I/O: a stale zero must not evict newly arrived members.
-    if (gateway.getChannelMemberCount(room.channelDiscordId) !== 0) return false;
-    try {
-      await gateway.deleteChannel(room.channelDiscordId);
-      await this.rooms.markClosed(room.id);
-      return true;
-    } catch (error: unknown) {
-      this.logFailure('closeRoom', input, room.channelDiscordId, error, room.id);
-      return false;
+    if (gateway.getChannelMemberCount(room.channelDiscordId) === 0) {
+      try {
+        await gateway.deleteChannel(room.channelDiscordId);
+        await this.rooms.markClosed(room.id);
+        return true;
+      } catch (error: unknown) {
+        this.logFailure('closeRoom', input, room.channelDiscordId, error, room.id);
+      }
     }
+    // Cleanup was aborted or failed. Reconcile the retained row while its room
+    // lock is still held, even if it is empty now and only gets occupied later.
+    if (closing.ownerDiscordId === input.memberDiscordId && gateway.getMemberChannelDiscordId() !== room.channelDiscordId) {
+      const retained = await this.rooms.clearOwner(room.id, input.memberDiscordId);
+      if (gateway.getChannelMemberCount(room.channelDiscordId) !== 0) {
+        await this.activateAndRefresh(retained, input, gateway);
+      }
+    }
+    return false;
   }
 
   private withRoomLock<T>(channelDiscordId: string, input: VoiceTransition, operation: () => Promise<T>): Promise<T> {
