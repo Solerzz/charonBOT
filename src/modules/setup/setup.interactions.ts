@@ -89,12 +89,21 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
     try {
       const customId = decoded.data;
       const value = this.validateInput(interaction, customId);
-      // Showing a modal must itself be the initial response. All other actions
-      // acknowledge before any Discord/database request and edit the private source.
-      if (!(customId.action === 'rename' && interaction.isButton())) {
-        await interaction.deferUpdate();
-        acknowledged = true;
+      // An empty form reads no private configuration. Show it before any
+      // external work; the submit independently validates every mutation target.
+      if (customId.action === 'rename' && interaction.isButton()) {
+        await interaction.showModal(new ModalBuilder()
+          .setCustomId(encodeSetupCustomId(customId))
+          .setTitle('Renomear Voice Creator')
+          .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('name').setLabel('Nome do canal')
+              .setStyle(TextInputStyle.Short).setRequired(true)
+              .setMinLength(1).setMaxLength(100),
+          )));
+        return;
       }
+      await interaction.deferUpdate();
+      acknowledged = true;
       const gateway = this.gatewayFactory(interaction);
       await gateway.assertCanConfigure(interaction.channelId);
       const configurations = await this.service.list(interaction.guildId);
@@ -169,19 +178,8 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
           await this.service.toggleRoomCommands(selected.id);
           break;
         case 'rename': {
-          const channel = await this.requireVoice(gateway, selected.creatorChannelDiscordId);
+          await this.requireVoice(gateway, selected.creatorChannelDiscordId);
           await this.requireCategory(gateway, selected.categoryDiscordId);
-          if (interaction.isButton()) {
-            await interaction.showModal(new ModalBuilder()
-              .setCustomId(encodeSetupCustomId(customId))
-              .setTitle('Renomear Voice Creator')
-              .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-                new TextInputBuilder().setCustomId('name').setLabel('Nome do canal')
-                  .setStyle(TextInputStyle.Short).setRequired(true)
-                  .setMinLength(1).setMaxLength(100).setValue(channel.name),
-              )));
-            return;
-          }
           await this.service.rename(selected.id, value, gateway);
           break;
         }

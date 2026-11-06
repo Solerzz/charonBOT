@@ -354,15 +354,15 @@
     "semantic_hash": ""
   },
   "src/modules/setup/setup.interactions.ts": {
-    "mtime": 1793947624.0234442,
-    "seen": 1793947805.1511524,
-    "ast_hash": "3b721f53fa2fd10ae5928f8c18a92e70",
+    "mtime": 1793948080.1826215,
+    "seen": 1793948106.3053954,
+    "ast_hash": "3d4adebccefaa8811691af4347621789",
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.interactions.test.ts": {
-    "mtime": 1793947730.1015863,
-    "seen": 1793947805.153659,
-    "ast_hash": "ba59161a035629ceff990e0fb542b385",
+    "mtime": 1793948058.0071306,
+    "seen": 1793948106.310136,
+    "ast_hash": "9c42c08e55b55713101dca05d32967f3",
     "semantic_hash": ""
   },
   "package-lock.json": {

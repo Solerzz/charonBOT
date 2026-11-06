@@ -133,14 +133,71 @@ describe('SetupInteractions', () => {
     expect(payload(f).embeds[0].fields).toContainEqual({ name: 'Categoria das salas', value: '<#72345678901234567>' });
   });
 
-  it('opens a native rename modal without an incompatible prior acknowledgement', async () => {
+  it('opens an empty generic rename modal synchronously without private data access', async () => {
     const f = fixture('rename');
-    await f.handler.execute(f.interaction);
+    const execution = f.handler.execute(f.interaction);
+    expect(f.showModal).toHaveBeenCalledOnce();
+    await execution;
     const modal = JSON.parse(JSON.stringify(f.showModal.mock.calls[0]![0]));
     expect(modal).toMatchObject({ custom_id: `setup:v1:rename:${first.id}`, title: 'Renomear Voice Creator' });
-    expect(modal.components[0].components[0]).toMatchObject({ custom_id: 'name', value: 'Criar sala', min_length: 1, max_length: 100 });
+    expect(modal.components[0].components[0]).toMatchObject({ custom_id: 'name', min_length: 1, max_length: 100 });
+    expect(modal.components[0].components[0].value).toBeUndefined();
+    expect(f.factory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
+    expect(f.findById).not.toHaveBeenCalled();
     expect(f.deferUpdate).not.toHaveBeenCalled();
     expect(f.editReply).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it.each(['gateway', 'repository'] as const)('opens the modal before awaiting a never-settling %s', async (dependency) => {
+    const f = fixture('rename');
+    const pending = new Promise<never>(() => {});
+    if (dependency === 'gateway') f.assertCanConfigure.mockReturnValue(pending);
+    else f.listByGuild.mockReturnValue(pending);
+    f.showModal.mockImplementation(async () => {
+      expect(f.factory).not.toHaveBeenCalled();
+      expect(f.listByGuild).not.toHaveBeenCalled();
+    });
+
+    const execution = f.handler.execute(f.interaction);
+    expect(f.showModal).toHaveBeenCalledOnce();
+    await execution;
+    expect(f.assertCanConfigure).not.toHaveBeenCalled();
+    expect(f.getVoiceChannel).not.toHaveBeenCalled();
+    expect(f.getCategory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it.each(['missing', 'foreign', 'deleted'] as const)('does not look up %s configuration state to open the generic form', async (state) => {
+    const f = fixture('rename');
+    if (state === 'missing') f.configurations.splice(0, 1);
+    else if (state === 'foreign') f.configurations[0]!.guildDiscordId = '92345678901234567';
+    else f.configurations[0]!.deletedAt = new Date();
+    await f.handler.execute(f.interaction);
+    expect(f.showModal).toHaveBeenCalledOnce();
+    expect(f.factory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
+    const modal = JSON.parse(JSON.stringify(f.showModal.mock.calls[0]![0]));
+    expect(modal.components[0].components[0].value).toBeUndefined();
+    expectNoMutation(f);
+  });
+
+  it.each([
+    { customId: 'setup:v1:rename:invalid' },
+    { inGuild: () => false, guild: null, guildId: null },
+    { guild: { id: '92345678901234567' } },
+    { memberPermissions: new PermissionsBitField(PermissionFlagsBits.ManageChannels) },
+    { message: { flags: new MessageFlagsBitField() } },
+  ])('checks synchronous safety gates before opening any rename form: %j', async (overrides) => {
+    const f = fixture('rename');
+    Object.assign(f.interaction, overrides);
+    await f.handler.execute(f.interaction);
+    expect(f.showModal).not.toHaveBeenCalled();
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+    expect(f.factory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
     expectNoMutation(f);
   });
 
@@ -193,7 +250,7 @@ describe('SetupInteractions', () => {
   });
 
   it.each(['delete', 'confirm-delete', 'cancel', 'toggle-commands', 'rename', 'change-category', 'select'])('rejects a forged foreign-guild configuration on every action: %s', async (action) => {
-    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
+    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : action === 'rename' ? 'modal' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
     f.configurations[0]!.guildDiscordId = '92345678901234567';
     await f.handler.execute(f.interaction);
     expectNoMutation(f);
@@ -220,7 +277,7 @@ describe('SetupInteractions', () => {
   });
 
   it.each(['delete', 'confirm-delete', 'cancel', 'toggle-commands', 'rename', 'change-category', 'select'])('rejects an expired or logically deleted configuration: %s', async (action) => {
-    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
+    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : action === 'rename' ? 'modal' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
     f.configurations[0]!.deletedAt = new Date();
     await f.handler.execute(f.interaction);
     expectNoMutation(f);
@@ -228,13 +285,27 @@ describe('SetupInteractions', () => {
     expect(f.listByGuild).toHaveBeenCalledWith(guildId);
   });
 
-  it.each(['missing', 'foreign'] as const)('rechecks persisted ownership on modal submit: %s', async (state) => {
+  it.each(['missing', 'foreign', 'deleted'] as const)('rechecks persisted ownership on modal submit: %s', async (state) => {
     const f = fixture('rename', 'modal');
     if (state === 'missing') f.configurations.splice(0, 1);
-    else f.configurations[0]!.guildDiscordId = '92345678901234567';
+    else if (state === 'foreign') f.configurations[0]!.guildDiscordId = '92345678901234567';
+    else f.configurations[0]!.deletedAt = new Date();
     await f.handler.execute(f.interaction);
     expectNoMutation(f);
+    expect(f.assertCanConfigure).toHaveBeenCalledWith('42345678901234567');
+    expect(f.listByGuild).toHaveBeenCalledWith(guildId);
+    expect(f.getVoiceChannel).not.toHaveBeenCalled();
     expect(payload(f).content).toContain('configuração');
+  });
+
+  it('rejects malformed rename submit IDs before data access or mutation', async () => {
+    const f = fixture('rename', 'modal');
+    Object.assign(f.interaction, { customId: 'setup:v1:rename:invalid' });
+    await f.handler.execute(f.interaction);
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+    expect(f.factory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
+    expectNoMutation(f);
   });
 
   it('refreshes another page from the existing real-UUID navigation contract', async () => {
@@ -295,6 +366,8 @@ describe('SetupInteractions', () => {
     if (f.interaction.isModalSubmit()) vi.mocked(f.interaction.fields.getTextInputValue).mockReturnValue(name);
     await f.handler.execute(f.interaction);
     expectNoMutation(f);
+    expect(f.factory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
   });
 
   it.each([null, 0n, PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageChannels])('rechecks user permissions after opening: %s', async (bits) => {
@@ -360,7 +433,7 @@ describe('SetupInteractions', () => {
   });
 
   it.each(['add-category', 'change-category', 'toggle-commands', 'rename'])('denies missing required destination categories: %s', async (action) => {
-    const f = fixture(action, action === 'add-category' || action === 'change-category' ? 'channel' : 'button', ['72345678901234567'], action === 'add-category' ? '62345678901234567' : first.id);
+    const f = fixture(action, action === 'add-category' || action === 'change-category' ? 'channel' : action === 'rename' ? 'modal' : 'button', ['72345678901234567'], action === 'add-category' ? '62345678901234567' : first.id);
     f.getCategory.mockResolvedValue(null as never);
     await f.handler.execute(f.interaction);
     expectNoMutation(f);

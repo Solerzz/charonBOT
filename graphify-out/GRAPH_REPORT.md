@@ -1,7 +1,7 @@
 # Graph Report - feature-etapa-1-infraestrutura  (2026-11-06)
 
 ## Corpus Check
-- 62 files · ~37,758 words
+- 62 files · ~37,997 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `de01457f`
+- Built from commit: `a554f844`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -59,12 +59,12 @@
 
 ## God Nodes (most connected - your core abstractions)
 1. `SetupService` - 20 edges
-2. `vitest` - 20 edges
-3. `discord.js` - 20 edges
+2. `discord.js` - 20 edges
+3. `vitest` - 20 edges
 4. `TemporaryRoomDelegate` - 18 edges
 5. `VoiceCreatorDelegate` - 18 edges
-6. `VoiceCreatorConfiguration` - 16 edges
-7. `VoiceCreatorRepository` - 16 edges
+6. `VoiceCreatorRepository` - 16 edges
+7. `VoiceCreatorConfiguration` - 16 edges
 8. `SetupDiscordError` - 15 edges
 9. `Charon v0.2.0 — Setup e Join-to-Create` - 15 edges
 10. `DiscordSetupGateway` - 14 edges
@@ -76,9 +76,9 @@
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/core/discord/interactions/interaction-registry.ts
 - `Task 4: Handle Setup Buttons, Selects, and Modals` --references--> `SetupService`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/modules/setup/setup.service.ts
-- `Task 2: Add Voice Creator Repository and Setup Service` --references--> `VoiceCreatorConfiguration`  [INFERRED]
-  docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/modules/setup/setup.repository.ts
-- `Task 3: Build the Private Setup Dashboard` --references--> `VoiceCreatorConfiguration`  [INFERRED]
+- `Arquitetura` --references--> `InteractionRegistry`  [INFERRED]
+  docs/superpowers/specs/2026-11-05-charon-v0.2.0-setup-join-to-create-design.md → src/core/discord/interactions/interaction-registry.ts
+- `Task 2: Add Voice Creator Repository and Setup Service` --references--> `PrismaVoiceCreatorRepository`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/modules/setup/setup.repository.ts
 
 ## Import Cycles
