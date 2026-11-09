@@ -15,7 +15,8 @@ import { roomSettingsFixture } from './room-settings.fixtures.js';
 function runtimeFixture() {
   const f = roomSettingsFixture();
   const database = createPrismaClient({ url: 'postgresql://test:test@127.0.0.1:1/test', directUrl: 'postgresql://test:test@127.0.0.1:1/test' });
-  const runtime = createRoomRuntime(database, createLogger({ level: 'silent' }));
+  const logger = createLogger({ level: 'silent' }); const timerFailures = vi.spyOn(logger, 'error');
+  const runtime = createRoomRuntime(database, logger);
   vi.spyOn(database, '$transaction').mockImplementation((async (work: (tx: typeof database) => Promise<unknown>) => work(database)) as never);
   for (const name of ['read', 'readTransfer', 'findOwnedRoom', 'syncPresence', 'savePriority', 'changeOwner', 'createTransfer', 'armTransfer', 'cancelTransfer', 'discardTransfer', 'invalidateTransfers', 'finishTransfer', 'setAllowed', 'updateSettings'] as const) {
     vi.spyOn(runtime.store, name).mockImplementation(f.store[name] as never);
@@ -72,12 +73,44 @@ function runtimeFixture() {
     return voiceService.handleVoiceTransition({ ...entry, memberDiscordId: member,
       oldChannelDiscordId: leaving ? f.channel.id : null, newChannelDiscordId: leaving ? null : f.channel.id }, gateway);
   };
-  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice };
+  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice, timerFailures };
 }
 
 afterEach(() => { vi.useRealTimers(); });
 
 describe('application-owned room runtime', () => {
+  it('propagates a direct manual refresh discovery error without scheduling recovery', async () => {
+    const f = runtimeFixture(); const failure = new Error('private-manual-query');
+    vi.mocked(f.runtime.store.read).mockRejectedValueOnce(failure);
+    await expect(f.runtime.ownership.refreshPriority(f.state().room.id, f.gateway)).rejects.toBe(failure);
+    expect(f.runtime.timers.scheduledDeadlines().size).toBe(0);
+    expect(f.timerFailures).not.toHaveBeenCalled();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each(['final-read-unavailable', 'unrelated-reservation'] as const)('does not retain unproven due work after initial read failure with %s', async (reason) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER); f.state().room.ownerDiscordId = null;
+    await f.runtime.start(f.resolveGuild);
+    const entered = deferred(); const release = deferred(); const committed = deferred(); const acknowledge = deferred();
+    vi.mocked(f.runtime.store.read).mockImplementationOnce(async () => { entered.resolve(); await release.promise; throw new Error('private-first-read'); });
+    if (reason === 'final-read-unavailable') vi.mocked(f.runtime.store.read).mockRejectedValueOnce(new Error('private-final-read'));
+    await vi.advanceTimersByTimeAsync(300_000); await entered.promise;
+    vi.mocked(f.database.$transaction).mockImplementationOnce((async (work: (tx: typeof f.database) => Promise<unknown>) => {
+      const saved = await work(f.database); committed.resolve(); await acknowledge.promise; return saved;
+    }) as never);
+    const toggling = f.toggle(false); await committed.promise;
+    if (reason === 'unrelated-reservation') await f.runtime.store.savePriority(f.state().room.id, 2, OLDEST, new Date(300_000));
+    release.resolve(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.runtime.timers.scheduledDeadlines().has(`priority:${f.state().room.id}`)).toBe(false);
+    expect(f.timerFailures).toHaveBeenCalledOnce();
+    expect(JSON.stringify(f.timerFailures.mock.calls)).not.toContain('private-');
+    const observations = vi.mocked(f.runtime.store.syncPresence).mock.calls.length;
+    acknowledge.resolve(); await toggling; await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length).toBe(observations);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
   it('retains due evidence after setup wins the panel installation CAS inside the observation callback', async () => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
@@ -154,13 +187,15 @@ describe('application-owned room runtime', () => {
     await f.runtime.stop(); await f.database.$disconnect();
   });
 
-  it.each([true, false].flatMap((enabled) => ['snapshot', 'presence-read', 'projection', 'snapshot-failure'].map((boundary) => ({ enabled, boundary }))))('preserves due evidence when setup $enabled -> opposite commits during $boundary', async ({ enabled, boundary }) => {
+  it.each([true, false].flatMap((enabled) => ['snapshot', 'presence-read', 'projection', 'snapshot-failure', 'initial-read-failure'].map((boundary) => ({ enabled, boundary }))))('preserves due evidence when setup $enabled -> opposite commits during $boundary', async ({ enabled, boundary }) => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
     Object.assign(f.state().room, { ownerDiscordId: null, visibility: 'PRIVATE' });
     f.state().controlsEnabled = enabled; await f.runtime.start(f.resolveGuild);
     const entered = deferred(); const release = deferred(); const committed = deferred(); const acknowledge = deferred();
-    if (boundary === 'snapshot' || boundary === 'snapshot-failure') {
+    if (boundary === 'initial-read-failure') {
+      vi.mocked(f.runtime.store.read).mockImplementationOnce(async () => { entered.resolve(); await release.promise; throw new Error('private-initial-query-sentinel'); });
+    } else if (boundary === 'snapshot' || boundary === 'snapshot-failure') {
       const fetch = f.guild.channels.fetch.getMockImplementation()!;
       f.guild.channels.fetch.mockImplementationOnce(async (...args) => {
         const result = await fetch(...args); entered.resolve(); await release.promise;

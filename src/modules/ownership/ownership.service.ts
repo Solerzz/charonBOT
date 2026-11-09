@@ -124,13 +124,16 @@ export class OwnershipService {
 
   private async refresh(roomId: string, gateway: RoomDiscordGateway, expected?: PriorityGeneration): Promise<void | 'retain-deadline'> {
     const { store, coordinator, onChangedLocked } = this.dependencies;
-    const initial = await store.read(roomId);
-    if (!initial) return;
-    return coordinator.room(initial.room.guildDiscordId, initial.room.channelDiscordId, async () => {
+    // Scheduled work already captured its lock identity. Keep every authoritative
+    // read inside the shared observation/error envelope; only manual refresh
+    // needs a discovery read before it knows which room to lock.
+    const identity = expected ?? (await store.read(roomId))?.room;
+    if (!identity) return;
+    return coordinator.room(identity.guildDiscordId, identity.channelDiscordId, async () => {
       const observe = async (): Promise<void> => {
         const current = await store.read(roomId);
-        if (!current || current.room.status !== 'ACTIVE' || current.room.guildDiscordId !== initial.room.guildDiscordId
-          || current.room.channelDiscordId !== initial.room.channelDiscordId) return;
+        if (!current || current.room.status !== 'ACTIVE' || current.room.guildDiscordId !== identity.guildDiscordId
+          || current.room.channelDiscordId !== identity.channelDiscordId) return;
         if (expected && (current.room.ownerDiscordId !== null || !matchesGeneration(current.room, expected))) return;
         const snapshot = await gateway.snapshot(current.room.channelDiscordId);
         if (!snapshot || !matchesSnapshot(current, snapshot)) return;
