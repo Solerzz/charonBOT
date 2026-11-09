@@ -27,7 +27,7 @@ describe('CallService', () => {
     expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game' });
     expect(f.rooms.createCreating).toHaveBeenCalledExactlyOnceWith({ guildDiscordId: entry.guildDiscordId, voiceCreatorId: creator.id, channelDiscordId: room.channelDiscordId, ownerDiscordId: entry.memberDiscordId, name: 'Game' });
     expect(f.gateway.moveMember).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, creator.creatorChannelDiscordId);
-    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1' });
+    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / Ilimitado' });
     expect(f.records.get(room.id)).toMatchObject({ status: 'ACTIVE', controlMessageDiscordId: room.controlMessageDiscordId });
   });
 
@@ -62,7 +62,7 @@ describe('CallService', () => {
     await f.handle(departure);
     expect(f.records.get(room.id)?.ownerDiscordId).toBeNull();
     expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Proprietário', value: 'Sem proprietário' });
-    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2' });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2 / Ilimitado' });
     await f.handle();
     expect(f.gateway.createTemporaryChannel).not.toHaveBeenCalled();
   });
@@ -86,7 +86,7 @@ describe('CallService', () => {
     f.setMemberChannel(other.channelDiscordId);
     await f.handle({ ...departure, newChannelDiscordId: other.channelDiscordId });
     expect(f.gateway.updateControlPanel.mock.calls.map((c) => c[0])).toEqual([room.channelDiscordId, other.channelDiscordId]);
-    expect(fields(f.gateway.updateControlPanel.mock.calls[1]![2])).toContainEqual({ name: 'Participantes', value: '3' });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[1]![2])).toContainEqual({ name: 'Participantes', value: '3 / Ilimitado' });
   });
 
   it('closes an empty room using live state even when the event snapshot says occupied', async () => {
