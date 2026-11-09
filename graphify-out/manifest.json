@@ -366,15 +366,15 @@
     "semantic_hash": ""
   },
   "src/modules/calls/call-panel.view.ts": {
-    "mtime": 1794200157.731392,
-    "seen": 1794200187.9237819,
-    "ast_hash": "b1920f3768e64839e1ab604f3ab9de00",
+    "mtime": 1794263490.5727825,
+    "seen": 1794264158.3643248,
+    "ast_hash": "50084bb05608861dcf0b36101ce68474",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/call-panel.view.test.ts": {
-    "mtime": 1794200077.7376058,
-    "seen": 1794200187.9366596,
-    "ast_hash": "fef44f1233bb67a70e34ff7b36fca690",
+    "mtime": 1794263490.5727825,
+    "seen": 1794264158.3861003,
+    "ast_hash": "5d02165ee570986ab0050239e681d25e",
     "semantic_hash": ""
   },
   "src/modules/calls/call.discord.ts": {
@@ -390,9 +390,9 @@
     "semantic_hash": ""
   },
   "src/modules/calls/call.service.ts": {
-    "mtime": 1794202010.6358004,
-    "seen": 1794219711.349691,
-    "ast_hash": "7dd32bda9bb57beec6a5089f1cda335c",
+    "mtime": 1794263723.6187232,
+    "seen": 1794264158.380154,
+    "ast_hash": "145799afbf2c09029e6b4a141565ba08",
     "semantic_hash": ""
   },
   "src/shared/keyed-mutex.ts": {
@@ -420,9 +420,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/call.service.test.ts": {
-    "mtime": 1794202078.583971,
-    "seen": 1794219711.3594441,
-    "ast_hash": "d2eca573d171f281548878d908d28c76",
+    "mtime": 1794263369.0877361,
+    "seen": 1794264158.3861003,
+    "ast_hash": "c380f81cdb368ae0320bf2d70f5765ef",
     "semantic_hash": ""
   },
   "tests/unit/shared/keyed-mutex.test.ts": {
@@ -504,9 +504,9 @@
     "semantic_hash": ""
   },
   "src/modules/calls/room.types.ts": {
-    "mtime": 1794200845.4356935,
-    "seen": 1794201118.3859658,
-    "ast_hash": "aabb4a998379fa17f88649f2e0ac8759",
+    "mtime": 1794263459.3452525,
+    "seen": 1794264158.380154,
+    "ast_hash": "9dd5d9da8cef21c518d3cbfa33022844",
     "semantic_hash": ""
   },
   "tests/integration/database-test-utils.ts": {
@@ -558,15 +558,15 @@
     "semantic_hash": ""
   },
   "src/modules/calls/room.coordinator.ts": {
-    "mtime": 1794193246.8141787,
-    "seen": 1794193654.2070022,
-    "ast_hash": "29420c23af1c8927f537f8bb27721828",
+    "mtime": 1794263958.034562,
+    "seen": 1794264158.380154,
+    "ast_hash": "fad2bf910a6108aaa8c4a1c27bd6eb71",
     "semantic_hash": ""
   },
   "src/modules/calls/room.discord.ts": {
-    "mtime": 1794200845.4356935,
-    "seen": 1794201118.3859658,
-    "ast_hash": "a61cc88dbcac6f847bc671df8813b18f",
+    "mtime": 1794263631.37591,
+    "seen": 1794264158.380154,
+    "ast_hash": "0776628de67c7d4ef43e9cddfc54e9d7",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/call.discord.fixtures.ts": {
@@ -594,9 +594,9 @@
     "semantic_hash": ""
   },
   "src/modules/ownership/ownership.timers.ts": {
-    "mtime": 1794202099.702769,
-    "seen": 1794219711.3534365,
-    "ast_hash": "4b22b62d802db81ebfcdc2b669c978bb",
+    "mtime": 1794263631.37591,
+    "seen": 1794264158.380154,
+    "ast_hash": "95829ab664f8f063b020d4d70b1c3ee2",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.timers.test.ts": {
@@ -606,9 +606,9 @@
     "semantic_hash": ""
   },
   "src/modules/ownership/ownership.service.ts": {
-    "mtime": 1794221765.289987,
-    "seen": 1794221829.3195314,
-    "ast_hash": "f8acf9cda67adddfabf0929b62a9a46a",
+    "mtime": 1794263908.3834107,
+    "seen": 1794264158.380154,
+    "ast_hash": "f5fa1fd0ccbc884e35bfc72efac662a7",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.fixtures.ts": {
@@ -624,9 +624,9 @@
     "semantic_hash": ""
   },
   "src/modules/ownership/transfer.service.ts": {
-    "mtime": 1794202099.702769,
-    "seen": 1794219711.3534365,
-    "ast_hash": "658ab38b3719cd9bfc5dfb50e634a36d",
+    "mtime": 1794263908.3834107,
+    "seen": 1794264158.380154,
+    "ast_hash": "807aae6ef1bfb2cf6e2675bb50b7174a",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/transfer.service.test.ts": {
@@ -636,15 +636,15 @@
     "semantic_hash": ""
   },
   "src/modules/calls/room-access.service.ts": {
-    "mtime": 1794198851.7356167,
-    "seen": 1794198941.703674,
-    "ast_hash": "f76f49ea5ddeefc67309457a94dc17bc",
+    "mtime": 1794264253.6271763,
+    "seen": 1794264336.8173184,
+    "ast_hash": "84d09c36885bb88e44fd537092598341",
     "semantic_hash": ""
   },
   "src/modules/calls/room-controls.service.ts": {
-    "mtime": 1794199340.521438,
-    "seen": 1794199388.1441045,
-    "ast_hash": "f2ca96c51aef5b6d74d405184574346c",
+    "mtime": 1794264253.6271763,
+    "seen": 1794264336.8173184,
+    "ast_hash": "3d508ea91e2b350747f3d44a0ba6619e",
     "semantic_hash": ""
   },
   "src/modules/calls/room-mutation.ts": {
@@ -684,39 +684,39 @@
     "semantic_hash": ""
   },
   "src/modules/calls/room-panel.service.ts": {
-    "mtime": 1794200991.9082232,
-    "seen": 1794201118.3859658,
-    "ast_hash": "67ba424fbeb4211b9961bb76a081845e",
+    "mtime": 1794263490.5727825,
+    "seen": 1794264158.380154,
+    "ast_hash": "3c7383d6865783310756a53ba4c0411a",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-panel.service.test.ts": {
-    "mtime": 1794201082.9533668,
-    "seen": 1794201118.3859658,
-    "ast_hash": "28300abbf7f1b501b54348c2629e1f57",
+    "mtime": 1794263958.0503795,
+    "seen": 1794264158.3861003,
+    "ast_hash": "ae2319fa1bc837e24e28df2e8a8ecdf5",
     "semantic_hash": ""
   },
   "src/modules/calls/call.interactions.ts": {
-    "mtime": 1794219316.2348585,
-    "seen": 1794219711.349691,
-    "ast_hash": "3470f14fc47e6216ee38615d45a5e8a8",
+    "mtime": 1794263958.034562,
+    "seen": 1794264158.3643248,
+    "ast_hash": "67c351c0074a5a4f1b186f9216401db9",
     "semantic_hash": ""
   },
   "src/modules/calls/room.runtime.ts": {
-    "mtime": 1794220728.6540928,
-    "seen": 1794220975.8383746,
-    "ast_hash": "6568c24cbeb921fa869c267cc625a207",
+    "mtime": 1794264253.6271763,
+    "seen": 1794264336.8334043,
+    "ast_hash": "e61cdf2eddcada9bf2d38b7446ddcfbc",
     "semantic_hash": ""
   },
   "tests/unit/application.rooms.test.ts": {
-    "mtime": 1794219499.0956893,
-    "seen": 1794219711.3554392,
-    "ast_hash": "5e42beee51deeffcf28a3afeeaff966e",
+    "mtime": 1794263570.189064,
+    "seen": 1794264158.3850734,
+    "ast_hash": "bc99cb10fda2d5236ead447a0f4183c8",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/call.interactions.test.ts": {
-    "mtime": 1794220572.576016,
-    "seen": 1794220975.8383746,
-    "ast_hash": "0cb571b698fa670c525e23edaac2d145",
+    "mtime": 1794263570.189064,
+    "seen": 1794264158.3861003,
+    "ast_hash": "ba566e03652f0dca59ba00aea2803c2f",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-lifecycle.fixtures.ts": {
@@ -726,21 +726,21 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room.runtime.test.ts": {
-    "mtime": 1794221743.0653102,
-    "seen": 1794221829.335214,
-    "ast_hash": "a575f89db3d8808f7eef323d67e7fcaa",
+    "mtime": 1794264227.1632023,
+    "seen": 1794264336.8334043,
+    "ast_hash": "33969cf3312a5473df7c96ed8683f4f2",
     "semantic_hash": ""
   },
   "docs/releases/v0.3.0.md": {
-    "mtime": 1794222136.3029425,
-    "seen": 1794222161.4979293,
-    "ast_hash": "fd5d214f78278e0d199d4808d2ac054e",
+    "mtime": 1794264316.1771438,
+    "seen": 1794264336.8494728,
+    "ast_hash": "3612af32e49d7c0a4fbcc95ab976dd6e",
     "semantic_hash": ""
   },
   "docs/validation/2026-11-08-v0.3.0-validation.md": {
-    "mtime": 1794222136.2993717,
-    "seen": 1794222161.4979293,
-    "ast_hash": "8634c0cffcbf27740877b14b8ade8a22",
+    "mtime": 1794264429.1899936,
+    "seen": 1794264444.561343,
+    "ast_hash": "0270265dcc258a69ad0ad78f3cb93b32",
     "semantic_hash": ""
   },
   "package-lock.json": {

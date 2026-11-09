@@ -36,7 +36,8 @@ export type RoomActionErrorCode =
   | 'PERSISTENCE_FAILURE' | 'PANEL_MISSING';
 
 export class RoomActionError extends Error {
-  constructor(readonly code: RoomActionErrorCode) {
+  constructor(readonly code: RoomActionErrorCode, readonly reason?:
+    'MANAGE_ROLES' | 'MANAGE_CHANNELS' | 'VIEW_CHANNEL' | 'SEND_MESSAGES' | 'EMBED_LINKS' | 'READ_MESSAGE_HISTORY' | 'OVERWRITE_CAPACITY' | 'INCOMPATIBLE_OVERWRITES') {
     super(code);
     this.name = 'RoomActionError';
   }

@@ -36,7 +36,7 @@ export class RoomPanelService {
       if (room.status !== 'ACTIVE') return;
       const snapshot = await gateway.snapshot(channelDiscordId);
       if (!snapshot || snapshot.guildDiscordId !== room.guildDiscordId || snapshot.channelDiscordId !== channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
-      const payload = buildCallPanel({ room, participantCount: snapshot.members.length });
+      const payload = buildCallPanel({ room, participantCount: snapshot.members.length, observedAt: new Date() });
       if (messageDiscordId !== null) {
         try {
           await gateway.updateControlPanel(channelDiscordId, messageDiscordId, payload);

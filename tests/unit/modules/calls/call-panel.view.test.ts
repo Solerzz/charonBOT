@@ -14,14 +14,21 @@ const room = {
   priorityMemberDiscordId: null, priorityExpiresAt: null,
 };
 
-function json(input: CallPanelInput) {
-  return JSON.parse(JSON.stringify(buildCallPanel(input))) as {
+function json(input: Omit<CallPanelInput, 'observedAt'> & { observedAt?: Date }) {
+  return JSON.parse(JSON.stringify(buildCallPanel({ observedAt: new Date(0), ...input }))) as {
     embeds: APIEmbed[]; components: APIActionRowComponent<APIButtonComponent>[];
     allowedMentions: { parse: string[] }; flags?: unknown;
   };
 }
 
 describe('buildCallPanel', () => {
+  it.each([300_000, 300_001])('shows open claim at observation %s without removing the durable marker', (at) => {
+    const marked = { ...room, ownerDiscordId: null, priorityMemberDiscordId: '42345678901234567', priorityExpiresAt: new Date(300_000) };
+    const payload = json({ room: marked, participantCount: 2, observedAt: new Date(at) } as CallPanelInput);
+    expect(JSON.stringify(payload)).toContain('Qualquer participante elegível');
+    expect(JSON.stringify(payload)).not.toContain('até <t:300:R>');
+    expect(marked.priorityExpiresAt).toEqual(new Date(300_000));
+  });
   it('shows the current owner, occupancy/limit and actual private visibility', () => {
     const payload = json({ room, participantCount: 3 });
     expect(payload.embeds).toHaveLength(1);
@@ -74,7 +81,7 @@ describe('buildCallPanel', () => {
     expectTypeOf<ActionRowBuilder<TextInputBuilder>>().not.toMatchTypeOf<CallPanelRow>();
     expectTypeOf<CallPanelPayload>().toMatchTypeOf<MessageCreateOptions>();
     expectTypeOf<CallPanelPayload>().toMatchTypeOf<MessageEditOptions>();
-    const payload = buildCallPanel({ room, participantCount: 1 });
+    const payload = buildCallPanel({ room, participantCount: 1, observedAt: new Date(0) });
     const create: MessageCreateOptions = payload;
     const edit: MessageEditOptions = payload;
     expect(create).toBe(edit);

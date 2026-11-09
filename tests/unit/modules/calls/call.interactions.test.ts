@@ -1,4 +1,4 @@
-import { MessageFlags, type Interaction } from 'discord.js';
+import { MessageFlags, OverwriteType, PermissionFlagsBits as P, PermissionsBitField, type Interaction } from 'discord.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CallInteractions, type CallInteraction } from '../../../../src/modules/calls/call.interactions.js';
@@ -38,6 +38,25 @@ function fixture() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('CallInteractions real controllers', () => {
+  it.each(['pending', 'permission', 'capacity', 'overwrites', 'rename', 'limit', 'unexpected'] as const)('explains %s failures privately without upstream payloads', async (fault) => {
+    const f = fixture();
+    const i = f.interaction(fault === 'pending' ? 'transfer-target' : fault === 'rename' ? 'rename-save' : fault === 'limit' ? 'limit-save' : 'visibility',
+      fault === 'pending' ? 'user' : ['rename', 'limit'].includes(fault) ? 'modal' : 'button');
+    i.values = [OTHER];
+    if (fault === 'pending') await f.transfers.begin(f.actor(), OTHER, f.gateway);
+    if (fault === 'permission') f.channel.permissionsFor.mockReturnValue(new PermissionsBitField([P.ViewChannel]));
+    if (fault === 'capacity') for (let n = 0; n < 100; n++) f.channel.permissionOverwrites.cache.set(`${BigInt(n) + 80000000000000000n}`, { id: `${BigInt(n) + 80000000000000000n}`, type: OverwriteType.Role, allow: new PermissionsBitField(), deny: new PermissionsBitField(P.Speak) });
+    if (fault === 'overwrites') f.channel.permissionOverwrites.cache.set(OTHER, { id: OTHER, type: OverwriteType.Role, allow: new PermissionsBitField(P.Connect), deny: new PermissionsBitField() });
+    if (fault === 'rename' || fault === 'limit') i.fields.getTextInputValue = () => fault === 'rename' ? 'private-sentinel-invalid-name' : '100';
+    if (fault === 'unexpected') f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('private-sentinel-token-sql'));
+    await f.execute(i);
+    const text = JSON.stringify(i.editReply.mock.calls);
+    const reason = { pending: 'pendente', permission: 'Gerenciar Cargos', capacity: '100', overwrites: 'sobrescritas', rename: '11', limit: '99', unexpected: 'expirou' }[fault];
+    expect(text).toContain(reason); expect(text).not.toContain('private-sentinel');
+    expect(i.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
+    expect(f.state().room.visibility).toBe('PUBLIC');
+    await f.timers.stop();
+  });
   it('opens only a private owner menu and privately rejects nonowners and legacy IDs', async () => {
     const f = fixture();
     const denied = f.interaction('open', 'button', OTHER);
@@ -123,6 +142,7 @@ describe('CallInteractions real controllers', () => {
     const f = fixture(); f.state().room.ownerDiscordId = null;
     Object.assign(f.state().room, { priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
     const reserved = f.interaction('claim'); await f.execute(reserved);
+    expect(JSON.stringify(reserved.editReply.mock.calls)).toContain('prioridade');
     expect(f.state().room.ownerDiscordId).toBeNull();
     const claim = f.interaction('claim', 'button', OTHER); await f.execute(claim);
     expect(f.state().room.ownerDiscordId).toBe(OTHER);
@@ -192,7 +212,8 @@ describe('CallInteractions real controllers', () => {
     release.resolve(); await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(next.editReply).toHaveBeenCalledTimes(2);
-    expect(original.editReply).toHaveBeenCalledTimes(2);
+    expect(original.editReply).toHaveBeenCalledTimes(3);
+    expect(original.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
     await f.timers.stop();
   });
 

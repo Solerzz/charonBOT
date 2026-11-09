@@ -76,7 +76,7 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
     return this.checked(async () => {
       const { channel, bot } = await this.authorized(channelId, [P.ViewChannel, P.ManageRoles]);
       const allowed = new Set(allowedIds.map((id) => discordIdSchema.parse(id)));
-      if (allowed.has(this.guild.roles.everyone.id)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
+      if (allowed.has(this.guild.roles.everyone.id)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'INCOMPATIBLE_OVERWRITES');
       allowed.add(bot.id);
       const previous = this.overwrites(channel);
       const projected = new Map(previous.map((overwrite) => [overwrite.id, overwrite]));
@@ -96,11 +96,11 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
         const administrator = overwrite.type === OverwriteType.Role
           ? (await this.guild.roles.fetch(overwrite.id, { force: true }))?.permissions.has(P.Administrator)
           : (await this.fetchMember(overwrite.id))?.permissions.has(P.Administrator);
-        if (!administrator) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
+        if (!administrator) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'INCOMPATIBLE_OVERWRITES');
       }
       this.project(projected, this.guild.roles.everyone.id, OverwriteType.Role, 0n, accessBits);
       for (const id of allowed) this.project(projected, id, OverwriteType.Member, id === bot.id ? botBits : accessBits, 0n);
-      if (projected.size > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
+      if (projected.size > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'OVERWRITE_CAPACITY');
       await channel.permissionOverwrites.set([...projected.values()]);
     });
   }
@@ -111,7 +111,7 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
       const projected = new Map(this.overwrites(channel).map((overwrite) => [overwrite.id, overwrite]));
       this.project(projected, this.guild.roles.everyone.id, OverwriteType.Role, accessBits, 0n);
       this.project(projected, bot.id, OverwriteType.Member, botBits, 0n);
-      if (projected.size > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
+      if (projected.size > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'OVERWRITE_CAPACITY');
       await channel.permissionOverwrites.set([...projected.values()]);
     });
   }
@@ -128,7 +128,7 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
         allow: new PermissionsBitField(oldBot?.allow).bitfield | botBits,
         deny: new PermissionsBitField(oldBot?.deny).bitfield & ~botBits,
       }];
-      if (restored.length > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
+      if (restored.length > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'OVERWRITE_CAPACITY');
       await channel.permissionOverwrites.set(restored);
     });
   }
@@ -212,7 +212,14 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
 
   private async assertPermissions(channel: VoiceChannel, permissions: bigint[]): Promise<GuildMember> {
     const bot = await this.guild.members.fetchMe({ force: true });
-    if (bot.guild.id !== this.guild.id || !channel.permissionsFor(bot)?.has(permissions)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
+    if (bot.guild.id !== this.guild.id) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
+    const actual = channel.permissionsFor(bot);
+    const named = [[P.ManageRoles, 'MANAGE_ROLES'], [P.ManageChannels, 'MANAGE_CHANNELS'], [P.ViewChannel, 'VIEW_CHANNEL'],
+      [P.SendMessages, 'SEND_MESSAGES'], [P.EmbedLinks, 'EMBED_LINKS'], [P.ReadMessageHistory, 'READ_MESSAGE_HISTORY']] as const;
+    for (const [permission, reason] of named) {
+      if (permissions.includes(permission) && !actual?.has(permission)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', reason);
+    }
+    if (!actual?.has(permissions)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
     return bot;
   }
 

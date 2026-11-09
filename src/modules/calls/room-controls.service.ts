@@ -40,6 +40,7 @@ export class RoomControlsService {
   private async changeSetting(actor: RoomActor, state: RoomState, gateway: RoomDiscordGateway, patch: RoomSettingsPatch, apply: () => Promise<void>, restore: () => Promise<void>): Promise<void> {
     await commitRoomMutation(state, apply, async () => {
       await currentOwnedRoom(this.dependencies.store, actor, gateway, state);
+      this.dependencies.coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);
       if (!await this.dependencies.store.updateSettings(state.room.id, actor.controlVersion, patch)) throw new RoomActionError('STALE_CONTROLS');
     }, restore);
   }
@@ -52,6 +53,7 @@ export class RoomControlsService {
       await coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
         const { state } = await currentOwnedRoom(store, actor, gateway);
         if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
+        coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);
         await work(state);
         // Committed state only; callback failure is not a failed setting CAS.
         await safeRoomAction(() => onChangedLocked(actor.roomId, gateway), 'DISCORD_FAILURE');

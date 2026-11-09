@@ -3,9 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaClient } from '../../../../src/core/database/prisma.js';
 import { createLogger } from '../../../../src/core/logger/logger.js';
 import { createRoomRuntime } from '../../../../src/modules/calls/room.runtime.js';
+import { CallService } from '../../../../src/modules/calls/call.service.js';
+import type { CallDiscordGateway } from '../../../../src/modules/calls/call.discord.js';
+import type { TemporaryRoomRepository } from '../../../../src/modules/calls/call.repository.js';
+import { CallInteractions, type CallInteraction } from '../../../../src/modules/calls/call.interactions.js';
 import { PrismaVoiceCreatorRepository } from '../../../../src/modules/setup/setup.repository.js';
 import { OTHER, OLDEST, OWNER } from '../ownership/ownership.fixtures.js';
-import { creator, deferred } from './call.fixtures.js';
+import { creator, deferred, entry } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 
 function runtimeFixture() {
@@ -47,12 +51,259 @@ function runtimeFixture() {
     await creators.setRoomCommandsEnabled(creator.id, enabled);
     return runtime.synchronizeCreator(creator.id);
   };
-  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild };
+  const handler = new CallInteractions(runtime, () => f.gateway);
+  const interaction = (action: string, kind = 'button') => ({
+    customId: `call:v2:${action}:${f.state().room.id}:${['confirm', 'undo'].includes(action) ? f.state().transfer!.id : f.state().room.controlVersion}`,
+    guild, guildId: guild.id, channelId: f.channel.id, user: { id: OWNER }, values: [OTHER],
+    inGuild: () => true, isButton: () => kind === 'button', isStringSelectMenu: () => false,
+    isUserSelectMenu: () => kind === 'user', isModalSubmit: () => false,
+    deferReply: vi.fn(async () => {}), reply: vi.fn(async (_payload: unknown) => {}),
+    editReply: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
+  });
+  const execute = (input: ReturnType<typeof interaction>) => handler.execute(input as unknown as CallInteraction);
+  const voiceService = new CallService({ findByChannel: async () => null } as never,
+    { findActiveByChannel: async () => structuredClone(f.state().room) } as unknown as TemporaryRoomRepository,
+    runtime, createLogger({ level: 'silent' }));
+  const voice = (member: string, leaving: boolean) => {
+    const gateway = Object.assign(Object.create(f.gateway) as object, {
+      getChannelMemberCount: () => f.states.size,
+      getMemberChannelDiscordId: () => f.states.get(member)?.channelId ?? null,
+    }) as unknown as CallDiscordGateway;
+    return voiceService.handleVoiceTransition({ ...entry, memberDiscordId: member,
+      oldChannelDiscordId: leaving ? f.channel.id : null, newChannelDiscordId: leaving ? null : f.channel.id }, gateway);
+  };
+  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice };
 }
 
 afterEach(() => { vi.useRealTimers(); });
 
 describe('application-owned room runtime', () => {
+  it.each(['name', 'visibility', 'allowed'] as const)('does not commit %s when the owner leaves/returns during its native write', async (setting) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const entered = deferred(); const release = deferred();
+    if (setting === 'name') f.channel.setName.mockImplementationOnce(async (name) => { f.channel.name = name; entered.resolve(); await release.promise; });
+    else {
+      if (setting === 'allowed') { f.state().room.visibility = 'PRIVATE'; await f.observe(); }
+      f.channel.permissionOverwrites.set.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    }
+    const changing = setting === 'name' ? f.runtime.controls.rename(f.actor(), 'New', f.gateway)
+      : setting === 'visibility' ? f.runtime.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway)
+      : f.runtime.controls.setAllowed(f.actor(), OTHER, true, f.gateway);
+    const rejected = expect(changing).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    await entered.promise;
+    f.leave(OWNER); const leaving = f.voice(OWNER, true);
+    f.join(OWNER); const returning = f.voice(OWNER, false);
+    release.resolve(); await rejected; await Promise.all([leaving, returning]);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 1, name: 'Game', visibility: setting === 'allowed' ? 'PRIVATE' : 'PUBLIC' });
+    expect(f.state().allowedMemberIds).toEqual([]); expect(f.channel.name).toBe('Game');
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('uses the online departure instant when priority expiry passes while its room lock is held', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER); f.join(OLDEST); f.state().room.ownerDiscordId = null; await f.observe();
+    const entered = deferred(); const release = deferred();
+    const held = f.runtime.coordinator.room(f.guild.id, f.channel.id, async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    vi.setSystemTime(299_999); f.leave(OLDEST); const leaving = f.voice(OLDEST, true);
+    vi.setSystemTime(300_001); f.join(OLDEST); const returning = f.voice(OLDEST, false);
+    release.resolve(); await Promise.all([held, leaving, returning]);
+    expect(f.state().room).toMatchObject({ priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(600_001) });
+    expect(f.state().presences.find((p) => p.memberDiscordId === OLDEST)?.joinedAt).toEqual(new Date(300_001));
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('keeps exact old/new prompt renderers separate while a terminal edit fails', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    const original = f.interaction('transfer-target', 'user'); await f.execute(original);
+    const oldId = f.state().transfer!.id;
+    const entered = deferred(); const release = deferred();
+    original.editReply.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
+    await vi.advanceTimersByTimeAsync(1_000); await entered.promise;
+    await f.execute(f.interaction('undo'));
+    const next = f.interaction('transfer-target', 'user'); await f.execute(next);
+    expect(f.state().transfer?.id).not.toBe(oldId);
+    expect(f.state().transfer?.expiresAt).toEqual(new Date(6_000));
+    original.editReply.mockRejectedValueOnce(new Error('private-terminal-sentinel'));
+    release.resolve(); await vi.advanceTimersByTimeAsync(1_000);
+    expect(original.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    expect(next.editReply).toHaveBeenCalledTimes(2);
+    await f.runtime.transfers.expire(oldId, f.gateway);
+    expect(f.state().transfer?.expiresAt).toEqual(new Date(6_000));
+    expect(f.state().room.ownerDiscordId).toBe(OWNER);
+    await vi.advanceTimersByTimeAsync(4_001);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: OTHER, controlVersion: 2 });
+    expect(next.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    const edits = original.editReply.mock.calls.length + next.editReply.mock.calls.length;
+    await f.runtime.stop(); await vi.advanceTimersByTimeAsync(600_000);
+    expect(original.editReply.mock.calls.length + next.editReply.mock.calls.length).toBe(edits);
+    await f.database.$disconnect();
+  });
+
+  it('does not let an exclusive candidate claim after leaving and returning during final REST', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER); f.state().room.ownerDiscordId = null; await f.observe();
+    const entered = deferred(); const release = deferred();
+    const snapshot = f.gateway.snapshot.bind(f.gateway);
+    let reads = 0;
+    vi.spyOn(f.gateway, 'snapshot').mockImplementation(async (id) => {
+      const live = await snapshot(id);
+      if (++reads === 2) { entered.resolve(); await release.promise; }
+      return live;
+    });
+    const claiming = f.runtime.ownership.claim(f.actorFor(OTHER), f.gateway);
+    const rejected = expect(claiming).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    await entered.promise;
+    f.leave(OTHER); const leaving = f.voice(OTHER, true);
+    vi.setSystemTime(1_000); f.join(OTHER); const returning = f.voice(OTHER, false);
+    release.resolve(); await rejected; await Promise.all([leaving, returning]);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 0, priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(301_000) });
+    await Promise.allSettled([f.runtime.ownership.claim(f.actorFor(OTHER), f.gateway), f.runtime.ownership.claim(f.actorFor(OTHER), f.gateway)]);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: OTHER, controlVersion: 1 });
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each(['confirm', 'undo', 'setup', 'departure', 'timeout'] as const)('terminally edits the original prompt on %s with the real runtime/handler', async (cause) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    const original = f.interaction('transfer-target', 'user'); await f.execute(original);
+    if (cause === 'confirm' || cause === 'undo') await f.execute(f.interaction(cause));
+    if (cause === 'setup') await f.toggle(false);
+    if (cause === 'departure') { f.leave(OTHER); await f.observe(); }
+    await vi.advanceTimersByTimeAsync(cause === 'timeout' ? 5_001 : 1);
+    expect(original.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    expect(f.state().room.ownerDiscordId).toBe(cause === 'confirm' || cause === 'timeout' ? OTHER : OWNER);
+    const edits = original.editReply.mock.calls.length;
+    await f.runtime.stop(); await vi.advanceTimersByTimeAsync(600_000);
+    expect(original.editReply).toHaveBeenCalledTimes(edits);
+    await f.database.$disconnect();
+  });
+
+  it.each([true, false].flatMap((enabled) => ['enumeration', 'read', 'lock'].map((stage) => ({ enabled, stage }))))('preserves a due setup observation across delayed $stage with initial controls $enabled', async ({ enabled, stage }) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    f.state().controlsEnabled = enabled; f.state().room.visibility = 'PRIVATE'; await f.runtime.start(f.resolveGuild);
+    await vi.advanceTimersByTimeAsync(299_999);
+    const entered = deferred(); const release = deferred();
+    let held: Promise<void> | undefined;
+    if (stage === 'enumeration') vi.mocked(f.runtime.store.listForCreator).mockImplementationOnce(async () => { entered.resolve(); await release.promise; return [structuredClone(f.state().room)]; });
+    if (stage === 'read') {
+      const read = f.runtime.store.read.bind(f.runtime.store);
+      vi.mocked(f.runtime.store.read).mockImplementationOnce(async (id) => { entered.resolve(); await release.promise; return read(id); });
+    }
+    if (stage === 'lock') {
+      held = f.runtime.coordinator.room(f.guild.id, f.channel.id, async () => { entered.resolve(); await release.promise; });
+      await entered.promise;
+    }
+    const toggling = f.toggle(!enabled); await entered.promise;
+    const observations = vi.mocked(f.runtime.store.syncPresence).mock.calls.length;
+    const projections = f.channel.permissionOverwrites.set.mock.calls.length;
+    f.join(OLDEST); await vi.advanceTimersByTimeAsync(2); release.resolve(); await toggling;
+    await held;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().presences.map((p) => p.memberDiscordId).sort()).toEqual([OLDEST, OTHER]);
+    expect(f.projected().some((o) => o.id === OLDEST)).toBe(true);
+    expect(f.state().room).toMatchObject({ priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each((['owner', 'target', 'priority'] as const).flatMap((kind) => ['member', 'room', 'REST'].map((stage) => ({ kind, stage }))))('preserves queued online $kind leave/rejoin boundaries behind $stage', async ({ kind, stage }) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); f.join(OLDEST);
+    if (kind === 'priority') { f.leave(OWNER); f.state().room.ownerDiscordId = null; }
+    await f.observe();
+    if (kind === 'target') {
+      const pending = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
+      await f.runtime.transfers.activate(f.actor(), pending.id, f.gateway);
+    }
+    const member = kind === 'owner' ? OWNER : kind === 'priority' ? OLDEST : OTHER;
+    const entered = deferred(); const release = deferred();
+    let held: Promise<void>;
+    if (stage === 'REST') {
+      f.state().room.visibility = 'PRIVATE';
+      f.channel.permissionOverwrites.set.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+      held = f.observe();
+    } else held = stage === 'member'
+      ? f.runtime.coordinator.member(f.guild.id, member, async () => { entered.resolve(); await release.promise; })
+      : f.runtime.coordinator.room(f.guild.id, f.channel.id, async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    vi.setSystemTime(1_000); f.leave(member);
+    const leaving = f.voice(member, true);
+    vi.setSystemTime(2_000); f.join(member);
+    const returning = f.voice(member, false);
+    release.resolve(); await Promise.all([held, leaving, returning]);
+    if (kind === 'owner') expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 1 });
+    if (kind === 'target') {
+      expect(f.state().transfer).toBeNull();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(f.state().room.ownerDiscordId).toBe(OWNER);
+    }
+    if (kind === 'priority') expect(f.state().room).toMatchObject({ priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(302_000) });
+    expect(f.state().presences.find((p) => p.memberDiscordId === member)?.joinedAt).toEqual(new Date(2_000));
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([OWNER, OTHER].flatMap((member) => ['confirmed', 'lost-reply'].map((reply) => ({ member, reply }))))('does not let an old departure of $member undo an in-flight CAS with $reply', async ({ member, reply }) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const first = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
+    await f.runtime.transfers.activate(f.actor(), first.id, f.gateway);
+    const entered = deferred(); const release = deferred();
+    f.hooks.beforeOwnerChange = async () => { entered.resolve(); await release.promise; };
+    if (reply === 'lost-reply') {
+      const finish = f.store.finishTransfer.getMockImplementation()!;
+      vi.mocked(f.runtime.store.finishTransfer).mockImplementationOnce(async (...args) => { await finish(...args); throw new Error('private-lost-reply'); });
+    }
+    const confirming = f.runtime.transfers.confirm(f.actor(), first.id, f.gateway);
+    const result = reply === 'lost-reply' ? expect(confirming).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' }) : confirming;
+    await entered.promise;
+    f.leave(member); const leaving = f.voice(member, true);
+    f.join(member); const returning = f.voice(member, false);
+    release.resolve(); await Promise.all([result, leaving, returning]);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: OTHER, controlVersion: 1 });
+    await f.runtime.transfers.confirm(f.actor(), first.id, f.gateway);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: OTHER, controlVersion: 1 });
+    if (reply === 'lost-reply') {
+      f.leave(OTHER); const newDeparture = f.voice(OTHER, true);
+      f.join(OTHER); const newReturn = f.voice(OTHER, false);
+      await Promise.all([newDeparture, newReturn]);
+      expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 2 });
+      await f.runtime.stop(); await f.database.$disconnect();
+      return;
+    }
+    const second = await f.runtime.transfers.begin(f.actorFor(OTHER), OWNER, f.gateway);
+    await f.runtime.transfers.confirm(f.actorFor(OTHER), second.id, f.gateway);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: OWNER, controlVersion: 2 });
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([OWNER, OTHER])('rejects confirmation if %s leaves and returns during the final live REST read', async (member) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const pending = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
+    const entered = deferred(); const release = deferred();
+    const snapshot = f.gateway.snapshot.bind(f.gateway);
+    vi.spyOn(f.gateway, 'snapshot').mockImplementationOnce(async (id) => { const live = await snapshot(id); entered.resolve(); await release.promise; return live; });
+    const confirming = f.runtime.transfers.confirm(f.actor(), pending.id, f.gateway);
+    const rejected = expect(confirming).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    await entered.promise;
+    f.leave(member); const leaving = f.voice(member, true);
+    f.join(member); const returning = f.voice(member, false);
+    release.resolve(); await rejected; await Promise.all([leaving, returning]);
+    expect(f.state().room.ownerDiscordId).toBe(member === OWNER ? null : OWNER);
+    expect(f.state().transfer).toBeNull();
+    expect(f.store.finishTransfer).not.toHaveBeenCalled();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
   it('cancels prior-run transfers and invalidates old menus without transferring; resets uncertain chronology', async () => {
     vi.useFakeTimers(); vi.setSystemTime(10_000);
     const f = runtimeFixture(); f.join(OTHER);

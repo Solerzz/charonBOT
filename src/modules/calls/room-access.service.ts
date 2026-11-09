@@ -2,6 +2,7 @@ import type { RoomVisibility } from '../../generated/prisma/client.js';
 import { discordIdSchema } from '../setup/setup.schemas.js';
 import { commitRoomMutation, currentOwnedRoom, safeRoomAction } from './room-mutation.js';
 import type { RoomStateRepository } from './room-state.repository.js';
+import type { RoomCoordinator } from './room.coordinator.js';
 import { RoomActionError, type RoomActor, type RoomDiscordGateway, type RoomSnapshot, type RoomState } from './room.types.js';
 
 const allowedUnion = (state: RoomState, snapshot: RoomSnapshot, allowed = state.allowedMemberIds): string[] =>
@@ -14,7 +15,7 @@ function assertSnapshot(state: RoomState, snapshot: RoomSnapshot | null): assert
 }
 
 export class RoomAccessService {
-  constructor(private readonly store: RoomStateRepository) {}
+  constructor(private readonly store: RoomStateRepository, private readonly coordinator?: RoomCoordinator) {}
 
   async setVisibilityLocked(actor: RoomActor, state: RoomState, visibility: RoomVisibility, gateway: RoomDiscordGateway): Promise<void> {
     if (visibility !== 'PUBLIC' && visibility !== 'PRIVATE') throw new RangeError('Invalid room visibility');
@@ -28,6 +29,7 @@ export class RoomAccessService {
       async () => {
         if (visibility === 'PRIVATE') await this.reconcilePrivate(actor, state, projected, current.state.allowedMemberIds, gateway);
         else await currentOwnedRoom(this.store, actor, gateway, state);
+        this.coordinator?.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
         if (!await this.store.updateSettings(state.room.id, actor.controlVersion, { visibility })) throw new RoomActionError('STALE_CONTROLS');
       },
       () => gateway.restoreAccess(channelId, previous));
@@ -42,6 +44,7 @@ export class RoomAccessService {
     const current = await currentOwnedRoom(this.store, actor, gateway, state);
     const next = [...new Set([...current.state.allowedMemberIds.filter((id) => id !== memberId), ...(allowed ? [memberId] : [])])];
     const commit = async () => {
+      this.coordinator?.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
       if (!await this.store.setAllowed(state.room.id, actor.controlVersion, memberId, allowed)) throw new RoomActionError('STALE_CONTROLS');
     };
     if (previous === null) return safeRoomAction(commit);

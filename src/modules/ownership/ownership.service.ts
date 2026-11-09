@@ -4,7 +4,7 @@ import type { RoomStateRepository } from '../calls/room-state.repository.js';
 import { RoomActionError, type RoomActor, type RoomChanged, type RoomDiscordGateway, type RoomSnapshot, type RoomState } from '../calls/room.types.js';
 import type { OwnershipTimers } from './ownership.timers.js';
 
-type OwnershipDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged };
+type OwnershipDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged; reconcileDeparturesLocked?: (roomId: string) => Promise<void> };
 type PriorityGeneration = Pick<RoomState['room'], 'guildDiscordId' | 'channelDiscordId' | 'controlVersion' | 'priorityMemberDiscordId' | 'priorityExpiresAt'>;
 
 const matchesSnapshot = (state: RoomState | null, snapshot: RoomSnapshot): state is RoomState =>
@@ -34,7 +34,8 @@ export class OwnershipService {
     const owner = state.room.ownerDiscordId;
     if (owner !== null && !snapshot.members.some((member) => member.memberDiscordId === owner && !member.isBot)) {
       const version = state.room.controlVersion;
-      if (!await store.changeOwner(roomId, version, owner, null)) return null;
+      if (!await this.dependencies.coordinator.changeOwnership(state.room.guildDiscordId, state.room.channelDiscordId, version, null,
+        () => store.changeOwner(roomId, version, owner, null))) return null;
       state = await store.read(roomId);
       if (!matchesSnapshot(state, snapshot) || state.room.controlVersion !== version + 1) return null;
     }
@@ -77,6 +78,7 @@ export class OwnershipService {
       const initial = await store.read(actor.roomId);
       if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
       await coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
+        await this.dependencies.reconcileDeparturesLocked?.(actor.roomId);
         const context = await requireActiveRoom(store, actor, gateway);
         if (context.state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         if (await store.findOwnedRoom(actor.guildDiscordId, actor.memberDiscordId)) throw new RoomActionError('ALREADY_OWNS_ROOM');
@@ -91,7 +93,9 @@ export class OwnershipService {
         if (priorityExpiresAt !== null && priorityExpiresAt > new Date() && priorityMemberDiscordId !== actor.memberDiscordId) {
           throw new RoomActionError('PRIORITY_RESERVED');
         }
-        if (!await store.changeOwner(actor.roomId, actor.controlVersion, null, actor.memberDiscordId)) throw new RoomActionError('STALE_CONTROLS');
+        coordinator.assertContinuous(actor.guildDiscordId, initial.room.channelDiscordId, current.presences.map((p) => p.memberDiscordId));
+        if (!await coordinator.changeOwnership(actor.guildDiscordId, initial.room.channelDiscordId, actor.controlVersion, actor.memberDiscordId,
+          () => store.changeOwner(actor.roomId, actor.controlVersion, null, actor.memberDiscordId))) throw new RoomActionError('STALE_CONTROLS');
         timers.cancel(`priority:${actor.roomId}`);
         await onChangedLocked(actor.roomId, gateway);
       });

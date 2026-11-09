@@ -17,6 +17,7 @@ export interface CallPanelInput {
     'id' | 'channelDiscordId' | 'name' | 'ownerDiscordId' | 'userLimit' | 'visibility' |
     'controlVersion' | 'priorityMemberDiscordId' | 'priorityExpiresAt'>;
   participantCount: number;
+  observedAt: Date;
 }
 
 // Exclude create-only flags so the same panel can be sent and edited unchanged.
@@ -38,7 +39,9 @@ export function buildCallPanel(input: CallPanelInput): CallPanelPayload {
       { name: 'Visibilidade', value: room.visibility === 'PRIVATE' ? 'Privada' : 'Pública' },
     );
   if (room.ownerDiscordId === null && room.priorityMemberDiscordId !== null && room.priorityExpiresAt !== null) {
-    embed.addFields({ name: 'Prioridade para assumir', value: `<@${room.priorityMemberDiscordId}> · até <t:${Math.floor(room.priorityExpiresAt.getTime() / 1000)}:R>` });
+    embed.addFields(room.priorityExpiresAt > input.observedAt
+      ? { name: 'Prioridade para assumir', value: `<@${room.priorityMemberDiscordId}> · até <t:${Math.floor(room.priorityExpiresAt.getTime() / 1000)}:R>` }
+      : { name: 'Sala disponível', value: 'Qualquer participante elegível presente pode assumir a sala.' });
   }
   const customId = (action: 'open' | 'claim') => encodeCallComponent({
     version: 'v2', action, roomId: room.id, controlVersion: room.controlVersion,

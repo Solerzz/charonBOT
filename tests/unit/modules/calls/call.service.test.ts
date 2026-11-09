@@ -79,7 +79,7 @@ describe('CallService', () => {
     expect(f.gateway.createTemporaryChannel).not.toHaveBeenCalled();
   });
 
-  it('does not clear ownership on a non-owner departure or a stale departure after owner returns', async () => {
+  it('keeps a non-owner departure harmless but invalidates a same-generation owner departure after return', async () => {
     const f = fixture();
     f.records.set(room.id, room);
     f.counts.set(room.channelDiscordId, 2);
@@ -88,7 +88,7 @@ describe('CallService', () => {
     expect(f.rooms.clearOwner).not.toHaveBeenCalled();
     f.setMemberChannel(room.channelDiscordId);
     await f.handle(departure);
-    expect(f.rooms.clearOwner).not.toHaveBeenCalled();
+    expect(f.records.get(room.id)).toMatchObject({ ownerDiscordId: null, controlVersion: 1 });
   });
 
   it('refreshes both old and new room panels when a participant moves between rooms', async () => {
@@ -167,7 +167,7 @@ describe('CallService', () => {
     expect(f.gateway.moveMember).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, creator.creatorChannelDiscordId);
   });
 
-  it('preserves ownership if the owner returns while closure awaits', async () => {
+  it('does not restore old ownership if the owner returns while closure awaits', async () => {
     const f = fixture();
     f.records.set(room.id, room); f.setMemberChannel(null);
     const beginClosing = f.rooms.beginClosing.getMockImplementation()!;
@@ -177,8 +177,8 @@ describe('CallService', () => {
       return closing;
     });
     await f.handle(departure);
-    expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: entry.memberDiscordId });
-    expect(f.rooms.clearOwner).not.toHaveBeenCalled();
+    expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
+    expect(f.rooms.clearOwner).toHaveBeenCalledOnce();
     expect(f.gateway.deleteChannel).not.toHaveBeenCalled();
   });
 

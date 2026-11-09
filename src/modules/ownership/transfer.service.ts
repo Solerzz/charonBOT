@@ -4,7 +4,7 @@ import type { RoomStateRepository } from '../calls/room-state.repository.js';
 import { RoomActionError, type PendingOwnershipTransfer, type RoomActor, type RoomChanged, type RoomDiscordGateway } from '../calls/room.types.js';
 import type { OwnershipTimers } from './ownership.timers.js';
 
-type TransferDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged };
+type TransferDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged; reconcileDeparturesLocked?: (roomId: string) => Promise<void> };
 
 async function safe<T>(work: () => Promise<T>, code: 'PERSISTENCE_FAILURE' | 'DISCORD_FAILURE' = 'PERSISTENCE_FAILURE'): Promise<T> {
   try { return await work(); } catch (error) {
@@ -13,7 +13,28 @@ async function safe<T>(work: () => Promise<T>, code: 'PERSISTENCE_FAILURE' | 'DI
 }
 
 export class TransferService {
+  private readonly prompts = new Map<string, { id: string; stop: () => void }>();
   constructor(private readonly dependencies: TransferDependencies) {}
+
+  watchPrompt(roomId: string, id: string, stop: () => void): void {
+    this.synchronizePrompt(roomId, null);
+    this.prompts.set(roomId, { id, stop });
+  }
+
+  synchronizePrompt(roomId: string, currentId: string | null): void {
+    const prompt = this.prompts.get(roomId);
+    if (!prompt || prompt.id === currentId) return;
+    this.prompts.delete(roomId);
+    prompt.stop();
+  }
+
+  finishPrompt(roomId: string, operationId: string): void {
+    if (this.prompts.get(roomId)?.id === operationId) this.synchronizePrompt(roomId, null);
+  }
+
+  stopPrompts(): void {
+    for (const roomId of this.prompts.keys()) this.synchronizePrompt(roomId, null);
+  }
 
   begin(actor: RoomActor, targetId: string, gateway: RoomDiscordGateway): Promise<PendingOwnershipTransfer> {
     return safe(async () => {
@@ -22,9 +43,11 @@ export class TransferService {
         const initial = await store.read(actor.roomId);
         if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         return coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
+          await this.dependencies.reconcileDeparturesLocked?.(actor.roomId);
           await this.eligible(actor, targetId, gateway);
           const { state } = await this.liveOwned(actor, targetId, initial.room.channelDiscordId, gateway);
           if (state.transfer) throw new RoomActionError('TRANSFER_PENDING');
+          coordinator.assertContinuous(actor.guildDiscordId, initial.room.channelDiscordId, [actor.memberDiscordId, targetId]);
           return store.createTransfer({ roomId: actor.roomId, ownerDiscordId: actor.memberDiscordId, targetDiscordId: targetId, controlVersion: actor.controlVersion });
         });
       });
@@ -39,6 +62,7 @@ export class TransferService {
         if (transfer.expiresAt !== null) return transfer;
         const expiresAt = new Date(Date.now() + 5_000);
         if (this.dependencies.timers.isStopped) throw new RoomActionError('ROOM_UNAVAILABLE');
+        this.dependencies.coordinator.assertContinuous(actor.guildDiscordId, channelId, [transfer.ownerDiscordId, transfer.targetDiscordId]);
         if (!await this.dependencies.store.armTransfer(transfer.id, transfer.controlVersion, expiresAt)) {
           throw new RoomActionError('STALE_CONTROLS');
         }
@@ -72,6 +96,7 @@ export class TransferService {
         throw error;
       }
       timers.cancel(`transfer:${transfer.roomId}`);
+      this.finishPrompt(transfer.roomId, transfer.id);
     }));
   }
 
@@ -112,6 +137,7 @@ export class TransferService {
     await safe(async () => {
       await this.dependencies.store.invalidateTransfers(roomId);
       this.dependencies.timers.cancel(`transfer:${roomId}`);
+      this.synchronizePrompt(roomId, null);
     });
   }
 
@@ -120,7 +146,9 @@ export class TransferService {
     try {
       await this.validate(actor, transfer, channelId, gateway);
       if (cause === 'confirm' && transfer.expiresAt !== null && transfer.expiresAt <= new Date()) throw new RoomActionError('TRANSFER_EXPIRED');
-      if (!await store.finishTransfer(transfer.id, transfer.controlVersion, new Date(), cause)) {
+      this.dependencies.coordinator.assertContinuous(actor.guildDiscordId, channelId, [transfer.ownerDiscordId, transfer.targetDiscordId]);
+      if (!await this.dependencies.coordinator.changeOwnership(actor.guildDiscordId, channelId, transfer.controlVersion, transfer.targetDiscordId,
+        () => store.finishTransfer(transfer.id, transfer.controlVersion, new Date(), cause))) {
         // Confirmation may cross the deadline during SQL I/O; leave its timeout intact.
         if (cause === 'confirm' && transfer.expiresAt !== null && transfer.expiresAt <= new Date()) throw new RoomActionError('TRANSFER_EXPIRED');
         throw new RoomActionError('STALE_CONTROLS');
@@ -132,6 +160,7 @@ export class TransferService {
       throw error;
     }
     timers.cancel(`transfer:${transfer.roomId}`);
+    this.finishPrompt(transfer.roomId, transfer.id);
     await safe(() => onChangedLocked(transfer.roomId, gateway), 'DISCORD_FAILURE');
   }
 
@@ -163,6 +192,7 @@ export class TransferService {
   private async discardLocked(transfer: PendingOwnershipTransfer): Promise<void> {
     await this.dependencies.store.discardTransfer(transfer.id);
     this.dependencies.timers.cancel(`transfer:${transfer.roomId}`);
+    this.finishPrompt(transfer.roomId, transfer.id);
   }
 
   private async withTransfer<T>(
@@ -180,6 +210,7 @@ export class TransferService {
     }
     return coordinator.member(state.room.guildDiscordId, member === 'owner' ? initial.ownerDiscordId : initial.targetDiscordId, () =>
       coordinator.room(state.room.guildDiscordId, state.room.channelDiscordId, async () => {
+        await this.dependencies.reconcileDeparturesLocked?.(initial.roomId);
         const current = await store.readTransfer(id);
         if (!current) return null;
         return work(current, state.room.channelDiscordId, state.room.guildDiscordId);

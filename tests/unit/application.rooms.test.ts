@@ -214,7 +214,8 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
     expect(JSON.stringify(setup.editReply.mock.calls)).toContain('concluída');
     const edits = transfer.editReply.mock.calls.length;
     await vi.advanceTimersByTimeAsync(6_000);
-    expect(f.record.ownerDiscordId).toBe(OWNER); expect(transfer.editReply.mock.calls.length).toBe(edits);
+    expect(f.record.ownerDiscordId).toBe(OWNER); expect(transfer.editReply.mock.calls.length).toBe(edits + 1);
+    expect(transfer.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
     await f.app.stop('test');
   });
 });
