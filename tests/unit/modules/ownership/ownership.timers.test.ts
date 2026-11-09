@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { OwnershipTimers } from '../../../../src/modules/calls/ownership/ownership.timers.js';
+import { OwnershipTimers } from '../../../../src/modules/ownership/ownership.timers.js';
 import { RoomCoordinator } from '../../../../src/modules/calls/room.coordinator.js';
 import { KeyedMutex } from '../../../../src/shared/keyed-mutex.js';
-import { deferred } from './call.fixtures.js';
+import { deferred } from '../calls/call.fixtures.js';
 
 describe('OwnershipTimers', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(0)); });
