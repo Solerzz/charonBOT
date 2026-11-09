@@ -34,13 +34,14 @@ export function deferred<T = void>() {
   return { promise, resolve };
 }
 export function lifecycleFixture() {
+  const configuration = { ...creator };
   const records = new Map<string, TemporaryRoom>();
   const counts = new Map<string, number>();
   let memberChannel: string | null = creator.creatorChannelDiscordId;
   const creators = {
     listByGuild: vi.fn(), findById: vi.fn(), create: vi.fn(), updateCategory: vi.fn(),
     setRoomCommandsEnabled: vi.fn(), delete: vi.fn(),
-    findByChannel: vi.fn(async (id: string) => id === creator.creatorChannelDiscordId ? creator : null),
+    findByChannel: vi.fn(async (id: string) => id === creator.creatorChannelDiscordId ? configuration : null),
   } satisfies VoiceCreatorRepository;
   const change = (id: string, data: Partial<TemporaryRoom>) => {
     const current = records.get(id);
@@ -75,7 +76,11 @@ export function lifecycleFixture() {
     }),
   } satisfies TemporaryRoomRepository;
   const gateway = {
-    snapshot: vi.fn(async (_id: string) => ({ guildDiscordId: room.guildDiscordId, channelDiscordId: room.channelDiscordId, name: room.name, userLimit: room.userLimit, members: [] })),
+    snapshot: vi.fn(async (id: string) => {
+      const current = [...records.values()].find((r) => r.channelDiscordId === id) ?? room;
+      const members = Array.from({ length: counts.get(id) ?? 0 }, (_, index) => ({ memberDiscordId: index === 0 && memberChannel === id ? entry.memberDiscordId : String(70000000000000000n + BigInt(index)), isBot: false }));
+      return { guildDiscordId: current.guildDiscordId, channelDiscordId: id, name: current.name, userLimit: current.userLimit, members };
+    }),
     resolveMember: vi.fn(async (id: string) => ({ memberDiscordId: id, isBot: false })),
     rename: vi.fn(async (_id: string, _name: string) => {}),
     restoreName: vi.fn(async (_id: string, _previousName: string) => {}),
@@ -93,5 +98,7 @@ export function lifecycleFixture() {
     updateControlPanel: vi.fn(async (_id: string, _message: string, _payload: CallPanelPayload) => {}),
     deleteChannel: vi.fn(async (id: string) => { counts.delete(id); }),
   } satisfies CallDiscordGateway;
-  return { records, counts, creators, rooms, gateway, setMemberChannel: (id: string | null) => { memberChannel = id; } };
+  return { records, counts, creators, rooms, gateway, configuration,
+    setControlsEnabled: (enabled: boolean) => { configuration.roomCommandsEnabled = enabled; },
+    setMemberChannel: (id: string | null) => { memberChannel = id; } };
 }

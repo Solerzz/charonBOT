@@ -1,17 +1,16 @@
 import type { Logger } from 'pino';
 
-import { KeyedMutex } from '../../shared/keyed-mutex.js';
 import type { VoiceCreatorRepository } from '../setup/setup.repository.js';
-import { buildCallPanel } from './call-panel.view.js';
 import { CallDiscordError, CallMoveUnconfirmedError, type CallDiscordGateway } from './call.discord.js';
 import type { TemporaryRoomRecord, TemporaryRoomRepository } from './call.repository.js';
 import { buildInitialRoomName, voiceTransitionSchema, type VoiceTransition } from './call.schemas.js';
+import type { RoomRuntime } from './room.runtime.js';
 
 export class CallService {
   constructor(
     private readonly creators: VoiceCreatorRepository,
     private readonly rooms: TemporaryRoomRepository,
-    private readonly mutex: KeyedMutex,
+    private readonly runtime: RoomRuntime,
     private readonly logger: Logger,
   ) {}
 
@@ -20,7 +19,7 @@ export class CallService {
     if (transition.oldChannelDiscordId === transition.newChannelDiscordId) return;
     // Lock order is always member -> one room. Never hold two room locks and
     // never await a voice-event handler from a Discord move operation.
-    await this.mutex.runExclusive(`${transition.guildDiscordId}:${transition.memberDiscordId}`, async () => {
+    await this.runtime.coordinator.member(transition.guildDiscordId, transition.memberDiscordId, async () => {
       if (transition.oldChannelDiscordId !== null) {
         await this.refreshRoom(transition.oldChannelDiscordId, transition, gateway, true);
       }
@@ -98,19 +97,8 @@ export class CallService {
         if (gateway.getMemberChannelDiscordId() !== channelDiscordId) {
           created = await this.rooms.clearOwner(created.id, transition.memberDiscordId);
         }
-        let messageDiscordId: string | null = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            messageDiscordId = await gateway.sendControlPanel(channelDiscordId, buildCallPanel({
-              room: created, participantCount: gateway.getChannelMemberCount(channelDiscordId),
-            }));
-            break;
-          } catch (error: unknown) {
-            this.logFailure('sendControlPanel', transition, channelDiscordId, error, created.id);
-          }
-        }
         try {
-          await this.rooms.markActive(created.id, messageDiscordId);
+          await this.activateAndRefresh(created, transition, gateway);
         } catch (error: unknown) {
           // The occupied room is NOT compensated: its durable CREATING row is
           // still queryable and blocks duplicate ownership. A later event can
@@ -138,14 +126,10 @@ export class CallService {
 
   private async activateAndRefresh(room: TemporaryRoomRecord, input: VoiceTransition, gateway: CallDiscordGateway): Promise<void> {
     if (room.status === 'CREATING') room = await this.rooms.markActive(room.id, room.controlMessageDiscordId);
-    if (room.controlMessageDiscordId !== null) {
-      try {
-        await gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId, buildCallPanel({
-          room, participantCount: gateway.getChannelMemberCount(room.channelDiscordId),
-        }));
-      } catch (error: unknown) {
-        this.logFailure('updateControlPanel', input, room.channelDiscordId, error, room.id);
-      }
+    try {
+      await this.runtime.observeLocked(room.id, gateway);
+    } catch (error: unknown) {
+      this.logFailure('observeRoom', input, room.channelDiscordId, error, room.id);
     }
   }
 
@@ -164,6 +148,9 @@ export class CallService {
   private async closeIfEmpty(room: TemporaryRoomRecord, input: VoiceTransition, gateway: CallDiscordGateway): Promise<boolean> {
     if (gateway.getChannelMemberCount(room.channelDiscordId) !== 0) return false;
     const closing = await this.rooms.beginClosing(room.id);
+    this.runtime.timers.cancel(`transfer:${room.id}`);
+    this.runtime.timers.cancel(`countdown:${room.id}`);
+    this.runtime.timers.cancel(`priority:${room.id}`);
     if (closing.status === 'CLOSED') return true;
     // beginClosing awaits I/O: a stale zero must not evict newly arrived members.
     if (gateway.getChannelMemberCount(room.channelDiscordId) === 0) {
@@ -187,7 +174,7 @@ export class CallService {
   }
 
   private withRoomLock<T>(channelDiscordId: string, input: VoiceTransition, operation: () => Promise<T>): Promise<T> {
-    return this.mutex.runExclusive(`room:${input.guildDiscordId}:${channelDiscordId}`, operation);
+    return this.runtime.coordinator.room(input.guildDiscordId, channelDiscordId, operation);
   }
 
   private logFailure(operation: string, input: VoiceTransition, channelDiscordId: string, error: unknown, roomId?: string): void {

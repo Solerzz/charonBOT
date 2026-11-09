@@ -48,5 +48,5 @@ export function roomSettingsFixture() {
   const leave = (id: string) => discord.states.delete(id);
   const projected = () => [...discord.channel.permissionOverwrites.cache.values()];
   const synchronize = async () => access.synchronizeLocked(f.state(), (await gateway.snapshot(f.state().room.channelDiscordId))!, gateway);
-  return { ...f, ...discord, store, gateway, access, controls, join, leave, projected, synchronize, actorFor: f.actor, actor: () => f.actor(OWNER) };
+  return { ...f, ...discord, roomStates: f.states, store, gateway, access, controls, join, leave, projected, synchronize, actorFor: f.actor, actor: () => f.actor(OWNER) };
 }

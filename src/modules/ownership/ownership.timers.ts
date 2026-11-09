@@ -7,6 +7,8 @@ export class OwnershipTimers {
 
   constructor(private readonly logger: Pick<Logger, 'error'>) {}
 
+  get isStopped(): boolean { return this.stopped; }
+
   schedule(key: string, deadline: Date, work: () => Promise<void>): void {
     if (this.stopped) throw new Error('Ownership timers stopped');
     this.cancel(key);

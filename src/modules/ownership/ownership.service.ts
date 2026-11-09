@@ -18,17 +18,17 @@ const matchesGeneration = (room: PriorityGeneration, expected: PriorityGeneratio
 export class OwnershipService {
   constructor(private readonly dependencies: OwnershipDependencies) {}
 
-  async observeLocked(roomId: string, snapshot: RoomSnapshot, gateway: RoomDiscordGateway, resetJoinedAt = false): Promise<void> {
-    await this.observeConfirmedLocked(roomId, snapshot, gateway, resetJoinedAt);
+  async observeLocked(roomId: string, snapshot: RoomSnapshot, gateway: RoomDiscordGateway, resetJoinedAt = false, observedAt = new Date()): Promise<void> {
+    await this.observeConfirmedLocked(roomId, snapshot, gateway, resetJoinedAt, undefined, observedAt);
   }
 
   private async observeConfirmedLocked(
-    roomId: string, snapshot: RoomSnapshot, gateway: RoomDiscordGateway, resetJoinedAt: boolean, expected?: PriorityGeneration,
+    roomId: string, snapshot: RoomSnapshot, gateway: RoomDiscordGateway, resetJoinedAt: boolean, expected?: PriorityGeneration, observedAt = new Date(),
   ): Promise<RoomState | null> {
     const { store } = this.dependencies;
     const initial = await store.read(roomId);
     if (!matchesSnapshot(initial, snapshot) || (expected && !matchesGeneration(initial.room, expected))) return null;
-    await store.syncPresence(roomId, snapshot.members, new Date(), resetJoinedAt);
+    await store.syncPresence(roomId, snapshot.members, observedAt, resetJoinedAt);
     let state = await store.read(roomId);
     if (!matchesSnapshot(state, snapshot) || state.room.controlVersion !== initial.room.controlVersion) return null;
     const owner = state.room.ownerDiscordId;
@@ -49,7 +49,10 @@ export class OwnershipService {
     }
     const presentHumans = new Set(snapshot.members.filter((member) => !member.isBot).map((member) => member.memberDiscordId));
     const ordered = [...state.presences].filter((member) => !member.isBot && presentHumans.has(member.memberDiscordId))
-      .sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime() || (a.memberDiscordId < b.memberDiscordId ? -1 : a.memberDiscordId > b.memberDiscordId ? 1 : 0));
+      .sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime()
+        // Equally verifiable joins after restart must not replace a still eligible reservation.
+        || Number(b.memberDiscordId === state.room.priorityMemberDiscordId) - Number(a.memberDiscordId === state.room.priorityMemberDiscordId)
+        || (a.memberDiscordId < b.memberDiscordId ? -1 : a.memberDiscordId > b.memberDiscordId ? 1 : 0));
     let candidate: string | null = null;
     for (const member of ordered) {
       if (!await store.findOwnedRoom(state.room.guildDiscordId, member.memberDiscordId)) {
@@ -100,6 +103,7 @@ export class OwnershipService {
   }
 
   private schedulePriority(state: RoomState, gateway: RoomDiscordGateway): void {
+    if (this.dependencies.timers.isStopped) return;
     const { room } = state;
     const key = `priority:${room.id}`;
     if (room.priorityExpiresAt === null || room.priorityExpiresAt <= new Date()) {
@@ -123,7 +127,7 @@ export class OwnershipService {
       if (!snapshot || !matchesSnapshot(current, snapshot)) return;
       // Carry the generation across Discord I/O; a late snapshot must not clear a later owner.
       const updated = await this.observeConfirmedLocked(roomId, snapshot, gateway, false, current.room);
-      if (updated?.controlsEnabled && updated.room.status === 'ACTIVE') await onChangedLocked(roomId, gateway);
+      if (updated?.room.status === 'ACTIVE') await onChangedLocked(roomId, gateway);
     });
   }
 }

@@ -1,4 +1,4 @@
-import { Events, type Interaction, type VoiceState } from 'discord.js';
+import { Events, type Guild, type Interaction, type VoiceState } from 'discord.js';
 import type { Logger } from 'pino';
 
 import type { AppConfig } from './core/config/env.js';
@@ -14,6 +14,9 @@ import { createLogger } from './core/logger/logger.js';
 import type { PrismaClient } from './generated/prisma/client.js';
 import { PrismaTemporaryRoomRepository } from './modules/calls/call.repository.js';
 import { CallService } from './modules/calls/call.service.js';
+import { CallInteractions } from './modules/calls/call.interactions.js';
+import { createRoomRuntime, type RoomRuntime } from './modules/calls/room.runtime.js';
+import { DiscordRoomGateway } from './modules/calls/room.discord.js';
 import {
   VoiceStateHandler,
   type VoiceStateDispatcher,
@@ -24,9 +27,12 @@ import { SetupInteractions } from './modules/setup/setup.interactions.js';
 import { PrismaVoiceCreatorRepository } from './modules/setup/setup.repository.js';
 import { SetupService } from './modules/setup/setup.service.js';
 import { StatusCommand } from './modules/status/status.command.js';
-import { KeyedMutex } from './shared/keyed-mutex.js';
 
 export interface DiscordClientPort {
+  on(event: typeof Events.ClientReady, listener: () => void): unknown;
+  off(event: typeof Events.ClientReady, listener: () => void): unknown;
+  isReady(): boolean;
+  guilds: { fetch(guildId: string): Promise<Guild> };
   on(
     event: typeof Events.InteractionCreate,
     listener: (interaction: Interaction) => void,
@@ -76,16 +82,22 @@ export function createApplication(
     }
     return database;
   };
+  const runtime = !overrides.dispatcher || !overrides.voiceDispatcher
+    ? createRoomRuntime(runtimeDatabase(), logger) : undefined;
   const dispatcher =
-    overrides.dispatcher ?? createDefaultDispatcher(logger, runtimeDatabase());
+    overrides.dispatcher ?? createDefaultDispatcher(logger, runtimeDatabase(), runtime);
   const voiceDispatcher =
-    overrides.voiceDispatcher ?? createDefaultVoiceDispatcher(logger, runtimeDatabase());
+    overrides.voiceDispatcher ?? createDefaultVoiceDispatcher(logger, runtimeDatabase(), runtime);
   let state: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed' =
     'idle';
   let startPromise: Promise<void> | undefined;
   let stopPromise: Promise<void> | undefined;
   let closePromise: Promise<void> | undefined;
   const inFlight = new Set<Promise<unknown>>();
+  const abort = new AbortController();
+  let settleReadiness!: (admitted: boolean) => void;
+  const readiness = runtime ? new Promise<boolean>((resolve) => { settleReadiness = resolve; }) : Promise.resolve(true);
+  const aborted = new Promise<false>((resolve) => abort.signal.addEventListener('abort', () => resolve(false), { once: true }));
 
   const acceptDispatch = (
     operation: () => Promise<unknown>,
@@ -94,7 +106,7 @@ export function createApplication(
     if (state !== 'starting' && state !== 'running') return;
     // Register synchronously, before the dispatcher gets its first microtask.
     const work = Promise.resolve()
-      .then(operation)
+      .then(async () => { if (await readiness) return operation(); })
       .catch(onFailure)
       .finally(() => { inFlight.delete(work); });
     inFlight.add(work);
@@ -103,7 +115,8 @@ export function createApplication(
   const closeResources = (): Promise<void> => {
     closePromise ??= (async () => {
       // Callers have already closed admission by entering stopping/failed.
-      await Promise.allSettled(inFlight);
+      const timersDrained = runtime?.stop();
+      await Promise.allSettled([...inFlight, timersDrained]);
       discord.destroy();
       await disconnectDatabase(database);
     })();
@@ -163,15 +176,24 @@ export function createApplication(
               },
             );
           });
-          await discord.login(config.discord.token);
+          // Subscribe before login: a synchronous ClientReady must not be lost.
+          const ready = runtime ? waitForDiscordReady(discord, abort.signal) : Promise.resolve(true);
+          const login = discord.login(config.discord.token);
+          if (runtime) {
+            if (!await Promise.race([login.then(() => true), aborted]) || !await ready) return;
+          } else await login;
           if (state !== 'starting') {
             return;
           }
-
+          if (runtime) await runtime.start((id) => discord.guilds.fetch(id));
+          if (state !== 'starting') return;
+          settleReadiness?.(true);
           state = 'running';
           logger.info('Charon started');
         } catch (error) {
           state = 'failed';
+          abort.abort();
+          settleReadiness?.(false);
           try {
             await closeResources();
           } catch (cleanupError) {
@@ -186,6 +208,8 @@ export function createApplication(
             );
           }
           throw error;
+        } finally {
+          if (state !== 'running') settleReadiness?.(false);
         }
       })();
 
@@ -198,9 +222,14 @@ export function createApplication(
       }
 
       state = 'stopping';
+      abort.abort();
+      settleReadiness?.(false);
+      // Close timer admission now, not after startup or dispatches release locks.
+      const timersDrained = runtime?.stop();
       stopPromise = (async () => {
         logger.info({ signal }, 'Charon stopping');
         await startPromise?.catch(() => undefined);
+        await timersDrained;
         await closeResources();
         state = 'stopped';
         logger.info('Charon stopped');
@@ -209,6 +238,22 @@ export function createApplication(
       return stopPromise;
     },
   };
+}
+
+function waitForDiscordReady(discord: DiscordClientPort, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    const finish = (ready: boolean) => {
+      discord.off(Events.ClientReady, onReady);
+      signal.removeEventListener('abort', onAbort);
+      resolve(ready);
+    };
+    const onReady = () => finish(true);
+    const onAbort = () => finish(false);
+    discord.on(Events.ClientReady, onReady);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) finish(false);
+    else if (discord.isReady()) finish(true);
+  });
 }
 
 function hasRuntimeRepositories(database: DatabaseClient): database is PrismaClient {
@@ -234,8 +279,9 @@ export function registerShutdownSignals(
 export function createDefaultDispatcher(
   logger: Logger,
   database: PrismaClient,
+  runtime: RoomRuntime = createRoomRuntime(database, logger),
 ): InteractionRegistry {
-  const setupService = new SetupService(new PrismaVoiceCreatorRepository(database));
+  const setupService = new SetupService(new PrismaVoiceCreatorRepository(database), (id) => runtime.synchronizeCreator(id), logger);
   const registry = new InteractionRegistry(logger);
   registry.register(new StatusCommand());
   registry.register(new SetupCommand(setupService));
@@ -245,18 +291,20 @@ export function createDefaultDispatcher(
       (interaction) => new DiscordSetupGateway(interaction.guild),
     ),
   );
+  registry.register(new CallInteractions(runtime, (guild) => new DiscordRoomGateway(guild)));
   return registry;
 }
 
 export function createDefaultVoiceDispatcher(
   logger: Logger,
   database: PrismaClient,
+  runtime: RoomRuntime = createRoomRuntime(database, logger),
 ): VoiceStateHandler {
-  // One service/mutex per application dispatcher, never per event or member.
+  // The application supplies the same runtime to both dispatchers.
   const service = new CallService(
     new PrismaVoiceCreatorRepository(database),
     new PrismaTemporaryRoomRepository(database),
-    new KeyedMutex(),
+    runtime,
     logger,
   );
   return new VoiceStateHandler(service, logger);

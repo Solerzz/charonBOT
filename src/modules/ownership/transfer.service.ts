@@ -34,9 +34,11 @@ export class TransferService {
   activate(actor: RoomActor, transferId: string, gateway: RoomDiscordGateway): Promise<PendingOwnershipTransfer | null> {
     return safe(() => this.withTransfer(transferId, 'owner', actor, async (transfer, channelId) => {
       try {
+        if (this.dependencies.timers.isStopped) throw new RoomActionError('ROOM_UNAVAILABLE');
         await this.validate(actor, transfer, channelId, gateway);
         if (transfer.expiresAt !== null) return transfer;
         const expiresAt = new Date(Date.now() + 5_000);
+        if (this.dependencies.timers.isStopped) throw new RoomActionError('ROOM_UNAVAILABLE');
         if (!await this.dependencies.store.armTransfer(transfer.id, transfer.controlVersion, expiresAt)) {
           throw new RoomActionError('STALE_CONTROLS');
         }
@@ -89,6 +91,7 @@ export class TransferService {
   }
 
   private scheduleExpiryRecovery(transferId: string): void {
+    if (this.dependencies.timers.isStopped) return;
     // An uncertain expiry is cancelled, never replayed as a reported transfer.
     // A per-operation key cannot replace a newer room timer. stop() closes admission.
     this.dependencies.timers.schedule(`transfer-recovery:${transferId}`, new Date(Date.now() + 1_000), () => this.recoverExpiry(transferId));

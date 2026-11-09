@@ -16,6 +16,9 @@ import { PrismaVoiceCreatorRepository } from '../../src/modules/setup/setup.repo
 import { createLogger } from '../../src/core/logger/logger.js';
 import { RoomPanelService } from '../../src/modules/calls/room-panel.service.js';
 import { DiscordRoomGateway } from '../../src/modules/calls/room.discord.js';
+import { createRoomRuntime } from '../../src/modules/calls/room.runtime.js';
+import { CallInteractions, type CallInteraction } from '../../src/modules/calls/call.interactions.js';
+import { SetupService } from '../../src/modules/setup/setup.service.js';
 import type { Guild } from 'discord.js';
 import { discordFixture } from '../unit/modules/calls/call.discord.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
@@ -528,5 +531,64 @@ describe('room ownership database', () => {
       await r.access.synchronizeLocked(state, (await r.gateway.snapshot(r.channel.id))!, r.gateway);
       expect((await f.store.read(f.first))?.room.visibility).toBe('PRIVATE');
     } finally { await f.cleanup(); }
+  });
+
+  integrationTest('composed startup cancels prior transfers, invalidates old menus and reobserves SQL presence without changing a present owner', async () => {
+    const f = await fixture(); const d = discordFixture();
+    const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));
+    try {
+      await f.client.temporaryRoom.updateMany({ where: { id: { in: [f.second, f.otherGuild] } }, data: { status: 'CLOSED' } });
+      await f.client.temporaryRoom.update({ where: { id: f.first }, data: {
+        guildDiscordId: d.guild.id, channelDiscordId: d.channel.id, ownerDiscordId: d.member.id,
+      } });
+      d.states.set(d.member.id, { channelId: d.channel.id });
+      await f.store.syncPresence(f.first, [{ memberDiscordId: d.member.id, isBot: false }], new Date(0), false);
+      const old = await f.store.createTransfer({ roomId: f.first, ownerDiscordId: d.member.id, targetDiscordId: '72345678901234567', controlVersion: 0 });
+      await f.store.armTransfer(old.id, 0, new Date(0));
+      const before = Date.now();
+      await runtime.start(async () => d.guild as unknown as Guild);
+      const state = (await runtime.store.read(f.first))!;
+      expect(state).toMatchObject({ transfer: null, room: { ownerDiscordId: d.member.id, controlVersion: 1, status: 'ACTIVE', controlMessageDiscordId: d.message.id } });
+      expect(state.presences).toHaveLength(1);
+      expect(state.presences[0]!.joinedAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(await f.store.finishTransfer(old.id, 0, new Date(), 'timeout')).toBe(false);
+      const gateway = new DiscordRoomGateway(d.guild as unknown as Guild);
+      await expect(runtime.controls.rename({ roomId: f.first, guildDiscordId: d.guild.id, memberDiscordId: d.member.id, controlVersion: 0 }, 'Stale', gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+      expect((await f.store.read(f.first))?.room.name).toBe('Room');
+    } finally { await runtime.stop(); await f.cleanup(); }
+  });
+
+  integrationTest('SQL off/on cancels a published-late exact operation; the real handler never arms an invisible timeout', async () => {
+    const f = await fixture(); const d = discordFixture(); const target = '72345678901234567';
+    const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));
+    try {
+      await f.client.temporaryRoom.updateMany({ where: { id: { in: [f.second, f.otherGuild] } }, data: { status: 'CLOSED' } });
+      await f.client.temporaryRoom.update({ where: { id: f.first }, data: { guildDiscordId: d.guild.id, channelDiscordId: d.channel.id, ownerDiscordId: d.member.id } });
+      d.states.set(d.member.id, { channelId: d.channel.id }); d.states.set(target, { channelId: d.channel.id });
+      await runtime.start(async () => d.guild as unknown as Guild);
+      const setup = new SetupService(new PrismaVoiceCreatorRepository(f.client), (id) => runtime.synchronizeCreator(id), createLogger({ level: 'silent' }));
+      const handler = new CallInteractions(runtime, (guild) => new DiscordRoomGateway(guild));
+      const responses: unknown[] = [];
+      let publication = true;
+      const interaction = {
+        customId: `call:v2:transfer-target:${f.first}:1`, guild: d.guild, guildId: d.guild.id, channelId: d.channel.id,
+        user: { id: d.member.id }, values: [target], inGuild: () => true,
+        isButton: () => false, isUserSelectMenu: () => true, isStringSelectMenu: () => false, isModalSubmit: () => false,
+        deferReply: async () => {}, editReply: async (payload: unknown) => {
+          responses.push(payload);
+          if (publication) {
+            publication = false;
+            expect((await runtime.store.read(f.first))?.transfer?.expiresAt).toBeNull();
+            expect((await setup.toggleRoomCommands(f.creatorId)).synchronization).toEqual({ synced: 1, failed: 0 });
+            expect((await setup.toggleRoomCommands(f.creatorId)).synchronization).toEqual({ synced: 1, failed: 0 });
+          }
+          return { id: '82345678901234567' };
+        },
+      } as unknown as CallInteraction;
+      await handler.execute(interaction);
+      expect(await runtime.store.read(f.first)).toMatchObject({ controlsEnabled: true, transfer: null, room: { ownerDiscordId: d.member.id, controlVersion: 3 } });
+      expect(JSON.stringify(responses.at(-1))).toContain('expirou');
+      expect(d.message.delete).toHaveBeenCalledOnce();
+    } finally { await runtime.stop(); await f.cleanup(); }
   });
 });

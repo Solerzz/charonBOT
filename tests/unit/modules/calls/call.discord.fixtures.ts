@@ -9,6 +9,7 @@ export function discordFixture() {
   const message = { id: room.controlMessageDiscordId!, edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
   const channel = {
     id: room.channelDiscordId, guildId: creator.guildDiscordId, type: ChannelType.GuildVoice, name: 'Game', userLimit: 0,
+    isThread: () => false,
     permissionsFor: vi.fn(() => rights), delete: vi.fn(async () => {}),
     send: vi.fn(async () => message), messages: { fetch: vi.fn(async () => message) },
     setName: vi.fn(async (_name: string) => {}), setUserLimit: vi.fn(async (_limit: number) => {}),

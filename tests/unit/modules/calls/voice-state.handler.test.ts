@@ -1,19 +1,21 @@
 import { Writable } from 'node:stream';
 import { ActivityType, Collection, type VoiceState } from 'discord.js';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLogger } from '../../../../src/core/logger/logger.js';
 import { DiscordCallGateway } from '../../../../src/modules/calls/call.discord.js';
 import { CallService } from '../../../../src/modules/calls/call.service.js';
 import { VoiceStateHandler } from '../../../../src/modules/calls/voice-state.handler.js';
-import { KeyedMutex } from '../../../../src/shared/keyed-mutex.js';
 import { lifecycleFixture } from './call.fixtures.js';
+import { attachRoomRuntime, stopRoomFixtures } from './room-lifecycle.fixtures.js';
+
+afterEach(stopRoomFixtures);
 
 function fixture() {
   const lines: string[] = [];
   const logger = createLogger({ level: 'error', destination: new Writable({ write(chunk, _encoding, done) { lines.push(chunk.toString()); done(); } }) });
   const ports = lifecycleFixture();
-  const service = new CallService(ports.creators, ports.rooms, new KeyedMutex(), logger);
+  const service = new CallService(ports.creators, ports.rooms, attachRoomRuntime(ports, logger), logger);
   const handle = vi.spyOn(service, 'handleVoiceTransition').mockResolvedValue(undefined);
   const guild = { id: '12345678901234567', voiceStates: { cache: new Collection<string, VoiceState>() } };
   const member = { id: '52345678901234567', guild, user: { bot: true }, displayName: 'Private display name', presence: { activities: [{ name: 'Private game', type: ActivityType.Playing }] } };

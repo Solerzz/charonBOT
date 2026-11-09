@@ -1,19 +1,21 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLogger } from '../../../../src/core/logger/logger.js';
 import type { CallPanelPayload } from '../../../../src/modules/calls/call-panel.view.js';
 import { CallDiscordError, CallMoveUnconfirmedError } from '../../../../src/modules/calls/call.discord.js';
 import { CallService } from '../../../../src/modules/calls/call.service.js';
-import { KeyedMutex } from '../../../../src/shared/keyed-mutex.js';
 import { creator, deferred, entry, lifecycleFixture, room } from './call.fixtures.js';
+import { attachRoomRuntime, stopRoomFixtures } from './room-lifecycle.fixtures.js';
+
+afterEach(stopRoomFixtures);
 
 function fixture() {
   const f = lifecycleFixture();
   const logs: string[] = [];
   const logger = createLogger({ level: 'debug', destination: { write: (value: string) => { logs.push(value); } } });
-  const mutex = new KeyedMutex();
-  const service = new CallService(f.creators, f.rooms, mutex, logger);
-  return { ...f, logs, mutex, service, handle: (input = entry) => service.handleVoiceTransition(input, f.gateway) };
+  const runtime = attachRoomRuntime(f, logger);
+  const service = new CallService(f.creators, f.rooms, runtime, logger);
+  return { ...f, logs, runtime, service, handle: (input = entry) => service.handleVoiceTransition(input, f.gateway) };
 }
 function fields(payload: CallPanelPayload) {
   return JSON.parse(JSON.stringify(payload)).embeds[0].fields as { name: string; value: string }[];
@@ -21,6 +23,16 @@ function fields(payload: CallPanelPayload) {
 const departure = { ...entry, oldChannelDiscordId: room.channelDiscordId, newChannelDiscordId: null, oldChannelMemberCount: 0 };
 
 describe('CallService', () => {
+  it('creates and closes disabled-creator rooms without ever publishing a panel', async () => {
+    const f = fixture(); f.setControlsEnabled(false);
+    await f.handle();
+    expect(f.records.get(room.id)?.status).toBe('ACTIVE');
+    expect(f.gateway.sendControlPanel).not.toHaveBeenCalled();
+    expect((await f.runtime.store.read(room.id))?.presences).toHaveLength(1);
+    f.counts.set(room.channelDiscordId, 0); f.setMemberChannel(null);
+    await f.handle(departure);
+    expect(f.records.get(room.id)?.status).toBe('CLOSED');
+  });
   it('creates, persists, moves and sends a real panel, then activates with the message ID', async () => {
     const f = fixture();
     await f.handle();
@@ -71,6 +83,7 @@ describe('CallService', () => {
     const f = fixture();
     f.records.set(room.id, room);
     f.counts.set(room.channelDiscordId, 2);
+    f.setMemberChannel(room.channelDiscordId);
     await f.handle({ ...departure, memberDiscordId: '72345678901234567' });
     expect(f.rooms.clearOwner).not.toHaveBeenCalled();
     f.setMemberChannel(room.channelDiscordId);
@@ -135,7 +148,7 @@ describe('CallService', () => {
     expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
     expect(f.rooms.clearOwner).toHaveBeenCalledExactlyOnceWith(room.id, entry.memberDiscordId);
     expect(f.rooms.markClosed).not.toHaveBeenCalled();
-    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Proprietário', value: 'Sem proprietário' });
+    expect(f.gateway.updateControlPanel).not.toHaveBeenCalled(); // CLOSING handles are not interactive panels.
   });
 
   it('does not redirect a former owner after deletion fails and another member later joins', async () => {
@@ -275,11 +288,11 @@ describe('CallService', () => {
       await finishPersist.promise;
       return record;
     });
-    const run = f.mutex.runExclusive.bind(f.mutex);
+    const run = f.runtime.coordinator.room.bind(f.runtime.coordinator);
     let observeCompeting = false;
-    vi.spyOn(f.mutex, 'runExclusive').mockImplementation((key, operation) => {
-      if (observeCompeting && key === `room:${entry.guildDiscordId}:${room.channelDiscordId}`) competingLock.resolve();
-      return run(key, operation);
+    vi.spyOn(f.runtime.coordinator, 'room').mockImplementation((guild, channel, operation) => {
+      if (observeCompeting && guild === entry.guildDiscordId && channel === room.channelDiscordId) competingLock.resolve();
+      return run(guild, channel, operation);
     });
     const creating = f.handle();
     await persisted.promise;
