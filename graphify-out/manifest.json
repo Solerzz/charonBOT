@@ -498,9 +498,9 @@
     "semantic_hash": ""
   },
   "src/modules/calls/room-state.repository.ts": {
-    "mtime": 1794192094.3144858,
-    "seen": 1794192269.0415382,
-    "ast_hash": "ec1398a9cd8437aad93692563b918ba4",
+    "mtime": 1794194530.1094062,
+    "seen": 1794194792.482093,
+    "ast_hash": "652b6be4c8d854dc0ef5a5b53e201763",
     "semantic_hash": ""
   },
   "src/modules/calls/room.types.ts": {
@@ -516,9 +516,9 @@
     "semantic_hash": ""
   },
   "tests/integration/ownership-database.test.ts": {
-    "mtime": 1794192198.8278334,
-    "seen": 1794192269.0415382,
-    "ast_hash": "904c31db008d71ee8585cc1fde049edf",
+    "mtime": 1794194442.0641098,
+    "seen": 1794194792.4861107,
+    "ast_hash": "aeda65e8c7a2a8d1d8299fdab7ab81c3",
     "semantic_hash": ""
   },
   "tests/integration/prepare-database.ts": {
@@ -534,9 +534,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-state.repository.test.ts": {
-    "mtime": 1794192094.3144858,
-    "seen": 1794192269.0415382,
-    "ast_hash": "a6a528fd2b3976f89d55d41ce0b73e3d",
+    "mtime": 1794194442.0641098,
+    "seen": 1794194792.4861107,
+    "ast_hash": "306b50ada9c5b1a5ec1712d003afb209",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-08-charon-v0.3.0-posse-controles.md": {
@@ -603,6 +603,24 @@
     "mtime": 1794193892.792373,
     "seen": 1794193907.0552237,
     "ast_hash": "6f29f4cfac85241b988a12c94668369b",
+    "semantic_hash": ""
+  },
+  "src/modules/ownership/ownership.service.ts": {
+    "mtime": 1794194707.0809736,
+    "seen": 1794194792.482093,
+    "ast_hash": "3b2c2412437d53e67eac5e493862107b",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/ownership/ownership.fixtures.ts": {
+    "mtime": 1794194597.0158799,
+    "seen": 1794194792.4861107,
+    "ast_hash": "8aa04114e463880976da9269b8e01901",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/ownership/ownership.service.test.ts": {
+    "mtime": 1794194765.9993818,
+    "seen": 1794194792.4861107,
+    "ast_hash": "e1695029379fcdc5529fa636334fc4e5",
     "semantic_hash": ""
   },
   "package-lock.json": {

@@ -152,7 +152,7 @@ describe('PrismaRoomStateRepository', () => {
   it('saves priority/settings/panel using conditional version/status/configuration filters', async () => {
     const f = fixture();
     await expect(f.store.savePriority(room.id, 0, 'next', new Date(300000))).resolves.toBe(true);
-    expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({ where: { id: room.id, controlVersion: 0, status: 'ACTIVE', ownerDiscordId: null, voiceCreator: { roomCommandsEnabled: true } }, data: { priorityMemberDiscordId: 'next', priorityExpiresAt: new Date(300000) } });
+    expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({ where: { id: room.id, controlVersion: 0, status: 'ACTIVE', ownerDiscordId: null }, data: { priorityMemberDiscordId: 'next', priorityExpiresAt: new Date(300000) } });
     await expect(f.store.updateSettings(room.id, 0, { name: 'New' })).resolves.toBe(true);
     expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({ where: { id: room.id, controlVersion: 0, status: 'ACTIVE', voiceCreator: { roomCommandsEnabled: true } }, data: { name: 'New' } });
     await expect(f.store.setPanelId(room.id, 0, null, 'message')).resolves.toBe(true);

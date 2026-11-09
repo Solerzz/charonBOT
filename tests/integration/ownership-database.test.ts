@@ -89,6 +89,36 @@ describe('room ownership database', () => {
     } finally { await f.cleanup(); }
   });
 
+  integrationTest('priority persists with controls disabled while stale, owned and inactive writes remain blocked', async () => {
+    const f = await fixture();
+    try {
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      expect(await f.store.savePriority(f.second, 0, 'candidate', new Date(300000))).toBe(true);
+      expect((await f.store.read(f.second))?.room).toMatchObject({ priorityMemberDiscordId: 'candidate', priorityExpiresAt: new Date(300000) });
+      expect(await f.store.changeOwner(f.second, 0, null, 'candidate')).toBe(false);
+      expect(await f.store.savePriority(f.second, 1, 'stale', new Date(600000))).toBe(false);
+      expect(await f.store.savePriority(f.first, 0, 'owned', new Date(600000))).toBe(false);
+      for (const status of ['CREATING', 'CLOSING', 'CLOSED'] as const) {
+        await f.client.temporaryRoom.update({ where: { id: f.second }, data: { status } });
+        expect(await f.store.savePriority(f.second, 0, 'inactive', new Date(600000))).toBe(false);
+      }
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('owner acquisition races across same-guild rooms have one winner and clearing releases the old slot', async () => {
+    const f = await fixture();
+    try {
+      expect(await f.store.changeOwner(f.first, 0, OWNER, null)).toBe(true);
+      const results = await Promise.allSettled([f.store.changeOwner(f.first, 1, null, OWNER), f.store.changeOwner(f.second, 0, null, OWNER)]);
+      expect(results.filter((r) => r.status === 'fulfilled' && r.value)).toHaveLength(1);
+      expect(results.filter((r) => r.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ code: 'ALREADY_OWNS_ROOM' }) })]);
+      const winner = (await f.store.findOwnedRoom(f.guild, OWNER))!;
+      expect(await f.store.changeOwner(winner.id, winner.controlVersion, OWNER, 'replacement')).toBe(true);
+      const loserId = winner.id === f.first ? f.second : f.first;
+      expect(await f.store.changeOwner(loserId, loserId === f.first ? 1 : 0, null, OWNER)).toBe(true);
+    } finally { await f.cleanup(); }
+  });
+
   integrationTest('presence continuity, restart reset, room uniqueness and hard-delete cascades', async () => {
     const f = await fixture();
     try {
