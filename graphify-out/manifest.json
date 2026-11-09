@@ -606,9 +606,9 @@
     "semantic_hash": ""
   },
   "src/modules/ownership/ownership.service.ts": {
-    "mtime": 1794194707.0809736,
-    "seen": 1794194792.482093,
-    "ast_hash": "3b2c2412437d53e67eac5e493862107b",
+    "mtime": 1794195320.6199958,
+    "seen": 1794195330.286586,
+    "ast_hash": "96d4af85c3a8744dd29315ca8d899bed",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.fixtures.ts": {
@@ -618,9 +618,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.service.test.ts": {
-    "mtime": 1794194765.9993818,
-    "seen": 1794194792.4861107,
-    "ast_hash": "e1695029379fcdc5529fa636334fc4e5",
+    "mtime": 1794195300.778159,
+    "seen": 1794195330.2984314,
+    "ast_hash": "d2f166585f656b471a052878a8094c5c",
     "semantic_hash": ""
   },
   "package-lock.json": {

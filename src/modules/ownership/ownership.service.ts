@@ -77,12 +77,13 @@ export class OwnershipService {
         const context = await requireActiveRoom(store, actor, gateway);
         if (context.state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         if (await store.findOwnedRoom(actor.guildDiscordId, actor.memberDiscordId)) throw new RoomActionError('ALREADY_OWNS_ROOM');
-        // Eligibility checks can await I/O: confirm authorization and live presence again at the mutation boundary.
-        const { state, snapshot } = await requireActiveRoom(store, actor, gateway);
-        if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
-        if (state.room.ownerDiscordId !== null) throw new RoomActionError('ROOM_UNAVAILABLE');
-        const current = await this.observeConfirmedLocked(actor.roomId, snapshot, gateway, false, state.room);
-        if (!current || current.room.controlVersion !== actor.controlVersion) throw new RoomActionError('STALE_CONTROLS');
+        if (context.state.room.ownerDiscordId !== null) throw new RoomActionError('ROOM_UNAVAILABLE');
+        const observed = await this.observeConfirmedLocked(actor.roomId, context.snapshot, gateway, false, context.state.room);
+        if (!observed || observed.room.controlVersion !== actor.controlVersion) throw new RoomActionError('STALE_CONTROLS');
+        // Finish reconciliation/eligibility I/O before the final live check; only the ownership CAS follows it.
+        const { state: current } = await requireActiveRoom(store, actor, gateway);
+        if (current.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
+        if (current.room.ownerDiscordId !== null) throw new RoomActionError('ROOM_UNAVAILABLE');
         const { priorityMemberDiscordId, priorityExpiresAt } = current.room;
         if (priorityExpiresAt !== null && priorityExpiresAt > new Date() && priorityMemberDiscordId !== actor.memberDiscordId) {
           throw new RoomActionError('PRIORITY_RESERVED');

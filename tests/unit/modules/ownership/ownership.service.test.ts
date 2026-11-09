@@ -194,6 +194,26 @@ describe('OwnershipService', () => {
     expect(f.state().room.ownerDiscordId).toBeNull();
   });
 
+  it.each(['syncPresence', 'candidate eligibility'] as const)('rejects a claimant departing during post-snapshot %s work', async (boundary) => {
+    const f = fixture(); await f.observe();
+    const depart = () => { f.live.snapshot!.members = [human(OTHER)]; };
+    if (boundary === 'syncPresence') {
+      const sync = f.store.syncPresence.getMockImplementation()!;
+      f.store.syncPresence.mockImplementationOnce(async (...args) => { await sync(...args); depart(); });
+    } else {
+      const findOwned = f.store.findOwnedRoom.getMockImplementation()!;
+      let lookups = 0;
+      f.store.findOwnedRoom.mockImplementation(async (...args) => {
+        const owned = await findOwned(...args);
+        if (++lookups === 2) depart();
+        return owned;
+      });
+    }
+    await expect(f.service.claim(f.actor(OLDEST), f.gateway)).rejects.toMatchObject({ code: 'NOT_PRESENT' });
+    expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 0 });
+    expect(f.refreshes).toEqual([]);
+  });
+
   it('a queued expired callback cannot refresh or mutate a later version of the room', async () => {
     const f = fixture(); await f.observe(); const gate = deferred(); const started = deferred();
     const held = f.coordinator.room(f.state().room.guildDiscordId, f.state().room.channelDiscordId, async () => { started.resolve(); await gate.promise; });
