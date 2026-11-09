@@ -1,3 +1,4 @@
+import type { OverwriteData } from 'discord.js';
 import { vi } from 'vitest';
 
 import type { TemporaryRoom, VoiceCreator } from '../../../../src/generated/prisma/client.js';
@@ -74,6 +75,15 @@ export function lifecycleFixture() {
     }),
   } satisfies TemporaryRoomRepository;
   const gateway = {
+    snapshot: vi.fn(async (_id: string) => ({ guildDiscordId: room.guildDiscordId, channelDiscordId: room.channelDiscordId, name: room.name, userLimit: room.userLimit, members: [] })),
+    resolveMember: vi.fn(async (id: string) => ({ memberDiscordId: id, isBot: false })),
+    rename: vi.fn(async (_id: string, _name: string) => {}),
+    setLimit: vi.fn(async (_id: string, _limit: number) => {}),
+    readAccess: vi.fn(async (_id: string) => []),
+    setPrivateAccess: vi.fn(async (_id: string, _allowed: string[]) => {}),
+    setPublicAccess: vi.fn(async (_id: string) => {}),
+    restoreAccess: vi.fn(async (_id: string, _previous: OverwriteData[]) => {}),
+    deleteControlPanel: vi.fn(async (_id: string, _message: string) => {}),
     createTemporaryChannel: vi.fn(async () => ({ channelDiscordId: room.channelDiscordId })),
     getMemberChannelDiscordId: vi.fn(() => memberChannel),
     getChannelMemberCount: vi.fn((id: string) => counts.get(id) ?? 0),
