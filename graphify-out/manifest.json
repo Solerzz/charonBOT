@@ -210,9 +210,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794220827.6597278,
-    "seen": 1794220975.8541348,
-    "ast_hash": "be9cbc22e56b9ccc14f5ac5d6586e620",
+    "mtime": 1794222136.301379,
+    "seen": 1794222161.4979293,
+    "ast_hash": "936fa290375da63c4f5540d1bff284ba",
     "semantic_hash": ""
   },
   "README.md": {
@@ -222,9 +222,9 @@
     "semantic_hash": ""
   },
   "docs/architecture.md": {
-    "mtime": 1794220885.6734164,
-    "seen": 1794220975.8541348,
-    "ast_hash": "5a92118baf60880df1f9c6cc8b410482",
+    "mtime": 1794222136.3029425,
+    "seen": 1794222161.4979293,
+    "ast_hash": "e4903f5f2dc4aac34623a0920d471aba",
     "semantic_hash": ""
   },
   "docs/releases/v0.1.0.md": {
@@ -456,9 +456,9 @@
     "semantic_hash": ""
   },
   "docs/RETOMADA-APOS-FORMATACAO.md": {
-    "mtime": 1794221022.3396065,
-    "seen": 1794221163.3067114,
-    "ast_hash": "fc6f9401a18c02846f3eeadeae5c82be",
+    "mtime": 1794222136.3029425,
+    "seen": 1794222161.4979293,
+    "ast_hash": "d3e3732b22f21a70e1507c0c67d2cf1f",
     "semantic_hash": ""
   },
   "docs/validation/2026-11-07-v0.2.0-validation.md": {
@@ -540,15 +540,15 @@
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-08-charon-v0.3.0-posse-controles.md": {
-    "mtime": 1794220827.6622512,
-    "seen": 1794220975.8541348,
-    "ast_hash": "f0b02b95a22ae7ce445c3d87ea53609c",
+    "mtime": 1794222136.3046448,
+    "seen": 1794222161.4979293,
+    "ast_hash": "a83747751922f401e4f80fb231551d26",
     "semantic_hash": ""
   },
   "docs/superpowers/specs/2026-11-08-charon-v0.3.0-posse-controles-design.md": {
-    "mtime": 1794220827.6638107,
-    "seen": 1794220975.8541348,
-    "ast_hash": "d0139cf5d981e051cf278b0183fae6db",
+    "mtime": 1794222136.3046448,
+    "seen": 1794222161.4979293,
+    "ast_hash": "c51894062ffa6dd66f74fadc165c4ae1",
     "semantic_hash": ""
   },
   "src/modules/calls/room-context.ts": {
@@ -732,15 +732,15 @@
     "semantic_hash": ""
   },
   "docs/releases/v0.3.0.md": {
-    "mtime": 1794220959.6534758,
-    "seen": 1794220975.8541348,
-    "ast_hash": "9196aea094d1f43cbb86d59ca6d3ca2d",
+    "mtime": 1794222136.3029425,
+    "seen": 1794222161.4979293,
+    "ast_hash": "fd5d214f78278e0d199d4808d2ac054e",
     "semantic_hash": ""
   },
   "docs/validation/2026-11-08-v0.3.0-validation.md": {
-    "mtime": 1794221819.2465506,
-    "seen": 1794221829.335214,
-    "ast_hash": "11ccce817e8e49882ce0f0402153803a",
+    "mtime": 1794222136.2993717,
+    "seen": 1794222161.4979293,
+    "ast_hash": "8634c0cffcbf27740877b14b8ade8a22",
     "semantic_hash": ""
   },
   "package-lock.json": {

@@ -70,7 +70,7 @@ sem credenciais ou conteúdo de mensagens de usuário.
 - Visual escolhido: **Minimalista Monocromático**.
 - `v0.3.0`: design/plano aprovados e implementação na branch local
   `feature-v0.3.0-posse-controles` (não assumir que foi enviada ao GitHub).
-  Tasks 1–8 aprovadas; Task 9 e revisão da branch ficam com o controlador.
+  Nove gates por tarefa aprovados; revisão da branch pendente com o controlador.
 - Antes de continuar, confira o SHA e os arquivos presentes no checkout.
   Consulte [a validação v0.3.0](validation/2026-11-08-v0.3.0-validation.md):
   execução real em 2026-11-09, sem substituir a evidência v0.2.0 acima.

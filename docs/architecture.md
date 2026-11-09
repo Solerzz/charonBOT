@@ -187,8 +187,9 @@ opt-ins. Integrações rodam `--maxWorkers=1`: startup reconcilia todos os regis
 acompanhados do DB compartilhado. Status e segundo deploy comprovam acesso do
 backend ao histórico sob RLS. Não há secrets Supabase/Discord no job.
 
-[Validação v0.3.0](validation/2026-11-08-v0.3.0-validation.md): 711 comuns
-aprovados, 29 pulados no modo comum; 29/29 integrações locais aprovadas. Execução
+[Validação v0.3.0](validation/2026-11-08-v0.3.0-validation.md), reexecutada pelo
+controlador no HEAD corrigido: 713 comuns aprovados, 29 pulados no modo comum;
+29/29 integrações locais aprovadas. Execução
 GitHub hospedada e smoke Discord não foram realizados. Grafo AST-only é parcial
 (SQL/schema/testes sem símbolos/docs sem indexação semântica), não prova de SQL
 ou renderização. Registro [v0.2.0](validation/2026-11-07-v0.2.0-validation.md)
