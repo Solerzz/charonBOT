@@ -109,6 +109,37 @@ describe('application-owned room runtime', () => {
     await f.runtime.stop(); await f.database.$disconnect();
   });
 
+  it.each([true, false])('observes expiry once when setup %s -> opposite resolves its guild after the deadline', async (enabled) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    f.state().controlsEnabled = enabled; f.state().room.visibility = 'PRIVATE';
+    const resolveGuild = vi.fn(f.resolveGuild);
+    await f.runtime.start(resolveGuild);
+    const version = f.state().room.controlVersion;
+    await vi.advanceTimersByTimeAsync(299_999);
+    const entered = deferred(); const release = deferred();
+    resolveGuild.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return f.resolveGuild(); });
+    const toggling = f.toggle(!enabled);
+    await entered.promise;
+    const observations = vi.mocked(f.runtime.store.syncPresence).mock.calls.length;
+    const projections = f.channel.permissionOverwrites.set.mock.calls.length;
+    f.join(OLDEST);
+    await vi.advanceTimersByTimeAsync(2); // Old expiry is now queued behind setup's room lock.
+    expect(f.state().presences.map((p) => p.memberDiscordId)).toEqual([OTHER]);
+    release.resolve();
+    await expect(toggling).resolves.toEqual({ synced: 1, failed: 0 });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().presences.map((p) => p.memberDiscordId).sort()).toEqual([OLDEST, OTHER]);
+    expect(f.projected().some((o) => o.id === OLDEST)).toBe(true);
+    expect(f.state().room).toMatchObject({ controlVersion: version + 1, priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
   it('disable at 4999ms defeats timeout even after reenable and invalidates the old operation', async () => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);

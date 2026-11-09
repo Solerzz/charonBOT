@@ -44,7 +44,7 @@ export class OwnershipService {
     }
     // An elapsed deadline is the durable open-claim marker, even if its member left.
     if (state.room.priorityExpiresAt !== null && state.room.priorityExpiresAt <= new Date()) {
-      this.rebindPriorityLocked(state, gateway);
+      this.dependencies.timers.cancel(`priority:${roomId}`);
       return state;
     }
     const presentHumans = new Set(snapshot.members.filter((member) => !member.isBot).map((member) => member.memberDiscordId));
@@ -106,11 +106,13 @@ export class OwnershipService {
     if (this.dependencies.timers.isStopped) return;
     const { room } = state;
     const key = `priority:${room.id}`;
-    if (room.status !== 'ACTIVE' || room.ownerDiscordId !== null || room.priorityExpiresAt === null || room.priorityExpiresAt <= new Date()) {
+    if (room.status !== 'ACTIVE' || room.ownerDiscordId !== null || room.priorityExpiresAt === null) {
       this.dependencies.timers.cancel(key);
       return;
     }
     const expected = { ...room };
+    // A known future can become due during setup's guild lookup. Observe it once;
+    // normal observation of the expired marker cancels rather than reschedules.
     this.dependencies.timers.schedule(key, room.priorityExpiresAt, () => this.refresh(room.id, gateway, expected));
   }
 
