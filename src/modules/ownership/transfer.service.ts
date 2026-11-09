@@ -74,11 +74,35 @@ export class TransferService {
   }
 
   async expire(transferId: string, gateway: RoomDiscordGateway): Promise<void> {
-    await safe(() => this.withTransfer(transferId, 'target', undefined, async (transfer, channelId, guildId) => {
-      if (transfer.expiresAt === null || transfer.expiresAt > new Date()) return;
-      const actor: RoomActor = { roomId: transfer.roomId, guildDiscordId: guildId, memberDiscordId: transfer.ownerDiscordId, controlVersion: transfer.controlVersion };
-      await this.finishLocked(transfer, actor, channelId, gateway, 'timeout');
-    }));
+    await safe(async () => {
+      try {
+        await this.withTransfer(transferId, 'target', undefined, async (transfer, channelId, guildId) => {
+          if (transfer.expiresAt === null || transfer.expiresAt > new Date()) return;
+          const actor: RoomActor = { roomId: transfer.roomId, guildDiscordId: guildId, memberDiscordId: transfer.ownerDiscordId, controlVersion: transfer.controlVersion };
+          await this.finishLocked(transfer, actor, channelId, gateway, 'timeout');
+        });
+      } catch (error) {
+        this.scheduleExpiryRecovery(transferId);
+        throw error;
+      }
+    });
+  }
+
+  private scheduleExpiryRecovery(transferId: string): void {
+    // An uncertain expiry is cancelled, never replayed as a reported transfer.
+    // A per-operation key cannot replace a newer room timer. stop() closes admission.
+    this.dependencies.timers.schedule(`transfer-recovery:${transferId}`, new Date(Date.now() + 1_000), () => this.recoverExpiry(transferId));
+  }
+
+  private async recoverExpiry(transferId: string): Promise<void> {
+    await safe(async () => {
+      try {
+        await this.withTransfer(transferId, 'target', undefined, (transfer) => this.discardLocked(transfer));
+      } catch (error) {
+        this.scheduleExpiryRecovery(transferId);
+        throw error;
+      }
+    });
   }
 
   async cancelForRoomLocked(roomId: string): Promise<void> {

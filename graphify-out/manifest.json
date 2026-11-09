@@ -624,15 +624,15 @@
     "semantic_hash": ""
   },
   "src/modules/ownership/transfer.service.ts": {
-    "mtime": 1794195840.086731,
-    "seen": 1794196058.6748621,
-    "ast_hash": "27445ddb26fdacd486e8f9eabcf60b78",
+    "mtime": 1794197936.3160312,
+    "seen": 1794197987.4990094,
+    "ast_hash": "e84a95d03394eed55b6dca9cfd2dc1f2",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/transfer.service.test.ts": {
-    "mtime": 1794195955.368272,
-    "seen": 1794196058.6893976,
-    "ast_hash": "7ff586cdedc9d06f2c98beee6565714a",
+    "mtime": 1794197961.5564556,
+    "seen": 1794197987.5146995,
+    "ast_hash": "98270a0e029808cc5a02e3fe101be87e",
     "semantic_hash": ""
   },
   "package-lock.json": {

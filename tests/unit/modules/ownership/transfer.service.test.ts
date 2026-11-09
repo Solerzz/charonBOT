@@ -288,4 +288,135 @@ describe('room ownership transfer', () => {
     await expect(f.service.begin(actor, TARGET, f.gateway)).rejects.toMatchObject({ code: codes[kind] });
     expect(f.state().transfer).toBeNull();
   });
+
+  it.each(['initial-transfer-read', 'room-read', 'locked-transfer-read', 'failed-cleanup'] as const)('recovers an expiry %s failure by exact-ID cancellation, not a reported transfer', async (boundary) => {
+    const f = fixture();
+    const pending = await f.service.begin(f.owner, TARGET, f.gateway);
+    await f.service.activate(f.owner, pending.id, f.gateway);
+    if (boundary === 'initial-transfer-read') f.store.readTransfer.mockRejectedValueOnce(new Error('private read payload'));
+    if (boundary === 'room-read') f.store.read.mockRejectedValueOnce(new Error('private read payload'));
+    if (boundary === 'locked-transfer-read') {
+      f.store.readTransfer.mockResolvedValueOnce(pending).mockRejectedValueOnce(new Error('private locked read payload'));
+    }
+    if (boundary === 'failed-cleanup') {
+      f.live.snapshot!.members = [human(OWNER)];
+      f.store.discardTransfer.mockRejectedValueOnce(new Error('private cleanup payload'));
+    }
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.state()).toMatchObject({ room: { ownerDiscordId: OWNER, controlVersion: 0 }, transfer: { id: pending.id, expiresAt: new Date(5000) } });
+    expect(f.timerErrors).toHaveBeenCalledExactlyOnceWith({ event: 'ownership_timer_failed' }, 'Ownership timer callback failed');
+    await vi.advanceTimersByTimeAsync(999);
+    expect(f.state().transfer?.id).toBe(pending.id);
+    f.locks.length = 0;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.state()).toMatchObject({ room: { ownerDiscordId: OWNER, controlVersion: 0 }, transfer: null });
+    expect(f.refreshes).toHaveLength(0);
+    expect(f.locks).toEqual([`${f.owner.guildDiscordId}:${TARGET}`, `room:${f.owner.guildDiscordId}:${f.state().room.channelDiscordId}`]);
+    expect(f.store.discardTransfer).toHaveBeenLastCalledWith(pending.id);
+    expect(vi.getTimerCount()).toBe(0);
+    f.live.snapshot!.members.push(human(OTHER));
+    expect((await f.service.begin(f.owner, OTHER, f.gateway)).expiresAt).toBeNull();
+  });
+
+  it('spaces recovery attempts during an outage and retries failed exact cleanup after persistence recovers', async () => {
+    const f = fixture();
+    const pending = await f.service.begin(f.owner, TARGET, f.gateway);
+    await f.service.activate(f.owner, pending.id, f.gateway);
+    f.store.readTransfer.mockRejectedValueOnce(new Error('initial outage')).mockRejectedValueOnce(new Error('continued outage'));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.timerErrors).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(f.timerErrors).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.timerErrors).toHaveBeenCalledTimes(2);
+    f.store.discardTransfer.mockRejectedValueOnce(new Error('cleanup outage'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.state().transfer?.id).toBe(pending.id);
+    expect(f.timerErrors).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.state()).toMatchObject({ room: { ownerDiscordId: OWNER, controlVersion: 0 }, transfer: null });
+    expect(f.refreshes).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(JSON.stringify(f.timerErrors.mock.calls)).not.toContain('outage');
+  });
+
+  it('a failed old expiry cannot replace or cancel a newer room timer while scheduling recovery', async () => {
+    const f = fixture();
+    const first = await f.service.begin(f.owner, TARGET, f.gateway);
+    await f.service.activate(f.owner, first.id, f.gateway);
+    const entered = deferred(); const release = deferred();
+    f.store.readTransfer.mockImplementationOnce(async () => { entered.resolve(); await release.promise; throw new Error('late initial read failure'); });
+    await vi.advanceTimersByTimeAsync(5000);
+    await entered.promise;
+    await f.service.abortUnpublished(first.id, f.gateway);
+    const second = await f.service.begin(f.owner, OTHER, f.gateway);
+    await f.service.activate(f.owner, second.id, f.gateway);
+    release.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.state().transfer).toMatchObject({ id: second.id, expiresAt: new Date(10000) });
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(f.state()).toMatchObject({ room: { ownerDiscordId: OTHER, controlVersion: 1 }, transfer: null });
+    expect(f.refreshes).toHaveLength(1);
+    expect(f.store.discardTransfer.mock.calls).toEqual([[first.id]]);
+  });
+
+  it.each(['expiry', 'recovery'] as const)('shutdown drains a failing in-flight %s without admitting another recovery timer', async (phase) => {
+    const f = fixture();
+    const pending = await f.service.begin(f.owner, TARGET, f.gateway);
+    await f.service.activate(f.owner, pending.id, f.gateway);
+    if (phase === 'recovery') {
+      f.store.readTransfer.mockRejectedValueOnce(new Error('initial outage'));
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(vi.getTimerCount()).toBe(1);
+    }
+    const entered = deferred(); const release = deferred();
+    f.store.readTransfer.mockImplementationOnce(async () => { entered.resolve(); await release.promise; throw new Error('shutdown outage'); });
+    await vi.advanceTimersByTimeAsync(phase === 'expiry' ? 5000 : 1000);
+    await entered.promise;
+    let stopped = false;
+    const stopping = f.timers.stop().then(() => { stopped = true; });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(stopped).toBe(false);
+    release.resolve();
+    await stopping;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(f.state()).toMatchObject({ room: { ownerDiscordId: OWNER }, transfer: { id: pending.id } });
+    expect(f.refreshes).toHaveLength(0);
+    expect(f.timerErrors).toHaveBeenCalledTimes(phase === 'expiry' ? 1 : 2);
+  });
+
+  it('shutdown cancels queued recovery rather than running it after admission closes', async () => {
+    const f = fixture();
+    const pending = await f.service.begin(f.owner, TARGET, f.gateway);
+    await f.service.activate(f.owner, pending.id, f.gateway);
+    f.store.readTransfer.mockRejectedValueOnce(new Error('outage'));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(vi.getTimerCount()).toBe(1);
+    await f.timers.stop();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(f.state().transfer?.id).toBe(pending.id);
+    expect(f.store.discardTransfer).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('uncertain completion plus failed cleanup never repeats or falsely reports a committed transfer', async () => {
+    const f = fixture();
+    const pending = await f.service.begin(f.owner, TARGET, f.gateway);
+    await f.service.activate(f.owner, pending.id, f.gateway);
+    const finish = f.store.finishTransfer.getMockImplementation()!;
+    f.store.finishTransfer.mockImplementationOnce(async (...args) => { await finish(...args); throw new Error('lost commit acknowledgement'); });
+    f.store.discardTransfer.mockRejectedValueOnce(new Error('cleanup unavailable'));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(f.state()).toMatchObject({ room: { ownerDiscordId: TARGET, controlVersion: 1 }, transfer: null });
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(f.store.finishTransfer).toHaveBeenCalledTimes(1);
+    expect(f.refreshes).toHaveLength(0);
+    expect(f.timerErrors).toHaveBeenCalledExactlyOnceWith({ event: 'ownership_timer_failed' }, 'Ownership timer callback failed');
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
