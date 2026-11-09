@@ -10,6 +10,8 @@ import {
 import { discordIdSchema } from '../setup/setup.schemas.js';
 import type { CallPanelPayload } from './call-panel.view.js';
 import { temporaryRoomNameSchema } from './call.schemas.js';
+import { DiscordRoomGateway } from './room.discord.js';
+import type { RoomDiscordGateway } from './room.types.js';
 
 export interface CreateDiscordRoomInput {
   categoryDiscordId: string;
@@ -18,11 +20,9 @@ export interface CreateDiscordRoomInput {
 export interface CreatedDiscordRoom {
   channelDiscordId: string;
 }
-export interface CallDiscordGateway {
+export interface CallDiscordGateway extends RoomDiscordGateway {
   createTemporaryChannel(input: CreateDiscordRoomInput): Promise<CreatedDiscordRoom>;
   moveMember(channelDiscordId: string, expectedChannelDiscordId?: string): Promise<void>;
-  sendControlPanel(channelDiscordId: string, payload: CallPanelPayload): Promise<string>;
-  updateControlPanel(channelDiscordId: string, messageDiscordId: string, payload: CallPanelPayload): Promise<void>;
   deleteChannel(channelDiscordId: string): Promise<void>;
   // Synchronous reads of the current gateway cache, not event-time snapshots.
   getMemberChannelDiscordId(): string | null;
@@ -58,7 +58,22 @@ const botRoomPermissions = [
 ];
 
 export class DiscordCallGateway implements CallDiscordGateway {
-  constructor(private readonly guild: Guild, private readonly member: GuildMember) {}
+  private readonly rooms: DiscordRoomGateway;
+
+  constructor(private readonly guild: Guild, private readonly member: GuildMember) {
+    this.rooms = new DiscordRoomGateway(guild);
+  }
+
+  snapshot(channelId: string) { return this.rooms.snapshot(channelId); }
+  resolveMember(memberId: string) { return this.rooms.resolveMember(memberId); }
+  rename(channelId: string, name: string) { return this.rooms.rename(channelId, name); }
+  restoreName(channelId: string, previousName: string) { return this.rooms.restoreName(channelId, previousName); }
+  setLimit(channelId: string, limit: number) { return this.rooms.setLimit(channelId, limit); }
+  readAccess(channelId: string) { return this.rooms.readAccess(channelId); }
+  setPrivateAccess(channelId: string, allowedIds: string[]) { return this.rooms.setPrivateAccess(channelId, allowedIds); }
+  setPublicAccess(channelId: string) { return this.rooms.setPublicAccess(channelId); }
+  restoreAccess(channelId: string, previous: Parameters<RoomDiscordGateway['restoreAccess']>[1]) { return this.rooms.restoreAccess(channelId, previous); }
+  deleteControlPanel(channelId: string, messageId: string) { return this.rooms.deleteControlPanel(channelId, messageId); }
 
   getMemberChannelDiscordId(): string | null {
     this.assertMemberGuild();
@@ -119,18 +134,11 @@ export class DiscordCallGateway implements CallDiscordGateway {
   }
 
   async sendControlPanel(channelDiscordId: string, payload: CallPanelPayload): Promise<string> {
-    const channel = await this.fetchVoiceChannel(channelDiscordId);
-    const bot = await this.guild.members.fetchMe({ force: true });
-    this.assertPermissions(channel, bot, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks]);
-    return (await channel.send(payload)).id;
+    return this.rooms.sendControlPanel(channelDiscordId, payload);
   }
 
   async updateControlPanel(channelDiscordId: string, messageDiscordId: string, payload: CallPanelPayload): Promise<void> {
-    const channel = await this.fetchVoiceChannel(channelDiscordId);
-    const bot = await this.guild.members.fetchMe({ force: true });
-    this.assertPermissions(channel, bot, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ReadMessageHistory]);
-    const message = await channel.messages.fetch(discordIdSchema.parse(messageDiscordId));
-    await message.edit(payload);
+    return this.rooms.updateControlPanel(channelDiscordId, messageDiscordId, payload);
   }
 
   async deleteChannel(channelDiscordId: string): Promise<void> {

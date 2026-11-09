@@ -122,9 +122,17 @@ export class PrismaVoiceCreatorRepository implements VoiceCreatorRepository {
     enabled: boolean,
   ): Promise<VoiceCreatorConfiguration> {
     try {
-      return await this.prisma.voiceCreator.update({
-        where: { id, deletedAt: null },
-        data: { roomCommandsEnabled: enabled },
+      return await this.prisma.$transaction(async (tx) => {
+        const configuration = await tx.voiceCreator.update({
+          where: { id, deletedAt: null },
+          data: { roomCommandsEnabled: enabled },
+        });
+        const tracked = { voiceCreatorId: id, status: { not: 'CLOSED' as const } };
+        // Room writes serialize with transfer/lifecycle CAS before cancellation.
+        // Discord synchronization happens only after this transaction commits.
+        await tx.temporaryRoom.updateMany({ where: tracked, data: { controlVersion: { increment: 1 } } });
+        await tx.pendingOwnershipTransfer.deleteMany({ where: { room: tracked } });
+        return configuration;
       });
     } catch (error: unknown) {
       this.throwNotFound(error);

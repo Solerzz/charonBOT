@@ -1,46 +1,24 @@
-import { ChannelType, Collection, PermissionFlagsBits, PermissionsBitField, type Guild, type GuildMember } from 'discord.js';
-import { describe, expect, it, vi } from 'vitest';
+import { ChannelType, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
+import { describe, expect, it } from 'vitest';
 
-import { CallMoveUnconfirmedError, DiscordCallGateway } from '../../../../src/modules/calls/call.discord.js';
+import { CallMoveUnconfirmedError } from '../../../../src/modules/calls/call.discord.js';
 import { creator, deferred, entry, room } from './call.fixtures.js';
+import { discordFixture as fixture } from './call.discord.fixtures.js';
 
-const rights = new PermissionsBitField(Object.values(PermissionFlagsBits));
-function fixture() {
-  const message = { id: room.controlMessageDiscordId!, edit: vi.fn(async () => {}) };
-  const channel = {
-    id: room.channelDiscordId, guildId: creator.guildDiscordId, type: ChannelType.GuildVoice,
-    permissionsFor: vi.fn(() => rights), delete: vi.fn(async () => {}),
-    send: vi.fn(async () => message), messages: { fetch: vi.fn(async () => message) },
-  };
-  const category = { ...channel, id: creator.categoryDiscordId, type: ChannelType.GuildCategory, permissionsFor: vi.fn(() => rights) };
-  const states = new Collection<string, { channelId: string | null }>([[entry.memberDiscordId, { channelId: creator.creatorChannelDiscordId }]]);
-  let serverChannel: string | null = creator.creatorChannelDiscordId;
-  const bot = { id: '92345678901234567', guild: { id: creator.guildDiscordId }, permissions: rights };
-  const member = {
-    id: entry.memberDiscordId, guild: { id: creator.guildDiscordId },
-    voice: {
-      get channelId() { return states.get(entry.memberDiscordId)?.channelId ?? null; },
-      setChannel: vi.fn(async (id: string) => { serverChannel = id; states.set(entry.memberDiscordId, { channelId: id }); }),
-    },
-  };
-  const guild = {
-    id: creator.guildDiscordId, roles: { everyone: { id: creator.guildDiscordId } },
-    voiceStates: {
-      cache: states,
-      fetch: vi.fn(async (id: string) => { const state = { channelId: serverChannel }; states.set(id, state); return state; }),
-    }, members: { fetchMe: vi.fn(async () => bot) },
-    channels: {
-      fetch: vi.fn(async (id: string) => id === creator.categoryDiscordId ? category : channel),
-      create: vi.fn(async () => channel),
-    },
-  };
-  const gateway = new DiscordCallGateway(guild as unknown as Guild, member as unknown as GuildMember);
-  return { guild, member, channel, category, message, states, gateway, setServerChannel: (id: string) => { serverChannel = id; } };
-}
 const createInput = { categoryDiscordId: creator.categoryDiscordId, name: 'Game' };
 const panel = { embeds: [], components: [], allowedMentions: { parse: [] as never[] } };
 
 describe('DiscordCallGateway', () => {
+  it('delegates exact native name restoration while keeping owner rename strict', async () => {
+    const f = fixture(); const previous = `  ${'x'.repeat(96)}  `;
+    f.channel.setName.mockImplementation(async (name) => { f.channel.name = name; });
+    await f.gateway.restoreName(room.channelDiscordId, previous);
+    expect((await f.gateway.snapshot(room.channelDiscordId))?.name).toBe(previous);
+    await expect(f.gateway.rename(room.channelDiscordId, previous)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.channel.name).toBe(previous);
+    await f.gateway.rename(room.channelDiscordId, '  Trimmed  ');
+    expect(f.channel.name).toBe('Trimmed');
+  });
   it('creates native public unlimited voice channels without inheriting hidden category overwrites', async () => {
     const f = fixture();
     await expect(f.gateway.createTemporaryChannel(createInput)).resolves.toEqual({ channelDiscordId: room.channelDiscordId });

@@ -3,53 +3,55 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
-  StringSelectMenuBuilder,
+  escapeMarkdown,
   type MessageCreateOptions,
+  type StringSelectMenuBuilder,
+  type UserSelectMenuBuilder,
 } from 'discord.js';
 
 import type { TemporaryRoom } from '../../generated/prisma/client.js';
+import { encodeCallComponent } from './call.schemas.js';
 
 export interface CallPanelInput {
-  room: Pick<TemporaryRoom, 'id' | 'channelDiscordId' | 'name' | 'ownerDiscordId'>;
+  room: Pick<TemporaryRoom,
+    'id' | 'channelDiscordId' | 'name' | 'ownerDiscordId' | 'userLimit' | 'visibility' |
+    'controlVersion' | 'priorityMemberDiscordId' | 'priorityExpiresAt'>;
   participantCount: number;
+  observedAt: Date;
 }
 
 // Exclude create-only flags so the same panel can be sent and edited unchanged.
-export type CallPanelPayload = Pick<
-  MessageCreateOptions,
-  'embeds' | 'components' | 'allowedMentions'
->;
+export type CallPanelRow = ActionRowBuilder<ButtonBuilder> |
+  ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<UserSelectMenuBuilder>;
+export type CallPanelPayload = Pick<MessageCreateOptions, 'embeds' | 'allowedMentions'> & {
+  components: readonly CallPanelRow[];
+};
 
 export function buildCallPanel(input: CallPanelInput): CallPanelPayload {
   const { room, participantCount } = input;
   const embed = new EmbedBuilder()
     .setTitle('Central da Call')
     .setColor(0x2b2d31)
-    .setDescription('Controles disponíveis em breve')
     .addFields(
-      { name: 'Sala', value: `<#${room.channelDiscordId}> · ${room.name}` },
+      { name: 'Sala', value: `<#${room.channelDiscordId}> · ${escapeMarkdown(room.name)}` },
       { name: 'Proprietário', value: room.ownerDiscordId === null ? 'Sem proprietário' : `<@${room.ownerDiscordId}>` },
-      { name: 'Participantes', value: String(participantCount) },
-      { name: 'Visibilidade', value: '🟢 Pública' },
+      { name: 'Participantes', value: `${participantCount} / ${room.userLimit === 0 ? 'Ilimitado' : room.userLimit}` },
+      { name: 'Visibilidade', value: room.visibility === 'PRIVATE' ? 'Privada' : 'Pública' },
     );
-  const customId = (action: string) => `call:v1:${action}:${room.id}`;
+  if (room.ownerDiscordId === null && room.priorityMemberDiscordId !== null && room.priorityExpiresAt !== null) {
+    embed.addFields(room.priorityExpiresAt > input.observedAt
+      ? { name: 'Prioridade para assumir', value: `<@${room.priorityMemberDiscordId}> · até <t:${Math.floor(room.priorityExpiresAt.getTime() / 1000)}:R>` }
+      : { name: 'Sala disponível', value: 'Qualquer participante elegível presente pode assumir a sala.' });
+  }
+  const customId = (action: 'open' | 'claim') => encodeCallComponent({
+    version: 'v2', action, roomId: room.id, controlVersion: room.controlVersion,
+  });
   const actions = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(customId('rename')).setLabel('Renomear').setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId(customId('limit')).setLabel('Alterar limite').setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId(customId('private')).setLabel('Privatizar').setStyle(ButtonStyle.Secondary).setDisabled(true),
-    new ButtonBuilder().setCustomId(customId('claim')).setLabel('Assumir sala').setStyle(ButtonStyle.Secondary).setDisabled(true),
-  );
-  const moderation = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId(customId('moderation'))
-      .setPlaceholder('Moderar participantes')
-      .setMinValues(1)
-      .setMaxValues(1)
-      .addOptions({ label: 'Moderação em breve', value: 'unavailable' })
-      .setDisabled(true),
+    new ButtonBuilder().setCustomId(customId('open')).setLabel('Abrir controles').setStyle(ButtonStyle.Secondary).setDisabled(false),
+    new ButtonBuilder().setCustomId(customId('claim')).setLabel('Assumir sala').setStyle(ButtonStyle.Secondary).setDisabled(room.ownerDiscordId !== null),
   );
   return {
-    embeds: [embed], components: [actions, moderation],
+    embeds: [embed], components: [actions],
     allowedMentions: { parse: [] },
   };
 }

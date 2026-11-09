@@ -15,7 +15,7 @@ const first: VoiceCreatorConfiguration = {
 const second = { ...first, id: '123e4567-e89b-42d3-a456-426614174001', creatorChannelDiscordId: '52345678901234567' };
 type Kind = 'button' | 'channel' | 'string' | 'modal' | 'role';
 
-function fixture(action = 'toggle-commands', kind: Kind = 'button', values: string[] = [], identifier = first.id) {
+function fixture(action = 'toggle-commands', kind: Kind = 'button', values: string[] = [], identifier = first.id, onControlsChanged?: (id: string) => Promise<{ synced: number; failed: number }>) {
   let configurations = [{ ...first }, { ...second }];
   const listByGuild = vi.fn(async () => configurations.map((item) => ({ ...item })));
   const findById = vi.fn(async (id: string) => configurations.find((item) => item.id === id) ?? null);
@@ -58,7 +58,7 @@ function fixture(action = 'toggle-commands', kind: Kind = 'button', values: stri
     fields: { getTextInputValue: vi.fn().mockReturnValue('Novo nome') },
     channel: { send }, reply, deferUpdate, editReply, showModal,
   } as unknown as SetupInteraction;
-  return { handler: new SetupInteractions(new SetupService(repository), factory), interaction, factory, reply, deferUpdate, editReply, showModal, send, listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, remove, assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel, configurations };
+  return { handler: new SetupInteractions(new SetupService(repository, onControlsChanged), factory), interaction, factory, reply, deferUpdate, editReply, showModal, send, listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, remove, assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel, configurations };
 }
 
 function payload(f: ReturnType<typeof fixture>) {
@@ -95,8 +95,40 @@ describe('SetupInteractions', () => {
     expect(f.reply).not.toHaveBeenCalled();
     expect(f.send).not.toHaveBeenCalled();
     expect(payload(f).flags).toBeUndefined();
-    expect(payload(f).content).toBeNull();
+    expect(payload(f).content).toContain('salva');
+    expect(payload(f).content).toContain('não confirmada');
     expect(payload(f).allowedMentions).toEqual({ parse: [] });
+  });
+
+  it.each([
+    [{ synced: 2, failed: 0 }, 'concluída'],
+    [{ synced: 1, failed: 2 }, '2 sala(s) com falha'],
+  ] as const)('refreshes the saved flag and reports private synchronization status: %j', async (counts, status) => {
+    const callback = vi.fn(async () => {
+      expect(f.deferUpdate).toHaveBeenCalledOnce();
+      expect(f.configurations[0]!.roomCommandsEnabled).toBe(false);
+      return counts;
+    });
+    const f = fixture('toggle-commands', 'button', [], first.id, callback);
+    await f.handler.execute(f.interaction);
+    expect(payload(f).content).toContain('salva');
+    expect(payload(f).content).toContain(status);
+    expect(payload(f).embeds[0].fields).toContainEqual({ name: 'Comandos da sala', value: expect.stringContaining('Desabilitados') });
+    expect(f.setRoomCommandsEnabled).toHaveBeenCalledOnce();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps the saved outcome explicit and removes stale toggle controls if dashboard refresh fails', async () => {
+    const f = fixture('toggle-commands', 'button', [], first.id, async () => {
+      f.getVoiceChannel.mockRejectedValueOnce(new SetupDiscordError('Permissões insuficientes.'));
+      return { synced: 1, failed: 1 };
+    });
+    await f.handler.execute(f.interaction);
+    expect(f.configurations[0]!.roomCommandsEnabled).toBe(false);
+    expect(f.setRoomCommandsEnabled).toHaveBeenCalledOnce();
+    expect(payload(f).content).toContain('salva');
+    expect(payload(f).content).toContain('1 sala(s) com falha');
+    expect(payload(f).components).toEqual([]);
   });
 
   it('selects another persisted creator using UUID values, including pagination values', async () => {

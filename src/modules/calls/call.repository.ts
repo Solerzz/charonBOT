@@ -24,6 +24,7 @@ export class TemporaryRoomTransitionError extends Error {
 // Non-closed rows include failed activation and unfinished cleanup. Hiding them
 // would lose the recovery handle and allow another room for the same owner.
 const trackedStatuses = ['CREATING', 'ACTIVE', 'CLOSING'] as const;
+const invalidateControls = { controlVersion: { increment: 1 }, priorityMemberDiscordId: null, priorityExpiresAt: null };
 
 export class PrismaTemporaryRoomRepository implements TemporaryRoomRepository {
   constructor(private readonly prisma: PrismaClient) {}
@@ -56,28 +57,37 @@ export class PrismaTemporaryRoomRepository implements TemporaryRoomRepository {
   }
 
   async clearOwner(id: string, expectedOwnerDiscordId: string): Promise<TemporaryRoomRecord> {
-    await this.prisma.temporaryRoom.updateMany({
-      where: { id, ownerDiscordId: expectedOwnerDiscordId, status: { in: [...trackedStatuses] } },
-      data: { ownerDiscordId: null },
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.temporaryRoom.updateMany({
+        where: { id, ownerDiscordId: expectedOwnerDiscordId, status: { in: [...trackedStatuses] } },
+        data: { ownerDiscordId: null, ...invalidateControls },
+      });
+      if (result.count) await tx.pendingOwnershipTransfer.deleteMany({ where: { roomId: id } });
+      return tx.temporaryRoom.findUniqueOrThrow({ where: { id } });
     });
-    return this.prisma.temporaryRoom.findUniqueOrThrow({ where: { id } });
   }
 
   async beginClosing(id: string): Promise<TemporaryRoomRecord> {
-    await this.prisma.temporaryRoom.updateMany({
-      where: { id, status: { in: ['CREATING', 'ACTIVE'] } }, data: { status: 'CLOSING' },
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.temporaryRoom.updateMany({
+        where: { id, status: { in: ['CREATING', 'ACTIVE'] } }, data: { status: 'CLOSING', ...invalidateControls },
+      });
+      if (result.count) await tx.pendingOwnershipTransfer.deleteMany({ where: { roomId: id } });
+      const record = await tx.temporaryRoom.findUniqueOrThrow({ where: { id } });
+      if (record.status !== 'CLOSING' && record.status !== 'CLOSED') throw new TemporaryRoomTransitionError();
+      return record;
     });
-    const record = await this.prisma.temporaryRoom.findUniqueOrThrow({ where: { id } });
-    if (record.status !== 'CLOSING' && record.status !== 'CLOSED') throw new TemporaryRoomTransitionError();
-    return record;
   }
 
   async markClosed(id: string): Promise<TemporaryRoomRecord> {
-    await this.prisma.temporaryRoom.updateMany({
-      where: { id, status: 'CLOSING' }, data: { status: 'CLOSED', closedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.temporaryRoom.updateMany({
+        where: { id, status: 'CLOSING' }, data: { status: 'CLOSED', closedAt: new Date(), ...invalidateControls },
+      });
+      if (result.count) await tx.pendingOwnershipTransfer.deleteMany({ where: { roomId: id } });
+      const record = await tx.temporaryRoom.findUniqueOrThrow({ where: { id } });
+      if (record.status !== 'CLOSED') throw new TemporaryRoomTransitionError();
+      return record;
     });
-    const record = await this.prisma.temporaryRoom.findUniqueOrThrow({ where: { id } });
-    if (record.status !== 'CLOSED') throw new TemporaryRoomTransitionError();
-    return record;
   }
 }

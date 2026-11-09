@@ -1,19 +1,21 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLogger } from '../../../../src/core/logger/logger.js';
 import type { CallPanelPayload } from '../../../../src/modules/calls/call-panel.view.js';
 import { CallDiscordError, CallMoveUnconfirmedError } from '../../../../src/modules/calls/call.discord.js';
 import { CallService } from '../../../../src/modules/calls/call.service.js';
-import { KeyedMutex } from '../../../../src/shared/keyed-mutex.js';
 import { creator, deferred, entry, lifecycleFixture, room } from './call.fixtures.js';
+import { attachRoomRuntime, stopRoomFixtures } from './room-lifecycle.fixtures.js';
+
+afterEach(stopRoomFixtures);
 
 function fixture() {
   const f = lifecycleFixture();
   const logs: string[] = [];
   const logger = createLogger({ level: 'debug', destination: { write: (value: string) => { logs.push(value); } } });
-  const mutex = new KeyedMutex();
-  const service = new CallService(f.creators, f.rooms, mutex, logger);
-  return { ...f, logs, mutex, service, handle: (input = entry) => service.handleVoiceTransition(input, f.gateway) };
+  const runtime = attachRoomRuntime(f, logger);
+  const service = new CallService(f.creators, f.rooms, runtime, logger);
+  return { ...f, logs, runtime, service, handle: (input = entry) => service.handleVoiceTransition(input, f.gateway) };
 }
 function fields(payload: CallPanelPayload) {
   return JSON.parse(JSON.stringify(payload)).embeds[0].fields as { name: string; value: string }[];
@@ -21,13 +23,75 @@ function fields(payload: CallPanelPayload) {
 const departure = { ...entry, oldChannelDiscordId: room.channelDiscordId, newChannelDiscordId: null, oldChannelMemberCount: 0 };
 
 describe('CallService', () => {
+  it('retires historical coordinator metadata after permanently closing successive rooms', async () => {
+    const f = fixture();
+    const state = f.runtime.coordinator as unknown as { generations: Map<string, number>; departures: Map<string, unknown>; ownershipAttempts: Map<string, unknown>; accepted: Map<string, unknown> };
+    for (let n = 0; n < 4; n++) {
+      const current = { ...room, id: `223e4567-e89b-42d3-a456-42661417400${n}`, channelDiscordId: String(80000000000000000n + BigInt(n)) };
+      f.records.set(current.id, current);
+      await f.runtime.coordinator.room(current.guildDiscordId, current.channelDiscordId, () =>
+        f.runtime.coordinator.changeOwnership(current.guildDiscordId, current.channelDiscordId, 0, null,
+          () => f.runtime.store.changeOwner(current.id, 0, entry.memberDiscordId, null)));
+      f.setMemberChannel(null);
+      await f.handle({ ...departure, oldChannelDiscordId: current.channelDiscordId });
+      expect(f.records.get(current.id)?.status).toBe('CLOSED');
+      expect(state.generations.size).toBe(0);
+      expect(state.departures.size).toBe(0);
+      expect(state.ownershipAttempts.size).toBe(0);
+      expect(state.accepted.size).toBe(0);
+    }
+  });
+
+  it('retires a closed key only after accepted member work drains without wiping a live key or resurrecting late work', async () => {
+    const f = fixture(); f.records.set(room.id, room);
+    const live = { ...room, id: '323e4567-e89b-42d3-a456-426614174000', channelDiscordId: '82345678901234567' };
+    f.records.set(live.id, live);
+    const coordinator = f.runtime.coordinator;
+    const state = coordinator as unknown as { generations: Map<string, number>; departures: Map<string, unknown>; ownershipAttempts: Map<string, unknown>; accepted: Map<string, unknown> };
+    for (const current of [room, live]) await coordinator.room(current.guildDiscordId, current.channelDiscordId, () =>
+      coordinator.changeOwnership(current.guildDiscordId, current.channelDiscordId, 0, null,
+        () => f.runtime.store.changeOwner(current.id, 0, entry.memberDiscordId, null)));
+    coordinator.recordDeparture(live.guildDiscordId, live.channelDiscordId, entry.memberDiscordId, false);
+    const closedKey = `${room.guildDiscordId}:${room.channelDiscordId}`;
+    const liveKey = `${live.guildDiscordId}:${live.channelDiscordId}`;
+    const entered = deferred(); const release = deferred();
+    const held = coordinator.member(entry.guildDiscordId, entry.memberDiscordId, async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    f.setMemberChannel(null);
+    const late = f.handle(departure);
+    await f.handle({ ...departure, memberDiscordId: '72345678901234567' });
+    expect(f.records.get(room.id)?.status).toBe('CLOSED');
+    expect(state.generations.get(closedKey)).toBe(1); // Accepted member work still holds generation safety.
+    release.resolve(); await Promise.all([held, late]);
+    expect(state.generations.has(closedKey)).toBe(false);
+    expect(state.departures.has(closedKey)).toBe(false);
+    expect(state.ownershipAttempts.has(closedKey)).toBe(false);
+    expect(state.accepted.size).toBe(0);
+    expect(state.generations.get(liveKey)).toBe(1);
+    expect(coordinator.pendingDepartures(live.guildDiscordId, live.channelDiscordId)).toHaveLength(1);
+    await f.handle(departure); // A newly received event for durable CLOSED history cannot resurrect its key.
+    expect(state.generations.has(closedKey)).toBe(false);
+    expect(state.generations.get(liveKey)).toBe(1);
+    expect(coordinator.pendingDepartures(live.guildDiscordId, live.channelDiscordId)).toHaveLength(1);
+  });
+
+  it('creates and closes disabled-creator rooms without ever publishing a panel', async () => {
+    const f = fixture(); f.setControlsEnabled(false);
+    await f.handle();
+    expect(f.records.get(room.id)?.status).toBe('ACTIVE');
+    expect(f.gateway.sendControlPanel).not.toHaveBeenCalled();
+    expect((await f.runtime.store.read(room.id))?.presences).toHaveLength(1);
+    f.counts.set(room.channelDiscordId, 0); f.setMemberChannel(null);
+    await f.handle(departure);
+    expect(f.records.get(room.id)?.status).toBe('CLOSED');
+  });
   it('creates, persists, moves and sends a real panel, then activates with the message ID', async () => {
     const f = fixture();
     await f.handle();
     expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game' });
     expect(f.rooms.createCreating).toHaveBeenCalledExactlyOnceWith({ guildDiscordId: entry.guildDiscordId, voiceCreatorId: creator.id, channelDiscordId: room.channelDiscordId, ownerDiscordId: entry.memberDiscordId, name: 'Game' });
     expect(f.gateway.moveMember).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, creator.creatorChannelDiscordId);
-    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1' });
+    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / Ilimitado' });
     expect(f.records.get(room.id)).toMatchObject({ status: 'ACTIVE', controlMessageDiscordId: room.controlMessageDiscordId });
   });
 
@@ -62,20 +126,21 @@ describe('CallService', () => {
     await f.handle(departure);
     expect(f.records.get(room.id)?.ownerDiscordId).toBeNull();
     expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Proprietário', value: 'Sem proprietário' });
-    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2' });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2 / Ilimitado' });
     await f.handle();
     expect(f.gateway.createTemporaryChannel).not.toHaveBeenCalled();
   });
 
-  it('does not clear ownership on a non-owner departure or a stale departure after owner returns', async () => {
+  it('keeps a non-owner departure harmless but invalidates a same-generation owner departure after return', async () => {
     const f = fixture();
     f.records.set(room.id, room);
     f.counts.set(room.channelDiscordId, 2);
+    f.setMemberChannel(room.channelDiscordId);
     await f.handle({ ...departure, memberDiscordId: '72345678901234567' });
     expect(f.rooms.clearOwner).not.toHaveBeenCalled();
     f.setMemberChannel(room.channelDiscordId);
     await f.handle(departure);
-    expect(f.rooms.clearOwner).not.toHaveBeenCalled();
+    expect(f.records.get(room.id)).toMatchObject({ ownerDiscordId: null, controlVersion: 1 });
   });
 
   it('refreshes both old and new room panels when a participant moves between rooms', async () => {
@@ -86,7 +151,7 @@ describe('CallService', () => {
     f.setMemberChannel(other.channelDiscordId);
     await f.handle({ ...departure, newChannelDiscordId: other.channelDiscordId });
     expect(f.gateway.updateControlPanel.mock.calls.map((c) => c[0])).toEqual([room.channelDiscordId, other.channelDiscordId]);
-    expect(fields(f.gateway.updateControlPanel.mock.calls[1]![2])).toContainEqual({ name: 'Participantes', value: '3' });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[1]![2])).toContainEqual({ name: 'Participantes', value: '3 / Ilimitado' });
   });
 
   it('closes an empty room using live state even when the event snapshot says occupied', async () => {
@@ -135,7 +200,7 @@ describe('CallService', () => {
     expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
     expect(f.rooms.clearOwner).toHaveBeenCalledExactlyOnceWith(room.id, entry.memberDiscordId);
     expect(f.rooms.markClosed).not.toHaveBeenCalled();
-    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Proprietário', value: 'Sem proprietário' });
+    expect(f.gateway.updateControlPanel).not.toHaveBeenCalled(); // CLOSING handles are not interactive panels.
   });
 
   it('does not redirect a former owner after deletion fails and another member later joins', async () => {
@@ -154,7 +219,7 @@ describe('CallService', () => {
     expect(f.gateway.moveMember).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, creator.creatorChannelDiscordId);
   });
 
-  it('preserves ownership if the owner returns while closure awaits', async () => {
+  it('does not restore old ownership if the owner returns while closure awaits', async () => {
     const f = fixture();
     f.records.set(room.id, room); f.setMemberChannel(null);
     const beginClosing = f.rooms.beginClosing.getMockImplementation()!;
@@ -164,8 +229,8 @@ describe('CallService', () => {
       return closing;
     });
     await f.handle(departure);
-    expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: entry.memberDiscordId });
-    expect(f.rooms.clearOwner).not.toHaveBeenCalled();
+    expect(f.records.get(room.id)).toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
+    expect(f.rooms.clearOwner).toHaveBeenCalledOnce();
     expect(f.gateway.deleteChannel).not.toHaveBeenCalled();
   });
 
@@ -275,11 +340,11 @@ describe('CallService', () => {
       await finishPersist.promise;
       return record;
     });
-    const run = f.mutex.runExclusive.bind(f.mutex);
+    const run = f.runtime.coordinator.room.bind(f.runtime.coordinator);
     let observeCompeting = false;
-    vi.spyOn(f.mutex, 'runExclusive').mockImplementation((key, operation) => {
-      if (observeCompeting && key === `room:${entry.guildDiscordId}:${room.channelDiscordId}`) competingLock.resolve();
-      return run(key, operation);
+    vi.spyOn(f.runtime.coordinator, 'room').mockImplementation((guild, channel, operation) => {
+      if (observeCompeting && guild === entry.guildDiscordId && channel === room.channelDiscordId) competingLock.resolve();
+      return run(guild, channel, operation);
     });
     const creating = f.handle();
     await persisted.promise;

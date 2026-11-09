@@ -52,7 +52,10 @@ export const AnyNull = runtime.AnyNull
 
 export const ModelName = {
   VoiceCreator: 'VoiceCreator',
-  TemporaryRoom: 'TemporaryRoom'
+  TemporaryRoom: 'TemporaryRoom',
+  RoomPresence: 'RoomPresence',
+  RoomAllowedMember: 'RoomAllowedMember',
+  PendingOwnershipTransfer: 'PendingOwnershipTransfer'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -98,10 +101,45 @@ export const TemporaryRoomScalarFieldEnum = {
   status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
-  closedAt: 'closedAt'
+  closedAt: 'closedAt',
+  controlVersion: 'controlVersion',
+  priorityMemberDiscordId: 'priorityMemberDiscordId',
+  priorityExpiresAt: 'priorityExpiresAt'
 } as const
 
 export type TemporaryRoomScalarFieldEnum = (typeof TemporaryRoomScalarFieldEnum)[keyof typeof TemporaryRoomScalarFieldEnum]
+
+
+export const RoomPresenceScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  memberDiscordId: 'memberDiscordId',
+  isBot: 'isBot',
+  joinedAt: 'joinedAt'
+} as const
+
+export type RoomPresenceScalarFieldEnum = (typeof RoomPresenceScalarFieldEnum)[keyof typeof RoomPresenceScalarFieldEnum]
+
+
+export const RoomAllowedMemberScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  memberDiscordId: 'memberDiscordId'
+} as const
+
+export type RoomAllowedMemberScalarFieldEnum = (typeof RoomAllowedMemberScalarFieldEnum)[keyof typeof RoomAllowedMemberScalarFieldEnum]
+
+
+export const PendingOwnershipTransferScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  ownerDiscordId: 'ownerDiscordId',
+  targetDiscordId: 'targetDiscordId',
+  controlVersion: 'controlVersion',
+  expiresAt: 'expiresAt'
+} as const
+
+export type PendingOwnershipTransferScalarFieldEnum = (typeof PendingOwnershipTransferScalarFieldEnum)[keyof typeof PendingOwnershipTransferScalarFieldEnum]
 
 
 export const SortOrder = {

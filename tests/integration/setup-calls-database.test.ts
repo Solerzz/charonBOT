@@ -8,11 +8,13 @@ import {
 } from '../../src/core/database/prisma.js';
 import { PrismaTemporaryRoomRepository } from '../../src/modules/calls/call.repository.js';
 import { PrismaVoiceCreatorRepository } from '../../src/modules/setup/setup.repository.js';
+import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
 
 describe('setup and calls database round trips', () => {
   integrationTest('isolates creator settings and preserves closed room history through restoration', async () => {
+    assertDisposableDatabaseEnvironment();
     const url = process.env.DATABASE_URL;
     const directUrl = process.env.DIRECT_URL;
 
@@ -73,6 +75,7 @@ describe('setup and calls database round trips', () => {
       expect(room).toMatchObject({
         status: 'CREATING', visibility: 'PUBLIC', userLimit: 0,
         controlMessageDiscordId: null, closedAt: null,
+        controlVersion: 0, priorityMemberDiscordId: null, priorityExpiresAt: null,
       });
       await expect(rooms.findActiveByChannel(channelDiscordId)).resolves.toEqual(room);
       await expect(rooms.findActiveByOwner(guildDiscordId, ownerDiscordId)).resolves.toEqual(room);

@@ -1,31 +1,34 @@
 import type { Logger } from 'pino';
 
-import { KeyedMutex } from '../../shared/keyed-mutex.js';
 import type { VoiceCreatorRepository } from '../setup/setup.repository.js';
-import { buildCallPanel } from './call-panel.view.js';
 import { CallDiscordError, CallMoveUnconfirmedError, type CallDiscordGateway } from './call.discord.js';
 import type { TemporaryRoomRecord, TemporaryRoomRepository } from './call.repository.js';
 import { buildInitialRoomName, voiceTransitionSchema, type VoiceTransition } from './call.schemas.js';
+import type { RoomRuntime } from './room.runtime.js';
 
 export class CallService {
   constructor(
     private readonly creators: VoiceCreatorRepository,
     private readonly rooms: TemporaryRoomRepository,
-    private readonly mutex: KeyedMutex,
+    private readonly runtime: RoomRuntime,
     private readonly logger: Logger,
   ) {}
 
   async handleVoiceTransition(input: VoiceTransition, gateway: CallDiscordGateway): Promise<void> {
     const transition = voiceTransitionSchema.parse(input);
     if (transition.oldChannelDiscordId === transition.newChannelDiscordId) return;
+    if (transition.oldChannelDiscordId !== null) {
+      this.runtime.coordinator.recordDeparture(transition.guildDiscordId, transition.oldChannelDiscordId, transition.memberDiscordId, transition.memberIsBot);
+    }
+    if (transition.newChannelDiscordId !== null) this.runtime.coordinator.recordArrival(transition.guildDiscordId, transition.newChannelDiscordId, transition.memberDiscordId);
     // Lock order is always member -> one room. Never hold two room locks and
     // never await a voice-event handler from a Discord move operation.
-    await this.mutex.runExclusive(`${transition.guildDiscordId}:${transition.memberDiscordId}`, async () => {
+    await this.runtime.coordinator.member(transition.guildDiscordId, transition.memberDiscordId, async () => {
       if (transition.oldChannelDiscordId !== null) {
-        await this.refreshRoom(transition.oldChannelDiscordId, transition, gateway, true);
+        await this.refreshRoom(transition.oldChannelDiscordId, transition, gateway);
       }
       if (transition.newChannelDiscordId === null) return;
-      await this.refreshRoom(transition.newChannelDiscordId, transition, gateway, false);
+      await this.refreshRoom(transition.newChannelDiscordId, transition, gateway);
       if (transition.memberIsBot) return;
       const creator = await this.creators.findByChannel(transition.newChannelDiscordId);
       if (creator === null || creator.guildDiscordId !== transition.guildDiscordId) return;
@@ -98,19 +101,8 @@ export class CallService {
         if (gateway.getMemberChannelDiscordId() !== channelDiscordId) {
           created = await this.rooms.clearOwner(created.id, transition.memberDiscordId);
         }
-        let messageDiscordId: string | null = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            messageDiscordId = await gateway.sendControlPanel(channelDiscordId, buildCallPanel({
-              room: created, participantCount: gateway.getChannelMemberCount(channelDiscordId),
-            }));
-            break;
-          } catch (error: unknown) {
-            this.logFailure('sendControlPanel', transition, channelDiscordId, error, created.id);
-          }
-        }
         try {
-          await this.rooms.markActive(created.id, messageDiscordId);
+          await this.activateAndRefresh(created, transition, gateway);
         } catch (error: unknown) {
           // The occupied room is NOT compensated: its durable CREATING row is
           // still queryable and blocks duplicate ownership. A later event can
@@ -121,16 +113,21 @@ export class CallService {
     });
   }
 
-  private async refreshRoom(channelDiscordId: string, input: VoiceTransition, gateway: CallDiscordGateway, departure: boolean): Promise<void> {
+  private async refreshRoom(channelDiscordId: string, input: VoiceTransition, gateway: CallDiscordGateway): Promise<void> {
     await this.withRoomLock(channelDiscordId, input, async () => {
       let room = await this.rooms.findActiveByChannel(channelDiscordId);
-      if (room === null || room.guildDiscordId !== input.guildDiscordId) return;
+      if (room === null || room.guildDiscordId !== input.guildDiscordId) {
+        for (const departure of this.runtime.coordinator.pendingDepartures(input.guildDiscordId, channelDiscordId)) {
+          this.runtime.coordinator.acknowledgeDeparture(input.guildDiscordId, channelDiscordId, departure);
+        }
+        return;
+      }
+      await this.runtime.reconcileDeparturesLocked(room.id);
+      room = await this.rooms.findActiveByChannel(channelDiscordId);
+      if (room === null) return;
       if (gateway.getChannelMemberCount(channelDiscordId) === 0) {
         await this.closeIfEmpty(room, input, gateway);
         return;
-      }
-      if (departure && room.ownerDiscordId === input.memberDiscordId && gateway.getMemberChannelDiscordId() !== channelDiscordId) {
-        room = await this.rooms.clearOwner(room.id, input.memberDiscordId);
       }
       await this.activateAndRefresh(room, input, gateway);
     });
@@ -138,14 +135,10 @@ export class CallService {
 
   private async activateAndRefresh(room: TemporaryRoomRecord, input: VoiceTransition, gateway: CallDiscordGateway): Promise<void> {
     if (room.status === 'CREATING') room = await this.rooms.markActive(room.id, room.controlMessageDiscordId);
-    if (room.controlMessageDiscordId !== null) {
-      try {
-        await gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId, buildCallPanel({
-          room, participantCount: gateway.getChannelMemberCount(room.channelDiscordId),
-        }));
-      } catch (error: unknown) {
-        this.logFailure('updateControlPanel', input, room.channelDiscordId, error, room.id);
-      }
+    try {
+      await this.runtime.observeLocked(room.id, gateway);
+    } catch (error: unknown) {
+      this.logFailure('observeRoom', input, room.channelDiscordId, error, room.id);
     }
   }
 
@@ -164,12 +157,20 @@ export class CallService {
   private async closeIfEmpty(room: TemporaryRoomRecord, input: VoiceTransition, gateway: CallDiscordGateway): Promise<boolean> {
     if (gateway.getChannelMemberCount(room.channelDiscordId) !== 0) return false;
     const closing = await this.rooms.beginClosing(room.id);
-    if (closing.status === 'CLOSED') return true;
+    this.runtime.timers.cancel(`transfer:${room.id}`);
+    this.runtime.timers.cancel(`countdown:${room.id}`);
+    this.runtime.timers.cancel(`priority:${room.id}`);
+    this.runtime.transfers.synchronizePrompt(room.id, null);
+    if (closing.status === 'CLOSED') {
+      this.runtime.coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
+      return true;
+    }
     // beginClosing awaits I/O: a stale zero must not evict newly arrived members.
     if (gateway.getChannelMemberCount(room.channelDiscordId) === 0) {
       try {
         await gateway.deleteChannel(room.channelDiscordId);
         await this.rooms.markClosed(room.id);
+        this.runtime.coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
         return true;
       } catch (error: unknown) {
         this.logFailure('closeRoom', input, room.channelDiscordId, error, room.id);
@@ -187,7 +188,7 @@ export class CallService {
   }
 
   private withRoomLock<T>(channelDiscordId: string, input: VoiceTransition, operation: () => Promise<T>): Promise<T> {
-    return this.mutex.runExclusive(`room:${input.guildDiscordId}:${channelDiscordId}`, operation);
+    return this.runtime.coordinator.room(input.guildDiscordId, channelDiscordId, operation);
   }
 
   private logFailure(operation: string, input: VoiceTransition, channelDiscordId: string, error: unknown, roomId?: string): void {

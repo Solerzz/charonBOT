@@ -6,8 +6,13 @@ import { room } from './call.fixtures.js';
 
 function fixture() {
   const temporaryRoom = { findFirst: vi.fn(), create: vi.fn(), updateMany: vi.fn(), findUniqueOrThrow: vi.fn() };
-  return { temporaryRoom, repository: new PrismaTemporaryRoomRepository({ temporaryRoom } as unknown as PrismaClient) };
+  const pendingOwnershipTransfer = { deleteMany: vi.fn() };
+  const tx = { temporaryRoom, pendingOwnershipTransfer };
+  const $transaction = vi.fn(async (fn) => fn(tx));
+  return { temporaryRoom, pendingOwnershipTransfer, $transaction, repository: new PrismaTemporaryRoomRepository({ ...tx, $transaction } as unknown as PrismaClient) };
 }
+
+const invalidate = { controlVersion: { increment: 1 }, priorityMemberDiscordId: null, priorityExpiresAt: null };
 
 describe('PrismaTemporaryRoomRepository', () => {
   it('queries tracked channels and owners including recoverable creating/closing rows, never closed rows', async () => {
@@ -29,8 +34,8 @@ describe('PrismaTemporaryRoomRepository', () => {
 
   it.each([
     ['markActive', 'ACTIVE', { status: 'CREATING' }, { status: 'ACTIVE', controlMessageDiscordId: null }],
-    ['beginClosing', 'CLOSING', { status: { in: ['CREATING', 'ACTIVE'] } }, { status: 'CLOSING' }],
-    ['markClosed', 'CLOSED', { status: 'CLOSING' }, { status: 'CLOSED', closedAt: expect.any(Date) }],
+    ['beginClosing', 'CLOSING', { status: { in: ['CREATING', 'ACTIVE'] } }, { status: 'CLOSING', ...invalidate }],
+    ['markClosed', 'CLOSED', { status: 'CLOSING' }, { status: 'CLOSED', closedAt: expect.any(Date), ...invalidate }],
   ] as const)('conditionally transitions %s and returns already transitioned records', async (method, status, where, data) => {
     const { temporaryRoom: db, repository } = fixture();
     db.updateMany.mockResolvedValue({ count: 1 });
@@ -57,7 +62,7 @@ describe('PrismaTemporaryRoomRepository', () => {
     db.updateMany.mockResolvedValue({ count: 0 });
     db.findUniqueOrThrow.mockResolvedValue({ ...room, ownerDiscordId: '72345678901234567' });
     await expect(repository.clearOwner(room.id, room.ownerDiscordId!)).resolves.toMatchObject({ ownerDiscordId: '72345678901234567' });
-    expect(db.updateMany).toHaveBeenCalledExactlyOnceWith({ where: { id: room.id, ownerDiscordId: room.ownerDiscordId, status: { in: ['CREATING', 'ACTIVE', 'CLOSING'] } }, data: { ownerDiscordId: null } });
+    expect(db.updateMany).toHaveBeenCalledExactlyOnceWith({ where: { id: room.id, ownerDiscordId: room.ownerDiscordId, status: { in: ['CREATING', 'ACTIVE', 'CLOSING'] } }, data: { ownerDiscordId: null, ...invalidate } });
   });
 
   it('can clear an owner from an occupied CLOSING room but never from CLOSED history', async () => {
@@ -67,7 +72,21 @@ describe('PrismaTemporaryRoomRepository', () => {
     await expect(repository.clearOwner(room.id, room.ownerDiscordId!)).resolves.toMatchObject({ status: 'CLOSING', ownerDiscordId: null });
     expect(db.updateMany).toHaveBeenCalledWith({
       where: { id: room.id, ownerDiscordId: room.ownerDiscordId, status: { in: ['CREATING', 'ACTIVE', 'CLOSING'] } },
-      data: { ownerDiscordId: null },
+      data: { ownerDiscordId: null, ...invalidate },
     });
+  });
+
+  it.each(['clearOwner', 'beginClosing', 'markClosed'] as const)('%s invalidates pending transfers only after a successful lifecycle CAS', async (method) => {
+    const f = fixture();
+    f.temporaryRoom.updateMany.mockResolvedValue({ count: 1 });
+    f.temporaryRoom.findUniqueOrThrow.mockResolvedValue({ ...room, status: method === 'clearOwner' ? 'ACTIVE' : method === 'beginClosing' ? 'CLOSING' : 'CLOSED' });
+    const operation = () => method === 'clearOwner' ? f.repository.clearOwner(room.id, room.ownerDiscordId!) : f.repository[method](room.id);
+    await operation();
+    expect(f.pendingOwnershipTransfer.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { roomId: room.id } });
+    expect(f.$transaction).toHaveBeenCalledTimes(1);
+    f.pendingOwnershipTransfer.deleteMany.mockClear();
+    f.temporaryRoom.updateMany.mockResolvedValue({ count: 0 });
+    await operation();
+    expect(f.pendingOwnershipTransfer.deleteMany).not.toHaveBeenCalled();
   });
 });

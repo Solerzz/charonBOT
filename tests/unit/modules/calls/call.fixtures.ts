@@ -1,3 +1,4 @@
+import type { OverwriteData } from 'discord.js';
 import { vi } from 'vitest';
 
 import type { TemporaryRoom, VoiceCreator } from '../../../../src/generated/prisma/client.js';
@@ -19,6 +20,7 @@ export const room: TemporaryRoom = {
   ownerDiscordId: '52345678901234567', controlMessageDiscordId: '62345678901234567',
   name: 'Game', userLimit: 0, visibility: 'PUBLIC', status: 'ACTIVE',
   createdAt: new Date(0), updatedAt: new Date(0), closedAt: null,
+  controlVersion: 0, priorityMemberDiscordId: null, priorityExpiresAt: null,
 };
 export const entry: VoiceTransition = {
   guildDiscordId: creator.guildDiscordId, memberDiscordId: room.ownerDiscordId!,
@@ -32,13 +34,14 @@ export function deferred<T = void>() {
   return { promise, resolve };
 }
 export function lifecycleFixture() {
+  const configuration = { ...creator };
   const records = new Map<string, TemporaryRoom>();
   const counts = new Map<string, number>();
   let memberChannel: string | null = creator.creatorChannelDiscordId;
   const creators = {
     listByGuild: vi.fn(), findById: vi.fn(), create: vi.fn(), updateCategory: vi.fn(),
     setRoomCommandsEnabled: vi.fn(), delete: vi.fn(),
-    findByChannel: vi.fn(async (id: string) => id === creator.creatorChannelDiscordId ? creator : null),
+    findByChannel: vi.fn(async (id: string) => id === creator.creatorChannelDiscordId ? configuration : null),
   } satisfies VoiceCreatorRepository;
   const change = (id: string, data: Partial<TemporaryRoom>) => {
     const current = records.get(id);
@@ -57,12 +60,36 @@ export function lifecycleFixture() {
     }),
     markActive: vi.fn(async (id: string, message: string | null) => change(id, { status: 'ACTIVE', controlMessageDiscordId: message })),
     clearOwner: vi.fn(async (id: string, expected: string) => {
-      return records.get(id)?.ownerDiscordId === expected ? change(id, { ownerDiscordId: null }) : records.get(id)!;
+      const current = records.get(id)!;
+      return current.ownerDiscordId === expected && current.status !== 'CLOSED'
+        ? change(id, { ownerDiscordId: null, controlVersion: current.controlVersion + 1, priorityMemberDiscordId: null, priorityExpiresAt: null }) : current;
     }),
-    beginClosing: vi.fn(async (id: string) => change(id, { status: 'CLOSING' })),
-    markClosed: vi.fn(async (id: string) => change(id, { status: 'CLOSED', closedAt: new Date() })),
+    beginClosing: vi.fn(async (id: string) => {
+      const current = records.get(id)!;
+      return current.status === 'CREATING' || current.status === 'ACTIVE'
+        ? change(id, { status: 'CLOSING', controlVersion: current.controlVersion + 1, priorityMemberDiscordId: null, priorityExpiresAt: null }) : current;
+    }),
+    markClosed: vi.fn(async (id: string) => {
+      const current = records.get(id)!;
+      return current.status === 'CLOSING'
+        ? change(id, { status: 'CLOSED', closedAt: new Date(), controlVersion: current.controlVersion + 1, priorityMemberDiscordId: null, priorityExpiresAt: null }) : current;
+    }),
   } satisfies TemporaryRoomRepository;
   const gateway = {
+    snapshot: vi.fn(async (id: string) => {
+      const current = [...records.values()].find((r) => r.channelDiscordId === id) ?? room;
+      const members = Array.from({ length: counts.get(id) ?? 0 }, (_, index) => ({ memberDiscordId: index === 0 && memberChannel === id ? entry.memberDiscordId : String(70000000000000000n + BigInt(index)), isBot: false }));
+      return { guildDiscordId: current.guildDiscordId, channelDiscordId: id, name: current.name, userLimit: current.userLimit, members };
+    }),
+    resolveMember: vi.fn(async (id: string) => ({ memberDiscordId: id, isBot: false })),
+    rename: vi.fn(async (_id: string, _name: string) => {}),
+    restoreName: vi.fn(async (_id: string, _previousName: string) => {}),
+    setLimit: vi.fn(async (_id: string, _limit: number) => {}),
+    readAccess: vi.fn(async (_id: string) => []),
+    setPrivateAccess: vi.fn(async (_id: string, _allowed: string[]) => {}),
+    setPublicAccess: vi.fn(async (_id: string) => {}),
+    restoreAccess: vi.fn(async (_id: string, _previous: OverwriteData[]) => {}),
+    deleteControlPanel: vi.fn(async (_id: string, _message: string) => {}),
     createTemporaryChannel: vi.fn(async () => ({ channelDiscordId: room.channelDiscordId })),
     getMemberChannelDiscordId: vi.fn(() => memberChannel),
     getChannelMemberCount: vi.fn((id: string) => counts.get(id) ?? 0),
@@ -71,5 +98,7 @@ export function lifecycleFixture() {
     updateControlPanel: vi.fn(async (_id: string, _message: string, _payload: CallPanelPayload) => {}),
     deleteChannel: vi.fn(async (id: string) => { counts.delete(id); }),
   } satisfies CallDiscordGateway;
-  return { records, counts, creators, rooms, gateway, setMemberChannel: (id: string | null) => { memberChannel = id; } };
+  return { records, counts, creators, rooms, gateway, configuration,
+    setControlsEnabled: (enabled: boolean) => { configuration.roomCommandsEnabled = enabled; },
+    setMemberChannel: (id: string | null) => { memberChannel = id; } };
 }

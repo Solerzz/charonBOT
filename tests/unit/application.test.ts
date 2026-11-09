@@ -18,6 +18,7 @@ import { createLogger } from '../../src/core/logger/logger.js';
 import { createPrismaClient } from '../../src/core/database/prisma.js';
 import { InteractionRegistry } from '../../src/core/discord/interactions/interaction-registry.js';
 import { VoiceStateHandler, type VoiceStateDispatcher } from '../../src/modules/calls/voice-state.handler.js';
+import { CallInteractions } from '../../src/modules/calls/call.interactions.js';
 import { SetupCommand } from '../../src/modules/setup/setup.command.js';
 import { SetupInteractions } from '../../src/modules/setup/setup.interactions.js';
 import { StatusCommand } from '../../src/modules/status/status.command.js';
@@ -52,6 +53,9 @@ function dependencies(events: string[]): {
       },
     },
     discord: {
+      off: () => undefined,
+      isReady: () => true,
+      guilds: { fetch: async () => { throw new Error('Unexpected guild fetch in health-only fixture'); } },
       on: (event) => {
         events.push(`discord:${event}`);
       },
@@ -463,7 +467,7 @@ describe('default module composition', () => {
     try {
       const registry = createDefaultDispatcher(createLogger({ level: 'silent' }), database);
       expect(registry).toBeInstanceOf(InteractionRegistry);
-      expect(register.mock.calls.map(([handler]) => handler.constructor)).toEqual([StatusCommand, SetupCommand, SetupInteractions]);
+      expect(register.mock.calls.map(([handler]) => handler.constructor)).toEqual([StatusCommand, SetupCommand, SetupInteractions, CallInteractions]);
       expect(connect).not.toHaveBeenCalled();
     } finally {
       register.mockRestore();
@@ -475,6 +479,8 @@ describe('default module composition', () => {
     const database = createPrismaClient(config.database);
     vi.spyOn(database, '$connect').mockResolvedValue(undefined);
     vi.spyOn(database, '$queryRawUnsafe').mockResolvedValue([]);
+    vi.spyOn(database.pendingOwnershipTransfer, 'deleteMany').mockResolvedValue({ count: 0 });
+    vi.spyOn(database.temporaryRoom, 'findMany').mockResolvedValue([]);
     const lookup = vi.spyOn(database.temporaryRoom, 'findFirst').mockResolvedValue(null);
     const discord = dependencies([]).discord;
     let interactionListener: ((interaction: Interaction) => void) | undefined;

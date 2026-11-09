@@ -28,10 +28,12 @@ export type AggregateTemporaryRoom = {
 
 export type TemporaryRoomAvgAggregateOutputType = {
   userLimit: number | null
+  controlVersion: number | null
 }
 
 export type TemporaryRoomSumAggregateOutputType = {
   userLimit: number | null
+  controlVersion: number | null
 }
 
 export type TemporaryRoomMinAggregateOutputType = {
@@ -48,6 +50,9 @@ export type TemporaryRoomMinAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   closedAt: Date | null
+  controlVersion: number | null
+  priorityMemberDiscordId: string | null
+  priorityExpiresAt: Date | null
 }
 
 export type TemporaryRoomMaxAggregateOutputType = {
@@ -64,6 +69,9 @@ export type TemporaryRoomMaxAggregateOutputType = {
   createdAt: Date | null
   updatedAt: Date | null
   closedAt: Date | null
+  controlVersion: number | null
+  priorityMemberDiscordId: string | null
+  priorityExpiresAt: Date | null
 }
 
 export type TemporaryRoomCountAggregateOutputType = {
@@ -80,16 +88,21 @@ export type TemporaryRoomCountAggregateOutputType = {
   createdAt: number
   updatedAt: number
   closedAt: number
+  controlVersion: number
+  priorityMemberDiscordId: number
+  priorityExpiresAt: number
   _all: number
 }
 
 
 export type TemporaryRoomAvgAggregateInputType = {
   userLimit?: true
+  controlVersion?: true
 }
 
 export type TemporaryRoomSumAggregateInputType = {
   userLimit?: true
+  controlVersion?: true
 }
 
 export type TemporaryRoomMinAggregateInputType = {
@@ -106,6 +119,9 @@ export type TemporaryRoomMinAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   closedAt?: true
+  controlVersion?: true
+  priorityMemberDiscordId?: true
+  priorityExpiresAt?: true
 }
 
 export type TemporaryRoomMaxAggregateInputType = {
@@ -122,6 +138,9 @@ export type TemporaryRoomMaxAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   closedAt?: true
+  controlVersion?: true
+  priorityMemberDiscordId?: true
+  priorityExpiresAt?: true
 }
 
 export type TemporaryRoomCountAggregateInputType = {
@@ -138,6 +157,9 @@ export type TemporaryRoomCountAggregateInputType = {
   createdAt?: true
   updatedAt?: true
   closedAt?: true
+  controlVersion?: true
+  priorityMemberDiscordId?: true
+  priorityExpiresAt?: true
   _all?: true
 }
 
@@ -241,6 +263,9 @@ export type TemporaryRoomGroupByOutputType = {
   createdAt: Date
   updatedAt: Date
   closedAt: Date | null
+  controlVersion: number
+  priorityMemberDiscordId: string | null
+  priorityExpiresAt: Date | null
   _count: TemporaryRoomCountAggregateOutputType | null
   _avg: TemporaryRoomAvgAggregateOutputType | null
   _sum: TemporaryRoomSumAggregateOutputType | null
@@ -280,7 +305,13 @@ export type TemporaryRoomWhereInput = {
   createdAt?: Prisma.DateTimeFilter<"TemporaryRoom"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"TemporaryRoom"> | Date | string
   closedAt?: Prisma.DateTimeNullableFilter<"TemporaryRoom"> | Date | string | null
+  controlVersion?: Prisma.IntFilter<"TemporaryRoom"> | number
+  priorityMemberDiscordId?: Prisma.StringNullableFilter<"TemporaryRoom"> | string | null
+  priorityExpiresAt?: Prisma.DateTimeNullableFilter<"TemporaryRoom"> | Date | string | null
   voiceCreator?: Prisma.XOR<Prisma.VoiceCreatorScalarRelationFilter, Prisma.VoiceCreatorWhereInput>
+  presences?: Prisma.RoomPresenceListRelationFilter
+  allowedMembers?: Prisma.RoomAllowedMemberListRelationFilter
+  pendingTransfer?: Prisma.XOR<Prisma.PendingOwnershipTransferNullableScalarRelationFilter, Prisma.PendingOwnershipTransferWhereInput> | null
 }
 
 export type TemporaryRoomOrderByWithRelationInput = {
@@ -297,7 +328,13 @@ export type TemporaryRoomOrderByWithRelationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   closedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  controlVersion?: Prisma.SortOrder
+  priorityMemberDiscordId?: Prisma.SortOrderInput | Prisma.SortOrder
+  priorityExpiresAt?: Prisma.SortOrderInput | Prisma.SortOrder
   voiceCreator?: Prisma.VoiceCreatorOrderByWithRelationInput
+  presences?: Prisma.RoomPresenceOrderByRelationAggregateInput
+  allowedMembers?: Prisma.RoomAllowedMemberOrderByRelationAggregateInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferOrderByWithRelationInput
 }
 
 export type TemporaryRoomWhereUniqueInput = Prisma.AtLeast<{
@@ -317,7 +354,13 @@ export type TemporaryRoomWhereUniqueInput = Prisma.AtLeast<{
   createdAt?: Prisma.DateTimeFilter<"TemporaryRoom"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"TemporaryRoom"> | Date | string
   closedAt?: Prisma.DateTimeNullableFilter<"TemporaryRoom"> | Date | string | null
+  controlVersion?: Prisma.IntFilter<"TemporaryRoom"> | number
+  priorityMemberDiscordId?: Prisma.StringNullableFilter<"TemporaryRoom"> | string | null
+  priorityExpiresAt?: Prisma.DateTimeNullableFilter<"TemporaryRoom"> | Date | string | null
   voiceCreator?: Prisma.XOR<Prisma.VoiceCreatorScalarRelationFilter, Prisma.VoiceCreatorWhereInput>
+  presences?: Prisma.RoomPresenceListRelationFilter
+  allowedMembers?: Prisma.RoomAllowedMemberListRelationFilter
+  pendingTransfer?: Prisma.XOR<Prisma.PendingOwnershipTransferNullableScalarRelationFilter, Prisma.PendingOwnershipTransferWhereInput> | null
 }, "id" | "channelDiscordId">
 
 export type TemporaryRoomOrderByWithAggregationInput = {
@@ -334,6 +377,9 @@ export type TemporaryRoomOrderByWithAggregationInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   closedAt?: Prisma.SortOrderInput | Prisma.SortOrder
+  controlVersion?: Prisma.SortOrder
+  priorityMemberDiscordId?: Prisma.SortOrderInput | Prisma.SortOrder
+  priorityExpiresAt?: Prisma.SortOrderInput | Prisma.SortOrder
   _count?: Prisma.TemporaryRoomCountOrderByAggregateInput
   _avg?: Prisma.TemporaryRoomAvgOrderByAggregateInput
   _max?: Prisma.TemporaryRoomMaxOrderByAggregateInput
@@ -358,6 +404,9 @@ export type TemporaryRoomScalarWhereWithAggregatesInput = {
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"TemporaryRoom"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"TemporaryRoom"> | Date | string
   closedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"TemporaryRoom"> | Date | string | null
+  controlVersion?: Prisma.IntWithAggregatesFilter<"TemporaryRoom"> | number
+  priorityMemberDiscordId?: Prisma.StringNullableWithAggregatesFilter<"TemporaryRoom"> | string | null
+  priorityExpiresAt?: Prisma.DateTimeNullableWithAggregatesFilter<"TemporaryRoom"> | Date | string | null
 }
 
 export type TemporaryRoomCreateInput = {
@@ -373,7 +422,13 @@ export type TemporaryRoomCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
   voiceCreator: Prisma.VoiceCreatorCreateNestedOneWithoutTemporaryRoomsInput
+  presences?: Prisma.RoomPresenceCreateNestedManyWithoutRoomInput
+  allowedMembers?: Prisma.RoomAllowedMemberCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferCreateNestedOneWithoutRoomInput
 }
 
 export type TemporaryRoomUncheckedCreateInput = {
@@ -390,6 +445,12 @@ export type TemporaryRoomUncheckedCreateInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedCreateNestedManyWithoutRoomInput
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedCreateNestedOneWithoutRoomInput
 }
 
 export type TemporaryRoomUpdateInput = {
@@ -405,7 +466,13 @@ export type TemporaryRoomUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   voiceCreator?: Prisma.VoiceCreatorUpdateOneRequiredWithoutTemporaryRoomsNestedInput
+  presences?: Prisma.RoomPresenceUpdateManyWithoutRoomNestedInput
+  allowedMembers?: Prisma.RoomAllowedMemberUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUpdateOneWithoutRoomNestedInput
 }
 
 export type TemporaryRoomUncheckedUpdateInput = {
@@ -422,6 +489,12 @@ export type TemporaryRoomUncheckedUpdateInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedUpdateManyWithoutRoomNestedInput
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedUpdateOneWithoutRoomNestedInput
 }
 
 export type TemporaryRoomCreateManyInput = {
@@ -438,6 +511,9 @@ export type TemporaryRoomCreateManyInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
 }
 
 export type TemporaryRoomUpdateManyMutationInput = {
@@ -453,6 +529,9 @@ export type TemporaryRoomUpdateManyMutationInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
 }
 
 export type TemporaryRoomUncheckedUpdateManyInput = {
@@ -469,6 +548,9 @@ export type TemporaryRoomUncheckedUpdateManyInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
 }
 
 export type TemporaryRoomListRelationFilter = {
@@ -495,10 +577,14 @@ export type TemporaryRoomCountOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   closedAt?: Prisma.SortOrder
+  controlVersion?: Prisma.SortOrder
+  priorityMemberDiscordId?: Prisma.SortOrder
+  priorityExpiresAt?: Prisma.SortOrder
 }
 
 export type TemporaryRoomAvgOrderByAggregateInput = {
   userLimit?: Prisma.SortOrder
+  controlVersion?: Prisma.SortOrder
 }
 
 export type TemporaryRoomMaxOrderByAggregateInput = {
@@ -515,6 +601,9 @@ export type TemporaryRoomMaxOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   closedAt?: Prisma.SortOrder
+  controlVersion?: Prisma.SortOrder
+  priorityMemberDiscordId?: Prisma.SortOrder
+  priorityExpiresAt?: Prisma.SortOrder
 }
 
 export type TemporaryRoomMinOrderByAggregateInput = {
@@ -531,10 +620,19 @@ export type TemporaryRoomMinOrderByAggregateInput = {
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   closedAt?: Prisma.SortOrder
+  controlVersion?: Prisma.SortOrder
+  priorityMemberDiscordId?: Prisma.SortOrder
+  priorityExpiresAt?: Prisma.SortOrder
 }
 
 export type TemporaryRoomSumOrderByAggregateInput = {
   userLimit?: Prisma.SortOrder
+  controlVersion?: Prisma.SortOrder
+}
+
+export type TemporaryRoomScalarRelationFilter = {
+  is?: Prisma.TemporaryRoomWhereInput
+  isNot?: Prisma.TemporaryRoomWhereInput
 }
 
 export type TemporaryRoomCreateNestedManyWithoutVoiceCreatorInput = {
@@ -599,6 +697,48 @@ export type EnumTemporaryRoomStatusFieldUpdateOperationsInput = {
   set?: $Enums.TemporaryRoomStatus
 }
 
+export type TemporaryRoomCreateNestedOneWithoutPresencesInput = {
+  create?: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPresencesInput, Prisma.TemporaryRoomUncheckedCreateWithoutPresencesInput>
+  connectOrCreate?: Prisma.TemporaryRoomCreateOrConnectWithoutPresencesInput
+  connect?: Prisma.TemporaryRoomWhereUniqueInput
+}
+
+export type TemporaryRoomUpdateOneRequiredWithoutPresencesNestedInput = {
+  create?: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPresencesInput, Prisma.TemporaryRoomUncheckedCreateWithoutPresencesInput>
+  connectOrCreate?: Prisma.TemporaryRoomCreateOrConnectWithoutPresencesInput
+  upsert?: Prisma.TemporaryRoomUpsertWithoutPresencesInput
+  connect?: Prisma.TemporaryRoomWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.TemporaryRoomUpdateToOneWithWhereWithoutPresencesInput, Prisma.TemporaryRoomUpdateWithoutPresencesInput>, Prisma.TemporaryRoomUncheckedUpdateWithoutPresencesInput>
+}
+
+export type TemporaryRoomCreateNestedOneWithoutAllowedMembersInput = {
+  create?: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutAllowedMembersInput, Prisma.TemporaryRoomUncheckedCreateWithoutAllowedMembersInput>
+  connectOrCreate?: Prisma.TemporaryRoomCreateOrConnectWithoutAllowedMembersInput
+  connect?: Prisma.TemporaryRoomWhereUniqueInput
+}
+
+export type TemporaryRoomUpdateOneRequiredWithoutAllowedMembersNestedInput = {
+  create?: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutAllowedMembersInput, Prisma.TemporaryRoomUncheckedCreateWithoutAllowedMembersInput>
+  connectOrCreate?: Prisma.TemporaryRoomCreateOrConnectWithoutAllowedMembersInput
+  upsert?: Prisma.TemporaryRoomUpsertWithoutAllowedMembersInput
+  connect?: Prisma.TemporaryRoomWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.TemporaryRoomUpdateToOneWithWhereWithoutAllowedMembersInput, Prisma.TemporaryRoomUpdateWithoutAllowedMembersInput>, Prisma.TemporaryRoomUncheckedUpdateWithoutAllowedMembersInput>
+}
+
+export type TemporaryRoomCreateNestedOneWithoutPendingTransferInput = {
+  create?: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPendingTransferInput, Prisma.TemporaryRoomUncheckedCreateWithoutPendingTransferInput>
+  connectOrCreate?: Prisma.TemporaryRoomCreateOrConnectWithoutPendingTransferInput
+  connect?: Prisma.TemporaryRoomWhereUniqueInput
+}
+
+export type TemporaryRoomUpdateOneRequiredWithoutPendingTransferNestedInput = {
+  create?: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPendingTransferInput, Prisma.TemporaryRoomUncheckedCreateWithoutPendingTransferInput>
+  connectOrCreate?: Prisma.TemporaryRoomCreateOrConnectWithoutPendingTransferInput
+  upsert?: Prisma.TemporaryRoomUpsertWithoutPendingTransferInput
+  connect?: Prisma.TemporaryRoomWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.TemporaryRoomUpdateToOneWithWhereWithoutPendingTransferInput, Prisma.TemporaryRoomUpdateWithoutPendingTransferInput>, Prisma.TemporaryRoomUncheckedUpdateWithoutPendingTransferInput>
+}
+
 export type TemporaryRoomCreateWithoutVoiceCreatorInput = {
   id?: string
   guildDiscordId: string
@@ -612,6 +752,12 @@ export type TemporaryRoomCreateWithoutVoiceCreatorInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  presences?: Prisma.RoomPresenceCreateNestedManyWithoutRoomInput
+  allowedMembers?: Prisma.RoomAllowedMemberCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferCreateNestedOneWithoutRoomInput
 }
 
 export type TemporaryRoomUncheckedCreateWithoutVoiceCreatorInput = {
@@ -627,6 +773,12 @@ export type TemporaryRoomUncheckedCreateWithoutVoiceCreatorInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedCreateNestedManyWithoutRoomInput
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedCreateNestedOneWithoutRoomInput
 }
 
 export type TemporaryRoomCreateOrConnectWithoutVoiceCreatorInput = {
@@ -672,6 +824,309 @@ export type TemporaryRoomScalarWhereInput = {
   createdAt?: Prisma.DateTimeFilter<"TemporaryRoom"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"TemporaryRoom"> | Date | string
   closedAt?: Prisma.DateTimeNullableFilter<"TemporaryRoom"> | Date | string | null
+  controlVersion?: Prisma.IntFilter<"TemporaryRoom"> | number
+  priorityMemberDiscordId?: Prisma.StringNullableFilter<"TemporaryRoom"> | string | null
+  priorityExpiresAt?: Prisma.DateTimeNullableFilter<"TemporaryRoom"> | Date | string | null
+}
+
+export type TemporaryRoomCreateWithoutPresencesInput = {
+  id?: string
+  guildDiscordId: string
+  channelDiscordId: string
+  ownerDiscordId?: string | null
+  controlMessageDiscordId?: string | null
+  name: string
+  userLimit?: number
+  visibility?: $Enums.RoomVisibility
+  status?: $Enums.TemporaryRoomStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  voiceCreator: Prisma.VoiceCreatorCreateNestedOneWithoutTemporaryRoomsInput
+  allowedMembers?: Prisma.RoomAllowedMemberCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferCreateNestedOneWithoutRoomInput
+}
+
+export type TemporaryRoomUncheckedCreateWithoutPresencesInput = {
+  id?: string
+  guildDiscordId: string
+  voiceCreatorId: string
+  channelDiscordId: string
+  ownerDiscordId?: string | null
+  controlMessageDiscordId?: string | null
+  name: string
+  userLimit?: number
+  visibility?: $Enums.RoomVisibility
+  status?: $Enums.TemporaryRoomStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedCreateNestedOneWithoutRoomInput
+}
+
+export type TemporaryRoomCreateOrConnectWithoutPresencesInput = {
+  where: Prisma.TemporaryRoomWhereUniqueInput
+  create: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPresencesInput, Prisma.TemporaryRoomUncheckedCreateWithoutPresencesInput>
+}
+
+export type TemporaryRoomUpsertWithoutPresencesInput = {
+  update: Prisma.XOR<Prisma.TemporaryRoomUpdateWithoutPresencesInput, Prisma.TemporaryRoomUncheckedUpdateWithoutPresencesInput>
+  create: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPresencesInput, Prisma.TemporaryRoomUncheckedCreateWithoutPresencesInput>
+  where?: Prisma.TemporaryRoomWhereInput
+}
+
+export type TemporaryRoomUpdateToOneWithWhereWithoutPresencesInput = {
+  where?: Prisma.TemporaryRoomWhereInput
+  data: Prisma.XOR<Prisma.TemporaryRoomUpdateWithoutPresencesInput, Prisma.TemporaryRoomUncheckedUpdateWithoutPresencesInput>
+}
+
+export type TemporaryRoomUpdateWithoutPresencesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  guildDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  channelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  controlMessageDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  userLimit?: Prisma.IntFieldUpdateOperationsInput | number
+  visibility?: Prisma.EnumRoomVisibilityFieldUpdateOperationsInput | $Enums.RoomVisibility
+  status?: Prisma.EnumTemporaryRoomStatusFieldUpdateOperationsInput | $Enums.TemporaryRoomStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  voiceCreator?: Prisma.VoiceCreatorUpdateOneRequiredWithoutTemporaryRoomsNestedInput
+  allowedMembers?: Prisma.RoomAllowedMemberUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUpdateOneWithoutRoomNestedInput
+}
+
+export type TemporaryRoomUncheckedUpdateWithoutPresencesInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  guildDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  voiceCreatorId?: Prisma.StringFieldUpdateOperationsInput | string
+  channelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  controlMessageDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  userLimit?: Prisma.IntFieldUpdateOperationsInput | number
+  visibility?: Prisma.EnumRoomVisibilityFieldUpdateOperationsInput | $Enums.RoomVisibility
+  status?: Prisma.EnumTemporaryRoomStatusFieldUpdateOperationsInput | $Enums.TemporaryRoomStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedUpdateOneWithoutRoomNestedInput
+}
+
+export type TemporaryRoomCreateWithoutAllowedMembersInput = {
+  id?: string
+  guildDiscordId: string
+  channelDiscordId: string
+  ownerDiscordId?: string | null
+  controlMessageDiscordId?: string | null
+  name: string
+  userLimit?: number
+  visibility?: $Enums.RoomVisibility
+  status?: $Enums.TemporaryRoomStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  voiceCreator: Prisma.VoiceCreatorCreateNestedOneWithoutTemporaryRoomsInput
+  presences?: Prisma.RoomPresenceCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferCreateNestedOneWithoutRoomInput
+}
+
+export type TemporaryRoomUncheckedCreateWithoutAllowedMembersInput = {
+  id?: string
+  guildDiscordId: string
+  voiceCreatorId: string
+  channelDiscordId: string
+  ownerDiscordId?: string | null
+  controlMessageDiscordId?: string | null
+  name: string
+  userLimit?: number
+  visibility?: $Enums.RoomVisibility
+  status?: $Enums.TemporaryRoomStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedCreateNestedManyWithoutRoomInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedCreateNestedOneWithoutRoomInput
+}
+
+export type TemporaryRoomCreateOrConnectWithoutAllowedMembersInput = {
+  where: Prisma.TemporaryRoomWhereUniqueInput
+  create: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutAllowedMembersInput, Prisma.TemporaryRoomUncheckedCreateWithoutAllowedMembersInput>
+}
+
+export type TemporaryRoomUpsertWithoutAllowedMembersInput = {
+  update: Prisma.XOR<Prisma.TemporaryRoomUpdateWithoutAllowedMembersInput, Prisma.TemporaryRoomUncheckedUpdateWithoutAllowedMembersInput>
+  create: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutAllowedMembersInput, Prisma.TemporaryRoomUncheckedCreateWithoutAllowedMembersInput>
+  where?: Prisma.TemporaryRoomWhereInput
+}
+
+export type TemporaryRoomUpdateToOneWithWhereWithoutAllowedMembersInput = {
+  where?: Prisma.TemporaryRoomWhereInput
+  data: Prisma.XOR<Prisma.TemporaryRoomUpdateWithoutAllowedMembersInput, Prisma.TemporaryRoomUncheckedUpdateWithoutAllowedMembersInput>
+}
+
+export type TemporaryRoomUpdateWithoutAllowedMembersInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  guildDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  channelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  controlMessageDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  userLimit?: Prisma.IntFieldUpdateOperationsInput | number
+  visibility?: Prisma.EnumRoomVisibilityFieldUpdateOperationsInput | $Enums.RoomVisibility
+  status?: Prisma.EnumTemporaryRoomStatusFieldUpdateOperationsInput | $Enums.TemporaryRoomStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  voiceCreator?: Prisma.VoiceCreatorUpdateOneRequiredWithoutTemporaryRoomsNestedInput
+  presences?: Prisma.RoomPresenceUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUpdateOneWithoutRoomNestedInput
+}
+
+export type TemporaryRoomUncheckedUpdateWithoutAllowedMembersInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  guildDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  voiceCreatorId?: Prisma.StringFieldUpdateOperationsInput | string
+  channelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  controlMessageDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  userLimit?: Prisma.IntFieldUpdateOperationsInput | number
+  visibility?: Prisma.EnumRoomVisibilityFieldUpdateOperationsInput | $Enums.RoomVisibility
+  status?: Prisma.EnumTemporaryRoomStatusFieldUpdateOperationsInput | $Enums.TemporaryRoomStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedUpdateOneWithoutRoomNestedInput
+}
+
+export type TemporaryRoomCreateWithoutPendingTransferInput = {
+  id?: string
+  guildDiscordId: string
+  channelDiscordId: string
+  ownerDiscordId?: string | null
+  controlMessageDiscordId?: string | null
+  name: string
+  userLimit?: number
+  visibility?: $Enums.RoomVisibility
+  status?: $Enums.TemporaryRoomStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  voiceCreator: Prisma.VoiceCreatorCreateNestedOneWithoutTemporaryRoomsInput
+  presences?: Prisma.RoomPresenceCreateNestedManyWithoutRoomInput
+  allowedMembers?: Prisma.RoomAllowedMemberCreateNestedManyWithoutRoomInput
+}
+
+export type TemporaryRoomUncheckedCreateWithoutPendingTransferInput = {
+  id?: string
+  guildDiscordId: string
+  voiceCreatorId: string
+  channelDiscordId: string
+  ownerDiscordId?: string | null
+  controlMessageDiscordId?: string | null
+  name: string
+  userLimit?: number
+  visibility?: $Enums.RoomVisibility
+  status?: $Enums.TemporaryRoomStatus
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedCreateNestedManyWithoutRoomInput
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedCreateNestedManyWithoutRoomInput
+}
+
+export type TemporaryRoomCreateOrConnectWithoutPendingTransferInput = {
+  where: Prisma.TemporaryRoomWhereUniqueInput
+  create: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPendingTransferInput, Prisma.TemporaryRoomUncheckedCreateWithoutPendingTransferInput>
+}
+
+export type TemporaryRoomUpsertWithoutPendingTransferInput = {
+  update: Prisma.XOR<Prisma.TemporaryRoomUpdateWithoutPendingTransferInput, Prisma.TemporaryRoomUncheckedUpdateWithoutPendingTransferInput>
+  create: Prisma.XOR<Prisma.TemporaryRoomCreateWithoutPendingTransferInput, Prisma.TemporaryRoomUncheckedCreateWithoutPendingTransferInput>
+  where?: Prisma.TemporaryRoomWhereInput
+}
+
+export type TemporaryRoomUpdateToOneWithWhereWithoutPendingTransferInput = {
+  where?: Prisma.TemporaryRoomWhereInput
+  data: Prisma.XOR<Prisma.TemporaryRoomUpdateWithoutPendingTransferInput, Prisma.TemporaryRoomUncheckedUpdateWithoutPendingTransferInput>
+}
+
+export type TemporaryRoomUpdateWithoutPendingTransferInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  guildDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  channelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  controlMessageDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  userLimit?: Prisma.IntFieldUpdateOperationsInput | number
+  visibility?: Prisma.EnumRoomVisibilityFieldUpdateOperationsInput | $Enums.RoomVisibility
+  status?: Prisma.EnumTemporaryRoomStatusFieldUpdateOperationsInput | $Enums.TemporaryRoomStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  voiceCreator?: Prisma.VoiceCreatorUpdateOneRequiredWithoutTemporaryRoomsNestedInput
+  presences?: Prisma.RoomPresenceUpdateManyWithoutRoomNestedInput
+  allowedMembers?: Prisma.RoomAllowedMemberUpdateManyWithoutRoomNestedInput
+}
+
+export type TemporaryRoomUncheckedUpdateWithoutPendingTransferInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  guildDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  voiceCreatorId?: Prisma.StringFieldUpdateOperationsInput | string
+  channelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
+  ownerDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  controlMessageDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  userLimit?: Prisma.IntFieldUpdateOperationsInput | number
+  visibility?: Prisma.EnumRoomVisibilityFieldUpdateOperationsInput | $Enums.RoomVisibility
+  status?: Prisma.EnumTemporaryRoomStatusFieldUpdateOperationsInput | $Enums.TemporaryRoomStatus
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedUpdateManyWithoutRoomNestedInput
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedUpdateManyWithoutRoomNestedInput
 }
 
 export type TemporaryRoomCreateManyVoiceCreatorInput = {
@@ -687,6 +1142,9 @@ export type TemporaryRoomCreateManyVoiceCreatorInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   closedAt?: Date | string | null
+  controlVersion?: number
+  priorityMemberDiscordId?: string | null
+  priorityExpiresAt?: Date | string | null
 }
 
 export type TemporaryRoomUpdateWithoutVoiceCreatorInput = {
@@ -702,6 +1160,12 @@ export type TemporaryRoomUpdateWithoutVoiceCreatorInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  presences?: Prisma.RoomPresenceUpdateManyWithoutRoomNestedInput
+  allowedMembers?: Prisma.RoomAllowedMemberUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUpdateOneWithoutRoomNestedInput
 }
 
 export type TemporaryRoomUncheckedUpdateWithoutVoiceCreatorInput = {
@@ -717,6 +1181,12 @@ export type TemporaryRoomUncheckedUpdateWithoutVoiceCreatorInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  presences?: Prisma.RoomPresenceUncheckedUpdateManyWithoutRoomNestedInput
+  allowedMembers?: Prisma.RoomAllowedMemberUncheckedUpdateManyWithoutRoomNestedInput
+  pendingTransfer?: Prisma.PendingOwnershipTransferUncheckedUpdateOneWithoutRoomNestedInput
 }
 
 export type TemporaryRoomUncheckedUpdateManyWithoutVoiceCreatorInput = {
@@ -732,8 +1202,49 @@ export type TemporaryRoomUncheckedUpdateManyWithoutVoiceCreatorInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   closedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  controlVersion?: Prisma.IntFieldUpdateOperationsInput | number
+  priorityMemberDiscordId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  priorityExpiresAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
 }
 
+
+/**
+ * Count Type TemporaryRoomCountOutputType
+ */
+
+export type TemporaryRoomCountOutputType = {
+  presences: number
+  allowedMembers: number
+}
+
+export type TemporaryRoomCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  presences?: boolean | TemporaryRoomCountOutputTypeCountPresencesArgs
+  allowedMembers?: boolean | TemporaryRoomCountOutputTypeCountAllowedMembersArgs
+}
+
+/**
+ * TemporaryRoomCountOutputType without action
+ */
+export type TemporaryRoomCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the TemporaryRoomCountOutputType
+   */
+  select?: Prisma.TemporaryRoomCountOutputTypeSelect<ExtArgs> | null
+}
+
+/**
+ * TemporaryRoomCountOutputType without action
+ */
+export type TemporaryRoomCountOutputTypeCountPresencesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.RoomPresenceWhereInput
+}
+
+/**
+ * TemporaryRoomCountOutputType without action
+ */
+export type TemporaryRoomCountOutputTypeCountAllowedMembersArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.RoomAllowedMemberWhereInput
+}
 
 
 export type TemporaryRoomSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -750,7 +1261,14 @@ export type TemporaryRoomSelect<ExtArgs extends runtime.Types.Extensions.Interna
   createdAt?: boolean
   updatedAt?: boolean
   closedAt?: boolean
+  controlVersion?: boolean
+  priorityMemberDiscordId?: boolean
+  priorityExpiresAt?: boolean
   voiceCreator?: boolean | Prisma.VoiceCreatorDefaultArgs<ExtArgs>
+  presences?: boolean | Prisma.TemporaryRoom$presencesArgs<ExtArgs>
+  allowedMembers?: boolean | Prisma.TemporaryRoom$allowedMembersArgs<ExtArgs>
+  pendingTransfer?: boolean | Prisma.TemporaryRoom$pendingTransferArgs<ExtArgs>
+  _count?: boolean | Prisma.TemporaryRoomCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["temporaryRoom"]>
 
 export type TemporaryRoomSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
@@ -767,6 +1285,9 @@ export type TemporaryRoomSelectCreateManyAndReturn<ExtArgs extends runtime.Types
   createdAt?: boolean
   updatedAt?: boolean
   closedAt?: boolean
+  controlVersion?: boolean
+  priorityMemberDiscordId?: boolean
+  priorityExpiresAt?: boolean
   voiceCreator?: boolean | Prisma.VoiceCreatorDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["temporaryRoom"]>
 
@@ -784,6 +1305,9 @@ export type TemporaryRoomSelectUpdateManyAndReturn<ExtArgs extends runtime.Types
   createdAt?: boolean
   updatedAt?: boolean
   closedAt?: boolean
+  controlVersion?: boolean
+  priorityMemberDiscordId?: boolean
+  priorityExpiresAt?: boolean
   voiceCreator?: boolean | Prisma.VoiceCreatorDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["temporaryRoom"]>
 
@@ -801,11 +1325,18 @@ export type TemporaryRoomSelectScalar = {
   createdAt?: boolean
   updatedAt?: boolean
   closedAt?: boolean
+  controlVersion?: boolean
+  priorityMemberDiscordId?: boolean
+  priorityExpiresAt?: boolean
 }
 
-export type TemporaryRoomOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "guildDiscordId" | "voiceCreatorId" | "channelDiscordId" | "ownerDiscordId" | "controlMessageDiscordId" | "name" | "userLimit" | "visibility" | "status" | "createdAt" | "updatedAt" | "closedAt", ExtArgs["result"]["temporaryRoom"]>
+export type TemporaryRoomOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "guildDiscordId" | "voiceCreatorId" | "channelDiscordId" | "ownerDiscordId" | "controlMessageDiscordId" | "name" | "userLimit" | "visibility" | "status" | "createdAt" | "updatedAt" | "closedAt" | "controlVersion" | "priorityMemberDiscordId" | "priorityExpiresAt", ExtArgs["result"]["temporaryRoom"]>
 export type TemporaryRoomInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   voiceCreator?: boolean | Prisma.VoiceCreatorDefaultArgs<ExtArgs>
+  presences?: boolean | Prisma.TemporaryRoom$presencesArgs<ExtArgs>
+  allowedMembers?: boolean | Prisma.TemporaryRoom$allowedMembersArgs<ExtArgs>
+  pendingTransfer?: boolean | Prisma.TemporaryRoom$pendingTransferArgs<ExtArgs>
+  _count?: boolean | Prisma.TemporaryRoomCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type TemporaryRoomIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   voiceCreator?: boolean | Prisma.VoiceCreatorDefaultArgs<ExtArgs>
@@ -818,6 +1349,9 @@ export type $TemporaryRoomPayload<ExtArgs extends runtime.Types.Extensions.Inter
   name: "TemporaryRoom"
   objects: {
     voiceCreator: Prisma.$VoiceCreatorPayload<ExtArgs>
+    presences: Prisma.$RoomPresencePayload<ExtArgs>[]
+    allowedMembers: Prisma.$RoomAllowedMemberPayload<ExtArgs>[]
+    pendingTransfer: Prisma.$PendingOwnershipTransferPayload<ExtArgs> | null
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
@@ -833,6 +1367,9 @@ export type $TemporaryRoomPayload<ExtArgs extends runtime.Types.Extensions.Inter
     createdAt: Date
     updatedAt: Date
     closedAt: Date | null
+    controlVersion: number
+    priorityMemberDiscordId: string | null
+    priorityExpiresAt: Date | null
   }, ExtArgs["result"]["temporaryRoom"]>
   composites: {}
 }
@@ -1228,6 +1765,9 @@ readonly fields: TemporaryRoomFieldRefs;
 export interface Prisma__TemporaryRoomClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
   voiceCreator<T extends Prisma.VoiceCreatorDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.VoiceCreatorDefaultArgs<ExtArgs>>): Prisma.Prisma__VoiceCreatorClient<runtime.Types.Result.GetResult<Prisma.$VoiceCreatorPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+  presences<T extends Prisma.TemporaryRoom$presencesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.TemporaryRoom$presencesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$RoomPresencePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  allowedMembers<T extends Prisma.TemporaryRoom$allowedMembersArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.TemporaryRoom$allowedMembersArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$RoomAllowedMemberPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  pendingTransfer<T extends Prisma.TemporaryRoom$pendingTransferArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.TemporaryRoom$pendingTransferArgs<ExtArgs>>): Prisma.Prisma__PendingOwnershipTransferClient<runtime.Types.Result.GetResult<Prisma.$PendingOwnershipTransferPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1270,6 +1810,9 @@ export interface TemporaryRoomFieldRefs {
   readonly createdAt: Prisma.FieldRef<"TemporaryRoom", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"TemporaryRoom", 'DateTime'>
   readonly closedAt: Prisma.FieldRef<"TemporaryRoom", 'DateTime'>
+  readonly controlVersion: Prisma.FieldRef<"TemporaryRoom", 'Int'>
+  readonly priorityMemberDiscordId: Prisma.FieldRef<"TemporaryRoom", 'String'>
+  readonly priorityExpiresAt: Prisma.FieldRef<"TemporaryRoom", 'DateTime'>
 }
     
 
@@ -1668,6 +2211,73 @@ export type TemporaryRoomDeleteManyArgs<ExtArgs extends runtime.Types.Extensions
    * Limit how many TemporaryRooms to delete.
    */
   limit?: number
+}
+
+/**
+ * TemporaryRoom.presences
+ */
+export type TemporaryRoom$presencesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the RoomPresence
+   */
+  select?: Prisma.RoomPresenceSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the RoomPresence
+   */
+  omit?: Prisma.RoomPresenceOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.RoomPresenceInclude<ExtArgs> | null
+  where?: Prisma.RoomPresenceWhereInput
+  orderBy?: Prisma.RoomPresenceOrderByWithRelationInput | Prisma.RoomPresenceOrderByWithRelationInput[]
+  cursor?: Prisma.RoomPresenceWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.RoomPresenceScalarFieldEnum | Prisma.RoomPresenceScalarFieldEnum[]
+}
+
+/**
+ * TemporaryRoom.allowedMembers
+ */
+export type TemporaryRoom$allowedMembersArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the RoomAllowedMember
+   */
+  select?: Prisma.RoomAllowedMemberSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the RoomAllowedMember
+   */
+  omit?: Prisma.RoomAllowedMemberOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.RoomAllowedMemberInclude<ExtArgs> | null
+  where?: Prisma.RoomAllowedMemberWhereInput
+  orderBy?: Prisma.RoomAllowedMemberOrderByWithRelationInput | Prisma.RoomAllowedMemberOrderByWithRelationInput[]
+  cursor?: Prisma.RoomAllowedMemberWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.RoomAllowedMemberScalarFieldEnum | Prisma.RoomAllowedMemberScalarFieldEnum[]
+}
+
+/**
+ * TemporaryRoom.pendingTransfer
+ */
+export type TemporaryRoom$pendingTransferArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the PendingOwnershipTransfer
+   */
+  select?: Prisma.PendingOwnershipTransferSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the PendingOwnershipTransfer
+   */
+  omit?: Prisma.PendingOwnershipTransferOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.PendingOwnershipTransferInclude<ExtArgs> | null
+  where?: Prisma.PendingOwnershipTransferWhereInput
 }
 
 /**

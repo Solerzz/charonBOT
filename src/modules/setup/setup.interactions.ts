@@ -172,11 +172,26 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
           await this.requireCategory(gateway, value);
           await this.service.changeCategory(selected.id, value);
           break;
-        case 'toggle-commands':
+        case 'toggle-commands': {
           await this.requireVoice(gateway, selected.creatorChannelDiscordId);
           await this.requireCategory(gateway, selected.categoryDiscordId);
-          await this.service.toggleRoomCommands(selected.id);
-          break;
+          const { synchronization } = await this.service.toggleRoomCommands(selected.id);
+          const status = synchronization === null ? 'Sincronização dos painéis não confirmada.'
+            : synchronization.failed > 0 ? `Sincronização parcial: ${synchronization.synced} sala(s) sincronizada(s), ${synchronization.failed} sala(s) com falha.`
+            : `Sincronização dos painéis concluída: ${synchronization.synced} sala(s).`;
+          const content = `Configuração salva. ${status}`;
+          try {
+            await this.refresh(interaction, gateway, selected.id, content);
+          } catch {
+            // Refresh failure cannot turn a committed toggle into a failed save
+            // or leave an old toggle available as an apparent retry action.
+            await interaction.editReply({
+              content: `${content} Não foi possível atualizar a configuração exibida. Abra /setup init para consultar o estado salvo.`,
+              embeds: [], components: [], allowedMentions: { parse: [] },
+            });
+          }
+          return;
+        }
         case 'rename': {
           await this.requireVoice(gateway, selected.creatorChannelDiscordId);
           await this.requireCategory(gateway, selected.categoryDiscordId);
@@ -251,7 +266,7 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
     if (await gateway.getCategory(id) === null) throw new SetupDiscordError();
   }
 
-  private async refresh(interaction: GuildBasedInteraction, gateway: SetupDiscordGateway, selectedVoiceCreatorId?: string): Promise<void> {
+  private async refresh(interaction: GuildBasedInteraction, gateway: SetupDiscordGateway, selectedVoiceCreatorId?: string, content: string | null = null): Promise<void> {
     const configurations = (await this.service.list(interaction.guildId))
       .filter((item) => item.guildDiscordId === interaction.guildId && item.deletedAt === null);
     const selected = configurations.find((item) => item.id === selectedVoiceCreatorId) ?? configurations[0];
@@ -266,7 +281,7 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
       }
     }
     await interaction.editReply({
-      content: null,
+      content,
       ...buildSetupDashboard({
         configurations, ...(selected === undefined ? {} : { selectedVoiceCreatorId: selected.id }),
         voiceChannels, unavailableChannelDiscordIds,

@@ -48,8 +48,44 @@ model TemporaryRoom {
   createdAt               DateTime            @default(now()) @db.Timestamptz(3)
   updatedAt               DateTime            @updatedAt @db.Timestamptz(3)
   closedAt                DateTime?           @db.Timestamptz(3)
+  controlVersion          Int                 @default(0)
+  priorityMemberDiscordId String?
+  priorityExpiresAt       DateTime?           @db.Timestamptz(3)
   voiceCreator            VoiceCreator        @relation(fields: [voiceCreatorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  presences               RoomPresence[]
+  allowedMembers          RoomAllowedMember[]
+  pendingTransfer         PendingOwnershipTransfer?
 
   @@index([guildDiscordId, ownerDiscordId, status])
   @@index([channelDiscordId, status])
+}
+
+model RoomPresence {
+  id              String        @id @default(uuid()) @db.Uuid
+  roomId          String        @db.Uuid
+  memberDiscordId String
+  isBot           Boolean
+  joinedAt        DateTime      @db.Timestamptz(3)
+  room            TemporaryRoom @relation(fields: [roomId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([roomId, memberDiscordId])
+}
+
+model RoomAllowedMember {
+  id              String        @id @default(uuid()) @db.Uuid
+  roomId          String        @db.Uuid
+  memberDiscordId String
+  room            TemporaryRoom @relation(fields: [roomId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([roomId, memberDiscordId])
+}
+
+model PendingOwnershipTransfer {
+  id              String        @id @default(uuid()) @db.Uuid
+  roomId          String        @unique @db.Uuid
+  ownerDiscordId  String
+  targetDiscordId String
+  controlVersion  Int
+  expiresAt       DateTime?     @db.Timestamptz(3)
+  room            TemporaryRoom @relation(fields: [roomId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 }
