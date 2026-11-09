@@ -78,6 +78,127 @@ function runtimeFixture() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('application-owned room runtime', () => {
+  it('retains due evidence after setup wins the panel installation CAS inside the observation callback', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    Object.assign(f.state().room, { ownerDiscordId: null, visibility: 'PRIVATE' }); await f.runtime.start(f.resolveGuild);
+    f.state().room.controlMessageDiscordId = null;
+    const entered = deferred(); const release = deferred(); const committed = deferred(); const acknowledge = deferred();
+    const send = f.channel.send.getMockImplementation()!;
+    f.channel.send.mockImplementationOnce(async (...args) => { const result = await send(...args); entered.resolve(); await release.promise; return result; });
+    f.join(OLDEST); await vi.advanceTimersByTimeAsync(300_000); await entered.promise;
+    vi.mocked(f.database.$transaction).mockImplementationOnce((async (work: (tx: typeof f.database) => Promise<unknown>) => {
+      const saved = await work(f.database); committed.resolve(); await acknowledge.promise; return saved;
+    }) as never);
+    const toggling = f.toggle(false); await committed.promise;
+    release.resolve(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.state().room.controlMessageDiscordId).toBeNull();
+    expect(f.message.delete).toHaveBeenCalledOnce(); // Failed old-version CAS compensates its untracked native message.
+    expect(f.runtime.timers.scheduledDeadlines().get(`priority:${f.state().room.id}`)).toEqual(new Date(300_000));
+    const observations = vi.mocked(f.runtime.store.syncPresence).mock.calls.length;
+    const projections = f.channel.permissionOverwrites.set.mock.calls.length;
+    acknowledge.resolve(); await toggling; await vi.advanceTimersByTimeAsync(1);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    expect(f.state().room).toMatchObject({ priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each(['cancel', 'replace', 'stop'] as const)('does not resurrect or remove due metadata after %s during a superseded snapshot', async (action) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    Object.assign(f.state().room, { ownerDiscordId: null, visibility: 'PRIVATE' }); await f.runtime.start(f.resolveGuild);
+    const entered = deferred(); const release = deferred(); const committed = deferred(); const acknowledge = deferred();
+    const fetch = f.guild.channels.fetch.getMockImplementation()!;
+    f.guild.channels.fetch.mockImplementationOnce(async (...args) => { const result = await fetch(...args); entered.resolve(); await release.promise; return result; });
+    await vi.advanceTimersByTimeAsync(300_000); await entered.promise;
+    vi.mocked(f.database.$transaction).mockImplementationOnce((async (work: (tx: typeof f.database) => Promise<unknown>) => {
+      const saved = await work(f.database); committed.resolve(); await acknowledge.promise; return saved;
+    }) as never);
+    const toggling = f.toggle(false); await committed.promise;
+    const key = `priority:${f.state().room.id}`; const effects: string[] = [];
+    let stopping: Promise<void> | undefined;
+    if (action === 'cancel') f.runtime.timers.cancel(key);
+    if (action === 'replace') f.runtime.timers.schedule(key, new Date(400_000), async () => { effects.push('replacement'); });
+    if (action === 'stop') stopping = f.runtime.stop();
+    release.resolve(); await vi.advanceTimersByTimeAsync(0); await stopping;
+    expect(f.runtime.timers.scheduledDeadlines().get(key)).toEqual(action === 'replace' ? new Date(400_000) : undefined);
+    if (action === 'replace') { await vi.advanceTimersByTimeAsync(100_000); expect(effects).toEqual(['replacement']); }
+    else { await vi.advanceTimersByTimeAsync(600_000); expect(effects).toEqual([]); }
+    acknowledge.resolve(); await toggling;
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each(['candidate', 'deadline', 'owner', 'closed'] as const)('does not retain an unrelated %s state after setup invalidates an awaited due snapshot', async (changed) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    f.state().room.ownerDiscordId = null; await f.runtime.start(f.resolveGuild);
+    const entered = deferred(); const release = deferred(); const committed = deferred(); const acknowledge = deferred();
+    const fetch = f.guild.channels.fetch.getMockImplementation()!;
+    f.guild.channels.fetch.mockImplementationOnce(async (...args) => { const result = await fetch(...args); entered.resolve(); await release.promise; return result; });
+    await vi.advanceTimersByTimeAsync(300_000); await entered.promise;
+    vi.mocked(f.database.$transaction).mockImplementationOnce((async (work: (tx: typeof f.database) => Promise<unknown>) => {
+      const saved = await work(f.database); committed.resolve(); await acknowledge.promise; return saved;
+    }) as never);
+    const toggling = f.toggle(false); await committed.promise;
+    if (changed === 'candidate') await f.runtime.store.savePriority(f.state().room.id, 2, OLDEST, new Date(300_000));
+    if (changed === 'deadline') await f.runtime.store.savePriority(f.state().room.id, 2, OTHER, new Date(299_999));
+    if (changed === 'owner') Object.assign(f.state().room, { ownerDiscordId: OTHER, controlVersion: 3, priorityMemberDiscordId: null, priorityExpiresAt: null });
+    if (changed === 'closed') f.state().room.status = 'CLOSED';
+    release.resolve(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.runtime.timers.scheduledDeadlines().has(`priority:${f.state().room.id}`)).toBe(false);
+    acknowledge.resolve(); await toggling; await vi.advanceTimersByTimeAsync(600_000);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([true, false].flatMap((enabled) => ['snapshot', 'presence-read', 'projection', 'snapshot-failure'].map((boundary) => ({ enabled, boundary }))))('preserves due evidence when setup $enabled -> opposite commits during $boundary', async ({ enabled, boundary }) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    Object.assign(f.state().room, { ownerDiscordId: null, visibility: 'PRIVATE' });
+    f.state().controlsEnabled = enabled; await f.runtime.start(f.resolveGuild);
+    const entered = deferred(); const release = deferred(); const committed = deferred(); const acknowledge = deferred();
+    if (boundary === 'snapshot' || boundary === 'snapshot-failure') {
+      const fetch = f.guild.channels.fetch.getMockImplementation()!;
+      f.guild.channels.fetch.mockImplementationOnce(async (...args) => {
+        const result = await fetch(...args); entered.resolve(); await release.promise;
+        if (boundary === 'snapshot-failure') throw new Error('private-snapshot-sentinel');
+        return result;
+      });
+    } else if (boundary === 'presence-read') {
+      const sync = vi.mocked(f.runtime.store.syncPresence).getMockImplementation()!;
+      vi.mocked(f.runtime.store.syncPresence).mockImplementationOnce(async (...args) => { await sync(...args); entered.resolve(); await release.promise; });
+    } else {
+      const project = f.channel.permissionOverwrites.set.getMockImplementation()!;
+      f.channel.permissionOverwrites.set.mockImplementationOnce(async (...args) => { await project(...args); entered.resolve(); await release.promise; });
+    }
+    f.join(OLDEST); await vi.advanceTimersByTimeAsync(300_000); await entered.promise;
+    vi.mocked(f.database.$transaction).mockImplementationOnce((async (work: (tx: typeof f.database) => Promise<unknown>) => {
+      const saved = await work(f.database); committed.resolve(); await acknowledge.promise; return saved;
+    }) as never);
+    const toggling = f.toggle(!enabled); await committed.promise;
+    release.resolve(); await vi.advanceTimersByTimeAsync(0);
+    expect(f.runtime.timers.scheduledDeadlines().get(`priority:${f.state().room.id}`)).toEqual(new Date(300_000));
+    const observations = vi.mocked(f.runtime.store.syncPresence).mock.calls.length;
+    const projections = f.channel.permissionOverwrites.set.mock.calls.length;
+    acknowledge.resolve(); await toggling; await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().presences.map((p) => p.memberDiscordId).sort()).toEqual([OLDEST, OTHER]);
+    expect(f.projected().some((o) => o.id === OLDEST)).toBe(true);
+    expect(f.state().room).toMatchObject({ controlVersion: 2, priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await f.toggle(enabled); await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    expect(f.state().room.priorityExpiresAt).toEqual(new Date(300_000));
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
   it('retires coordinator metadata when startup confirms a missing tracked channel permanently closed', async () => {
     const f = runtimeFixture();
     await f.runtime.coordinator.room(f.guild.id, f.channel.id, () => f.runtime.coordinator.changeOwnership(f.guild.id, f.channel.id, 0, null,

@@ -45,7 +45,9 @@ export class OwnershipService {
     }
     // An elapsed deadline is the durable open-claim marker, even if its member left.
     if (state.room.priorityExpiresAt !== null && state.room.priorityExpiresAt <= new Date()) {
-      this.dependencies.timers.cancel(`priority:${roomId}`);
+      // A generation-bound caller still owns this in-flight entry. Its final
+      // durable check decides whether setup invalidated the due observation.
+      if (!expected) this.dependencies.timers.cancel(`priority:${roomId}`);
       return state;
     }
     const presentHumans = new Set(snapshot.members.filter((member) => !member.isBot).map((member) => member.memberDiscordId));
@@ -125,22 +127,30 @@ export class OwnershipService {
     const initial = await store.read(roomId);
     if (!initial) return;
     return coordinator.room(initial.room.guildDiscordId, initial.room.channelDiscordId, async () => {
-      const current = await store.read(roomId);
-      if (!current || current.room.status !== 'ACTIVE' || current.room.guildDiscordId !== initial.room.guildDiscordId
-        || current.room.channelDiscordId !== initial.room.channelDiscordId) return;
-      if (expected && (current.room.ownerDiscordId !== null || !matchesGeneration(current.room, expected))) {
-        // A setup commit may be visible before its setter acknowledgement.
-        // Keep only this exact stale due entry until synchronization rebinds it.
-        if (current.room.ownerDiscordId === null && current.room.controlVersion > expected.controlVersion
-          && current.room.priorityMemberDiscordId === expected.priorityMemberDiscordId
-          && current.room.priorityExpiresAt?.getTime() === expected.priorityExpiresAt?.getTime()) return 'retain-deadline' as const;
-        return;
+      const observe = async (): Promise<void> => {
+        const current = await store.read(roomId);
+        if (!current || current.room.status !== 'ACTIVE' || current.room.guildDiscordId !== initial.room.guildDiscordId
+          || current.room.channelDiscordId !== initial.room.channelDiscordId) return;
+        if (expected && (current.room.ownerDiscordId !== null || !matchesGeneration(current.room, expected))) return;
+        const snapshot = await gateway.snapshot(current.room.channelDiscordId);
+        if (!snapshot || !matchesSnapshot(current, snapshot)) return;
+        // Carry the generation across Discord I/O; a late snapshot must not clear a later owner.
+        const updated = await this.observeConfirmedLocked(roomId, snapshot, gateway, false, current.room);
+        if (updated?.room.status === 'ACTIVE') await onChangedLocked(roomId, gateway);
+      };
+      let failure: { error: unknown } | undefined;
+      try { await observe(); } catch (error) { failure = { error }; }
+      // All early returns and awaited observation/projection boundaries converge
+      // here, including a null result from the inner durable read/CAS checks.
+      if (expected) {
+        const latest = await store.read(roomId);
+        if (latest?.room.status === 'ACTIVE' && latest.room.ownerDiscordId === null
+          && latest.room.guildDiscordId === expected.guildDiscordId && latest.room.channelDiscordId === expected.channelDiscordId
+          && latest.room.controlVersion > expected.controlVersion
+          && latest.room.priorityMemberDiscordId === expected.priorityMemberDiscordId
+          && latest.room.priorityExpiresAt?.getTime() === expected.priorityExpiresAt?.getTime()) return 'retain-deadline' as const;
       }
-      const snapshot = await gateway.snapshot(current.room.channelDiscordId);
-      if (!snapshot || !matchesSnapshot(current, snapshot)) return;
-      // Carry the generation across Discord I/O; a late snapshot must not clear a later owner.
-      const updated = await this.observeConfirmedLocked(roomId, snapshot, gateway, false, current.room);
-      if (updated?.room.status === 'ACTIVE') await onChangedLocked(roomId, gateway);
+      if (failure) throw failure.error;
     });
   }
 }

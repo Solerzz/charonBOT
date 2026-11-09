@@ -606,9 +606,9 @@
     "semantic_hash": ""
   },
   "src/modules/ownership/ownership.service.ts": {
-    "mtime": 1794265404.2285664,
-    "seen": 1794265897.1823418,
-    "ast_hash": "8dcb1e07430ddef5a43cf7bc4e299875",
+    "mtime": 1794266748.5531006,
+    "seen": 1794266847.8706362,
+    "ast_hash": "d958847d3ec92d8fbb0ba65beee8f6d8",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.fixtures.ts": {
@@ -726,21 +726,21 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room.runtime.test.ts": {
-    "mtime": 1794265735.3650486,
-    "seen": 1794265897.191909,
-    "ast_hash": "85118df8884dcaa3776d69eeb59dfcf4",
+    "mtime": 1794266701.1075928,
+    "seen": 1794266847.8824627,
+    "ast_hash": "403354d315ee43f9eccdd74a86c5cbcd",
     "semantic_hash": ""
   },
   "docs/releases/v0.3.0.md": {
-    "mtime": 1794265883.65299,
-    "seen": 1794265897.1974943,
-    "ast_hash": "0ef87e1c2bddd55a5fda59ef31c2f0c0",
+    "mtime": 1794266835.305875,
+    "seen": 1794266847.8880832,
+    "ast_hash": "3b02abd03e4f6d7c393fb8d7db8b728f",
     "semantic_hash": ""
   },
   "docs/validation/2026-11-08-v0.3.0-validation.md": {
-    "mtime": 1794266109.0541384,
-    "seen": 1794266117.8653462,
-    "ast_hash": "0aa97363f9c95b064d0dc91363fae71d",
+    "mtime": 1794266862.7907438,
+    "seen": 1794266872.1690316,
+    "ast_hash": "531b16f5b2a28d9e82ce1bfacb772212",
     "semantic_hash": ""
   },
   "package-lock.json": {
