@@ -78,6 +78,90 @@ function runtimeFixture() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('application-owned room runtime', () => {
+  it('retires coordinator metadata when startup confirms a missing tracked channel permanently closed', async () => {
+    const f = runtimeFixture();
+    await f.runtime.coordinator.room(f.guild.id, f.channel.id, () => f.runtime.coordinator.changeOwnership(f.guild.id, f.channel.id, 0, null,
+      () => f.runtime.store.changeOwner(f.state().room.id, 0, OWNER, null)));
+    f.guild.channels.fetch.mockResolvedValueOnce(null!);
+    await f.runtime.start(f.resolveGuild);
+    expect(f.state().room.status).toBe('CLOSED');
+    const metadata = f.runtime.coordinator as unknown as { generations: Map<string, number>; departures: Map<string, unknown>; ownershipAttempts: Map<string, unknown>; accepted: Map<string, unknown> };
+    expect(metadata.generations.size).toBe(0); expect(metadata.departures.size).toBe(0); expect(metadata.ownershipAttempts.size).toBe(0);
+    expect(metadata.accepted.size).toBe(0);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([true, false])('retains due work while actual setup %s -> opposite waits for its committed storage acknowledgement', async (enabled) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    f.state().controlsEnabled = enabled; f.state().room.visibility = 'PRIVATE'; f.state().room.ownerDiscordId = null; await f.runtime.start(f.resolveGuild);
+    await vi.advanceTimersByTimeAsync(299_999);
+    const committed = deferred(); const acknowledge = deferred();
+    vi.mocked(f.database.$transaction).mockImplementationOnce((async (work: (tx: typeof f.database) => Promise<unknown>) => {
+      const saved = await work(f.database); committed.resolve(); await acknowledge.promise; return saved;
+    }) as never);
+    const toggling = f.toggle(!enabled); await committed.promise;
+    expect(f.state().room.controlVersion).toBe(2);
+    const observations = vi.mocked(f.runtime.store.syncPresence).mock.calls.length;
+    const projections = f.channel.permissionOverwrites.set.mock.calls.length;
+    f.join(OLDEST); await vi.advanceTimersByTimeAsync(2);
+    expect(f.state().presences.map((p) => p.memberDiscordId)).toEqual([OTHER]);
+    acknowledge.resolve(); await toggling; await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().presences.map((p) => p.memberDiscordId).sort()).toEqual([OLDEST, OTHER]);
+    expect(f.projected().some((o) => o.id === OLDEST)).toBe(true);
+    expect(f.state().room).toMatchObject({ controlVersion: 2, priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(vi.mocked(f.runtime.store.syncPresence).mock.calls.length - observations).toBe(1);
+    expect(f.channel.permissionOverwrites.set.mock.calls.length - projections).toBe(1);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([true, false].flatMap((enabled) => ['owner', 'priority'].map((kind) => ({ enabled, kind }))))('reconciles a $kind departure after actual setup $enabled -> opposite wins its CAS', async ({ enabled, kind }) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); f.state().controlsEnabled = enabled;
+    if (kind === 'priority') { f.leave(OWNER); f.state().room.ownerDiscordId = null; }
+    await f.runtime.start(f.resolveGuild);
+    const member = kind === 'owner' ? OWNER : OTHER;
+    const entered = deferred(); const release = deferred(); const committed = deferred();
+    const beforeCAS = async () => { entered.resolve(); await release.promise; };
+    if (kind === 'owner') f.hooks.beforeOwnerChange = beforeCAS; else f.hooks.beforePrioritySave = beforeCAS;
+    const update = vi.mocked(f.database.temporaryRoom.updateMany).getMockImplementation()!;
+    vi.mocked(f.database.temporaryRoom.updateMany).mockImplementationOnce((...args) => { const saved = update(...args); committed.resolve(); return saved; });
+    vi.setSystemTime(1_000); f.leave(member); const leaving = f.voice(member, true);
+    f.join(member); const returning = f.voice(member, false);
+    await entered.promise;
+    const toggling = f.toggle(!enabled); await committed.promise;
+    release.resolve(); await Promise.all([leaving, returning, toggling]);
+    expect(f.state().controlsEnabled).toBe(!enabled);
+    if (kind === 'owner') expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 3 });
+    else expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 2, priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(301_000) });
+    expect(f.runtime.coordinator.pendingDepartures(f.guild.id, f.channel.id)).toHaveLength(0);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each(['owner', 'priority'] as const)('retains a %s departure after bounded definitive CAS losses and reconciles on the next observation', async (kind) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER);
+    if (kind === 'priority') { f.leave(OWNER); f.state().room.ownerDiscordId = null; }
+    await f.observe(); vi.setSystemTime(1_000);
+    const member = kind === 'owner' ? OWNER : OTHER;
+    f.runtime.coordinator.recordDeparture(f.guild.id, f.channel.id, member, false);
+    f.runtime.coordinator.recordArrival(f.guild.id, f.channel.id, member);
+    const cas = vi.mocked(kind === 'owner' ? f.runtime.store.changeOwner : f.runtime.store.savePriority);
+    cas.mockClear(); cas.mockResolvedValue(false);
+    await expect(f.observe()).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.runtime.coordinator.pendingDepartures(f.guild.id, f.channel.id)).toHaveLength(1);
+    expect(cas).toHaveBeenCalledTimes(3);
+    cas.mockImplementation((kind === 'owner' ? f.store.changeOwner : f.store.savePriority) as never);
+    await f.observe();
+    expect(f.state().room.ownerDiscordId).toBeNull();
+    if (kind === 'priority') expect(f.state().room.priorityExpiresAt).toEqual(new Date(301_000));
+    expect(f.runtime.coordinator.pendingDepartures(f.guild.id, f.channel.id)).toHaveLength(0);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
   it.each(['name', 'visibility', 'allowed'] as const)('does not commit %s when the owner leaves/returns during its native write', async (setting) => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.join(OTHER); await f.observe();

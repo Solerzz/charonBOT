@@ -10,6 +10,7 @@ export class RoomCoordinator {
   private readonly generations = new Map<string, number>();
   private readonly departures = new Map<string, Departure[]>();
   private readonly ownershipAttempts = new Map<string, OwnershipAttempt>();
+  private readonly accepted = new Map<string, { count: number; retired: Set<string> }>();
   constructor(private readonly mutex: KeyedMutex) {}
 
   recordDeparture(guildId: string, channelId: string, memberId: string, isBot: boolean): void {
@@ -67,11 +68,39 @@ export class RoomCoordinator {
     }
   }
 
+  // Only a confirmed permanent CLOSED transition may request retirement.
+  retireRoom(guildId: string, channelId: string): void {
+    const key = `${guildId}:${channelId}`;
+    const accepted = this.accepted.get(guildId);
+    if (accepted) accepted.retired.add(key);
+    else this.forgetRoom(key);
+  }
+
+  private forgetRoom(key: string): void {
+    this.generations.delete(key);
+    this.departures.delete(key);
+    this.ownershipAttempts.delete(key);
+  }
+
+  private async accept<T>(guildId: string, work: () => Promise<T>): Promise<T> {
+    const accepted = this.accepted.get(guildId) ?? { count: 0, retired: new Set<string>() };
+    accepted.count++;
+    this.accepted.set(guildId, accepted);
+    try { return await work(); } finally {
+      if (--accepted.count === 0) {
+        // Conservatively include member work that has not resolved its room yet.
+        // No closed-key tombstone survives this guild's accepted-work drain.
+        for (const key of accepted.retired) this.forgetRoom(key);
+        this.accepted.delete(guildId);
+      }
+    }
+  }
+
   member<T>(guildId: string, memberId: string, work: () => Promise<T>): Promise<T> {
-    return this.mutex.runExclusive(`${guildId}:${memberId}`, work);
+    return this.accept(guildId, () => this.mutex.runExclusive(`${guildId}:${memberId}`, work));
   }
 
   room<T>(guildId: string, channelId: string, work: () => Promise<T>): Promise<T> {
-    return this.mutex.runExclusive(`room:${guildId}:${channelId}`, work);
+    return this.accept(guildId, () => this.mutex.runExclusive(`room:${guildId}:${channelId}`, work));
   }
 }

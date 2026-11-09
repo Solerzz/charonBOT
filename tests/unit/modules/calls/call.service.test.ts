@@ -23,6 +23,58 @@ function fields(payload: CallPanelPayload) {
 const departure = { ...entry, oldChannelDiscordId: room.channelDiscordId, newChannelDiscordId: null, oldChannelMemberCount: 0 };
 
 describe('CallService', () => {
+  it('retires historical coordinator metadata after permanently closing successive rooms', async () => {
+    const f = fixture();
+    const state = f.runtime.coordinator as unknown as { generations: Map<string, number>; departures: Map<string, unknown>; ownershipAttempts: Map<string, unknown>; accepted: Map<string, unknown> };
+    for (let n = 0; n < 4; n++) {
+      const current = { ...room, id: `223e4567-e89b-42d3-a456-42661417400${n}`, channelDiscordId: String(80000000000000000n + BigInt(n)) };
+      f.records.set(current.id, current);
+      await f.runtime.coordinator.room(current.guildDiscordId, current.channelDiscordId, () =>
+        f.runtime.coordinator.changeOwnership(current.guildDiscordId, current.channelDiscordId, 0, null,
+          () => f.runtime.store.changeOwner(current.id, 0, entry.memberDiscordId, null)));
+      f.setMemberChannel(null);
+      await f.handle({ ...departure, oldChannelDiscordId: current.channelDiscordId });
+      expect(f.records.get(current.id)?.status).toBe('CLOSED');
+      expect(state.generations.size).toBe(0);
+      expect(state.departures.size).toBe(0);
+      expect(state.ownershipAttempts.size).toBe(0);
+      expect(state.accepted.size).toBe(0);
+    }
+  });
+
+  it('retires a closed key only after accepted member work drains without wiping a live key or resurrecting late work', async () => {
+    const f = fixture(); f.records.set(room.id, room);
+    const live = { ...room, id: '323e4567-e89b-42d3-a456-426614174000', channelDiscordId: '82345678901234567' };
+    f.records.set(live.id, live);
+    const coordinator = f.runtime.coordinator;
+    const state = coordinator as unknown as { generations: Map<string, number>; departures: Map<string, unknown>; ownershipAttempts: Map<string, unknown>; accepted: Map<string, unknown> };
+    for (const current of [room, live]) await coordinator.room(current.guildDiscordId, current.channelDiscordId, () =>
+      coordinator.changeOwnership(current.guildDiscordId, current.channelDiscordId, 0, null,
+        () => f.runtime.store.changeOwner(current.id, 0, entry.memberDiscordId, null)));
+    coordinator.recordDeparture(live.guildDiscordId, live.channelDiscordId, entry.memberDiscordId, false);
+    const closedKey = `${room.guildDiscordId}:${room.channelDiscordId}`;
+    const liveKey = `${live.guildDiscordId}:${live.channelDiscordId}`;
+    const entered = deferred(); const release = deferred();
+    const held = coordinator.member(entry.guildDiscordId, entry.memberDiscordId, async () => { entered.resolve(); await release.promise; });
+    await entered.promise;
+    f.setMemberChannel(null);
+    const late = f.handle(departure);
+    await f.handle({ ...departure, memberDiscordId: '72345678901234567' });
+    expect(f.records.get(room.id)?.status).toBe('CLOSED');
+    expect(state.generations.get(closedKey)).toBe(1); // Accepted member work still holds generation safety.
+    release.resolve(); await Promise.all([held, late]);
+    expect(state.generations.has(closedKey)).toBe(false);
+    expect(state.departures.has(closedKey)).toBe(false);
+    expect(state.ownershipAttempts.has(closedKey)).toBe(false);
+    expect(state.accepted.size).toBe(0);
+    expect(state.generations.get(liveKey)).toBe(1);
+    expect(coordinator.pendingDepartures(live.guildDiscordId, live.channelDiscordId)).toHaveLength(1);
+    await f.handle(departure); // A newly received event for durable CLOSED history cannot resurrect its key.
+    expect(state.generations.has(closedKey)).toBe(false);
+    expect(state.generations.get(liveKey)).toBe(1);
+    expect(coordinator.pendingDepartures(live.guildDiscordId, live.channelDiscordId)).toHaveLength(1);
+  });
+
   it('creates and closes disabled-creator rooms without ever publishing a panel', async () => {
     const f = fixture(); f.setControlsEnabled(false);
     await f.handle();

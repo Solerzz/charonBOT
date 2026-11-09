@@ -161,12 +161,16 @@ export class CallService {
     this.runtime.timers.cancel(`countdown:${room.id}`);
     this.runtime.timers.cancel(`priority:${room.id}`);
     this.runtime.transfers.synchronizePrompt(room.id, null);
-    if (closing.status === 'CLOSED') return true;
+    if (closing.status === 'CLOSED') {
+      this.runtime.coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
+      return true;
+    }
     // beginClosing awaits I/O: a stale zero must not evict newly arrived members.
     if (gateway.getChannelMemberCount(room.channelDiscordId) === 0) {
       try {
         await gateway.deleteChannel(room.channelDiscordId);
         await this.rooms.markClosed(room.id);
+        this.runtime.coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
         return true;
       } catch (error: unknown) {
         this.logFailure('closeRoom', input, room.channelDiscordId, error, room.id);

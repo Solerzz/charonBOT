@@ -120,15 +120,22 @@ export class OwnershipService {
     this.dependencies.timers.schedule(key, room.priorityExpiresAt, () => this.refresh(room.id, gateway, expected));
   }
 
-  private async refresh(roomId: string, gateway: RoomDiscordGateway, expected?: PriorityGeneration): Promise<void> {
+  private async refresh(roomId: string, gateway: RoomDiscordGateway, expected?: PriorityGeneration): Promise<void | 'retain-deadline'> {
     const { store, coordinator, onChangedLocked } = this.dependencies;
     const initial = await store.read(roomId);
     if (!initial) return;
-    await coordinator.room(initial.room.guildDiscordId, initial.room.channelDiscordId, async () => {
+    return coordinator.room(initial.room.guildDiscordId, initial.room.channelDiscordId, async () => {
       const current = await store.read(roomId);
       if (!current || current.room.status !== 'ACTIVE' || current.room.guildDiscordId !== initial.room.guildDiscordId
         || current.room.channelDiscordId !== initial.room.channelDiscordId) return;
-      if (expected && (current.room.ownerDiscordId !== null || !matchesGeneration(current.room, expected))) return;
+      if (expected && (current.room.ownerDiscordId !== null || !matchesGeneration(current.room, expected))) {
+        // A setup commit may be visible before its setter acknowledgement.
+        // Keep only this exact stale due entry until synchronization rebinds it.
+        if (current.room.ownerDiscordId === null && current.room.controlVersion > expected.controlVersion
+          && current.room.priorityMemberDiscordId === expected.priorityMemberDiscordId
+          && current.room.priorityExpiresAt?.getTime() === expected.priorityExpiresAt?.getTime()) return 'retain-deadline' as const;
+        return;
+      }
       const snapshot = await gateway.snapshot(current.room.channelDiscordId);
       if (!snapshot || !matchesSnapshot(current, snapshot)) return;
       // Carry the generation across Discord I/O; a late snapshot must not clear a later owner.
