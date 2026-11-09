@@ -72,6 +72,27 @@ describe('RoomControlsService', () => {
     expect(f.state().room).toMatchObject({ name: 'Game', userLimit: 0 }); expect(f.refreshes).toEqual([]);
   });
 
+  it.each([
+    { previous: 'External name longer than eleven graphemes', failure: 'cas' },
+    { previous: '  External  ', failure: 'cas' },
+    { previous: 'External name longer than eleven graphemes', failure: 'persistence' },
+    { previous: '  External  ', failure: 'persistence' },
+  ] as const)('restores the exact external name $previous after $failure failure', async ({ previous, failure }) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const f = roomSettingsFixture(); f.channel.name = previous;
+      if (failure === 'cas') f.store.updateSettings.mockResolvedValueOnce(false);
+      else f.store.updateSettings.mockRejectedValueOnce(new Error('private persistence payload'));
+      const error: unknown = await f.controls.rename(f.actor(), 'New', f.gateway).catch((reason: unknown) => reason);
+      expect(f.channel.name).toBe(previous);
+      expect((await f.gateway.snapshot(f.channel.id))?.name).toBe(previous);
+      expect(f.state().room.name).toBe('Game'); expect(f.refreshes).toEqual([]);
+      const code = failure === 'cas' ? 'STALE_CONTROLS' : 'PERSISTENCE_FAILURE';
+      expect(error).toMatchObject({ code, message: code });
+      expect(logged).not.toHaveBeenCalled();
+    } finally { logged.mockRestore(); }
+  });
+
   it('does not persist a rejected Discord name edit', async () => {
     const f = roomSettingsFixture(); f.channel.setName.mockRejectedValueOnce(new Error('private Discord payload'));
     await expect(f.controls.rename(f.actor(), 'New', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE', message: 'DISCORD_FAILURE' });

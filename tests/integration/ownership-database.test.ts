@@ -263,7 +263,7 @@ describe('room ownership database', () => {
           members: [OWNER, 'second-owner', 'target'].map((memberDiscordId) => ({ memberDiscordId, isBot: false })) } : null;
       },
       resolveMember: async (memberDiscordId) => ({ memberDiscordId, isBot: false }),
-      rename: unused, setLimit: unused, readAccess: unused, setPrivateAccess: unused, setPublicAccess: unused,
+      rename: unused, restoreName: unused, setLimit: unused, readAccess: unused, setPrivateAccess: unused, setPublicAccess: unused,
       restoreAccess: unused, sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,
     };
     const timers = new OwnershipTimers({ error: () => { throw new Error('Unexpected timer error'); } });

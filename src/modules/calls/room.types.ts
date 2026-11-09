@@ -17,6 +17,8 @@ export interface RoomDiscordGateway {
   snapshot(channelId: string): Promise<RoomSnapshot | null>;
   resolveMember(memberId: string): Promise<RoomMember | null>;
   rename(channelId: string, name: string): Promise<void>;
+  // Compensation only: restore the captured native name without user normalization.
+  restoreName(channelId: string, previousName: string): Promise<void>;
   setLimit(channelId: string, limit: number): Promise<void>;
   readAccess(channelId: string): Promise<OverwriteData[]>;
   setPrivateAccess(channelId: string, allowedIds: string[]): Promise<void>;

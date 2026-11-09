@@ -9,6 +9,16 @@ const createInput = { categoryDiscordId: creator.categoryDiscordId, name: 'Game'
 const panel = { embeds: [], components: [], allowedMentions: { parse: [] as never[] } };
 
 describe('DiscordCallGateway', () => {
+  it('delegates exact native name restoration while keeping owner rename strict', async () => {
+    const f = fixture(); const previous = `  ${'x'.repeat(96)}  `;
+    f.channel.setName.mockImplementation(async (name) => { f.channel.name = name; });
+    await f.gateway.restoreName(room.channelDiscordId, previous);
+    expect((await f.gateway.snapshot(room.channelDiscordId))?.name).toBe(previous);
+    await expect(f.gateway.rename(room.channelDiscordId, previous)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.channel.name).toBe(previous);
+    await f.gateway.rename(room.channelDiscordId, '  Trimmed  ');
+    expect(f.channel.name).toBe('Trimmed');
+  });
   it('creates native public unlimited voice channels without inheriting hidden category overwrites', async () => {
     const f = fixture();
     await expect(f.gateway.createTemporaryChannel(createInput)).resolves.toEqual({ channelDiscordId: room.channelDiscordId });

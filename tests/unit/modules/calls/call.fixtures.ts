@@ -78,6 +78,7 @@ export function lifecycleFixture() {
     snapshot: vi.fn(async (_id: string) => ({ guildDiscordId: room.guildDiscordId, channelDiscordId: room.channelDiscordId, name: room.name, userLimit: room.userLimit, members: [] })),
     resolveMember: vi.fn(async (id: string) => ({ memberDiscordId: id, isBot: false })),
     rename: vi.fn(async (_id: string, _name: string) => {}),
+    restoreName: vi.fn(async (_id: string, _previousName: string) => {}),
     setLimit: vi.fn(async (_id: string, _limit: number) => {}),
     readAccess: vi.fn(async (_id: string) => []),
     setPrivateAccess: vi.fn(async (_id: string, _allowed: string[]) => {}),

@@ -16,7 +16,7 @@ export class RoomControlsService {
     await this.withOwned(actor, gateway, async (state) => {
       const { snapshot } = await currentOwnedRoom(this.dependencies.store, actor, gateway, state);
       await this.changeSetting(actor, state, gateway, { name: normalized },
-        () => gateway.rename(state.room.channelDiscordId, normalized), () => gateway.rename(state.room.channelDiscordId, snapshot.name));
+        () => gateway.rename(state.room.channelDiscordId, normalized), () => gateway.restoreName(state.room.channelDiscordId, snapshot.name));
     });
   }
 

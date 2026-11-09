@@ -66,6 +66,29 @@ describe('DiscordRoomGateway', () => {
     await f.gateway.rename(room.channelDiscordId, '  🎮Game  ');
     expect(f.channel.setName).toHaveBeenCalledExactlyOnceWith('🎮Game');
   });
+  it.each(['x'.repeat(100), '  External  ', '👨‍👩‍👧‍👦'.repeat(12)])('restores captured native names exactly without user-name normalization: %j', async (previous) => {
+    const f = fixture(); f.channel.setName.mockImplementation(async (name) => { f.channel.name = name; });
+    await f.gateway.restoreName(room.channelDiscordId, previous);
+    expect((await f.gateway.snapshot(room.channelDiscordId))?.name).toBe(previous);
+    expect(f.channel.setName).toHaveBeenCalledExactlyOnceWith(previous);
+  });
+  it.each(['foreign guild', 'wrong channel', 'wrong type', 'missing channel', 'permissions', 'foreign bot'] as const)('guards native name restoration against %s', async (cause) => {
+    const f = fixture();
+    if (cause === 'foreign guild') f.channel.guildId = '82345678901234567';
+    if (cause === 'wrong channel') f.channel.id = '82345678901234567';
+    if (cause === 'wrong type') f.channel.type = ChannelType.GuildStageVoice;
+    if (cause === 'missing channel') f.guild.channels.fetch.mockResolvedValueOnce(null as never);
+    if (cause === 'permissions') f.channel.permissionsFor.mockReturnValue(new PermissionsBitField(P.ViewChannel));
+    if (cause === 'foreign bot') f.bot.guild.id = '82345678901234567';
+    await expect(f.gateway.restoreName(room.channelDiscordId, '  External previous name  ')).rejects.toMatchObject({
+      code: cause === 'permissions' || cause === 'foreign bot' ? 'PERMISSIONS_UNAVAILABLE' : 'ROOM_UNAVAILABLE',
+    });
+    expect(f.channel.setName).not.toHaveBeenCalled();
+  });
+  it('reports a fixed error when native name restoration is rejected by Discord', async () => {
+    const f = fixture(); f.channel.setName.mockRejectedValueOnce(new Error('private native validation response'));
+    await expect(f.gateway.restoreName(room.channelDiscordId, 'External previous name')).rejects.toMatchObject({ code: 'DISCORD_FAILURE', message: 'DISCORD_FAILURE' });
+  });
   it.each(['', '   ', 'abcdefghijkl'])('rejects invalid name %j before Discord writes', async (name) => {
     const f = fixture(); await expect(f.gateway.rename(room.channelDiscordId, name)).rejects.toThrow();
     expect(f.channel.setName).not.toHaveBeenCalled();

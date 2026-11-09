@@ -51,6 +51,15 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
     });
   }
 
+  restoreName(channelId: string, previousName: string): Promise<void> {
+    return this.checked(async () => {
+      const { channel } = await this.authorized(channelId, [P.ManageChannels]);
+      // Captured native state: Discord validates its own channel-name contract.
+      // Do not trim, truncate or impose the owner's 11-grapheme input limit.
+      await channel.setName(previousName);
+    });
+  }
+
   setLimit(channelId: string, limit: number): Promise<void> {
     return this.checked(async () => {
       if (!Number.isInteger(limit) || limit < 0 || limit > 99) throw new RangeError('Invalid room limit');

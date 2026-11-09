@@ -67,6 +67,7 @@ export class DiscordCallGateway implements CallDiscordGateway {
   snapshot(channelId: string) { return this.rooms.snapshot(channelId); }
   resolveMember(memberId: string) { return this.rooms.resolveMember(memberId); }
   rename(channelId: string, name: string) { return this.rooms.rename(channelId, name); }
+  restoreName(channelId: string, previousName: string) { return this.rooms.restoreName(channelId, previousName); }
   setLimit(channelId: string, limit: number) { return this.rooms.setLimit(channelId, limit); }
   readAccess(channelId: string) { return this.rooms.readAccess(channelId); }
   setPrivateAccess(channelId: string, allowedIds: string[]) { return this.rooms.setPrivateAccess(channelId, allowedIds); }
