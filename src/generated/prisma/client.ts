@@ -51,3 +51,18 @@ export type VoiceCreator = Prisma.VoiceCreatorModel
  * 
  */
 export type TemporaryRoom = Prisma.TemporaryRoomModel
+/**
+ * Model RoomPresence
+ * 
+ */
+export type RoomPresence = Prisma.RoomPresenceModel
+/**
+ * Model RoomAllowedMember
+ * 
+ */
+export type RoomAllowedMember = Prisma.RoomAllowedMemberModel
+/**
+ * Model PendingOwnershipTransfer
+ * 
+ */
+export type PendingOwnershipTransfer = Prisma.PendingOwnershipTransferModel

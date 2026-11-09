@@ -19,7 +19,7 @@ describe('database row-level security', () => {
       // This opt-in is safe for read-only checks; it never inserts test fixtures.
       await client.query('BEGIN READ ONLY');
 
-      const tables = ['TemporaryRoom', 'VoiceCreator', '_prisma_migrations'];
+      const tables = ['PendingOwnershipTransfer', 'RoomAllowedMember', 'RoomPresence', 'TemporaryRoom', 'VoiceCreator', '_prisma_migrations'];
       const protection = await client.query<{ name: string; protected: boolean }>(`
         SELECT c.relname AS name, c.relrowsecurity AS protected
         FROM pg_class c
@@ -29,6 +29,9 @@ describe('database row-level security', () => {
       `, [tables]);
 
       expect(protection.rows).toEqual([
+        { name: 'PendingOwnershipTransfer', protected: true },
+        { name: 'RoomAllowedMember', protected: true },
+        { name: 'RoomPresence', protected: true },
         { name: 'TemporaryRoom', protected: true },
         { name: 'VoiceCreator', protected: true },
         { name: '_prisma_migrations', protected: true },

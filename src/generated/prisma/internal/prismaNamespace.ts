@@ -398,7 +398,10 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 
 export const ModelName = {
   VoiceCreator: 'VoiceCreator',
-  TemporaryRoom: 'TemporaryRoom'
+  TemporaryRoom: 'TemporaryRoom',
+  RoomPresence: 'RoomPresence',
+  RoomAllowedMember: 'RoomAllowedMember',
+  PendingOwnershipTransfer: 'PendingOwnershipTransfer'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -414,7 +417,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "voiceCreator" | "temporaryRoom"
+    modelProps: "voiceCreator" | "temporaryRoom" | "roomPresence" | "roomAllowedMember" | "pendingOwnershipTransfer"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -566,6 +569,228 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    RoomPresence: {
+      payload: Prisma.$RoomPresencePayload<ExtArgs>
+      fields: Prisma.RoomPresenceFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.RoomPresenceFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.RoomPresenceFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>
+        }
+        findFirst: {
+          args: Prisma.RoomPresenceFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.RoomPresenceFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>
+        }
+        findMany: {
+          args: Prisma.RoomPresenceFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>[]
+        }
+        create: {
+          args: Prisma.RoomPresenceCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>
+        }
+        createMany: {
+          args: Prisma.RoomPresenceCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.RoomPresenceCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>[]
+        }
+        delete: {
+          args: Prisma.RoomPresenceDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>
+        }
+        update: {
+          args: Prisma.RoomPresenceUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>
+        }
+        deleteMany: {
+          args: Prisma.RoomPresenceDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.RoomPresenceUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.RoomPresenceUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>[]
+        }
+        upsert: {
+          args: Prisma.RoomPresenceUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomPresencePayload>
+        }
+        aggregate: {
+          args: Prisma.RoomPresenceAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateRoomPresence>
+        }
+        groupBy: {
+          args: Prisma.RoomPresenceGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RoomPresenceGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.RoomPresenceCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RoomPresenceCountAggregateOutputType> | number
+        }
+      }
+    }
+    RoomAllowedMember: {
+      payload: Prisma.$RoomAllowedMemberPayload<ExtArgs>
+      fields: Prisma.RoomAllowedMemberFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.RoomAllowedMemberFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.RoomAllowedMemberFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>
+        }
+        findFirst: {
+          args: Prisma.RoomAllowedMemberFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.RoomAllowedMemberFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>
+        }
+        findMany: {
+          args: Prisma.RoomAllowedMemberFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>[]
+        }
+        create: {
+          args: Prisma.RoomAllowedMemberCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>
+        }
+        createMany: {
+          args: Prisma.RoomAllowedMemberCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.RoomAllowedMemberCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>[]
+        }
+        delete: {
+          args: Prisma.RoomAllowedMemberDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>
+        }
+        update: {
+          args: Prisma.RoomAllowedMemberUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>
+        }
+        deleteMany: {
+          args: Prisma.RoomAllowedMemberDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.RoomAllowedMemberUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.RoomAllowedMemberUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>[]
+        }
+        upsert: {
+          args: Prisma.RoomAllowedMemberUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomAllowedMemberPayload>
+        }
+        aggregate: {
+          args: Prisma.RoomAllowedMemberAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateRoomAllowedMember>
+        }
+        groupBy: {
+          args: Prisma.RoomAllowedMemberGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RoomAllowedMemberGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.RoomAllowedMemberCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RoomAllowedMemberCountAggregateOutputType> | number
+        }
+      }
+    }
+    PendingOwnershipTransfer: {
+      payload: Prisma.$PendingOwnershipTransferPayload<ExtArgs>
+      fields: Prisma.PendingOwnershipTransferFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.PendingOwnershipTransferFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.PendingOwnershipTransferFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>
+        }
+        findFirst: {
+          args: Prisma.PendingOwnershipTransferFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.PendingOwnershipTransferFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>
+        }
+        findMany: {
+          args: Prisma.PendingOwnershipTransferFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>[]
+        }
+        create: {
+          args: Prisma.PendingOwnershipTransferCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>
+        }
+        createMany: {
+          args: Prisma.PendingOwnershipTransferCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.PendingOwnershipTransferCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>[]
+        }
+        delete: {
+          args: Prisma.PendingOwnershipTransferDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>
+        }
+        update: {
+          args: Prisma.PendingOwnershipTransferUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>
+        }
+        deleteMany: {
+          args: Prisma.PendingOwnershipTransferDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.PendingOwnershipTransferUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.PendingOwnershipTransferUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>[]
+        }
+        upsert: {
+          args: Prisma.PendingOwnershipTransferUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$PendingOwnershipTransferPayload>
+        }
+        aggregate: {
+          args: Prisma.PendingOwnershipTransferAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregatePendingOwnershipTransfer>
+        }
+        groupBy: {
+          args: Prisma.PendingOwnershipTransferGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PendingOwnershipTransferGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.PendingOwnershipTransferCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.PendingOwnershipTransferCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -632,10 +857,45 @@ export const TemporaryRoomScalarFieldEnum = {
   status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
-  closedAt: 'closedAt'
+  closedAt: 'closedAt',
+  controlVersion: 'controlVersion',
+  priorityMemberDiscordId: 'priorityMemberDiscordId',
+  priorityExpiresAt: 'priorityExpiresAt'
 } as const
 
 export type TemporaryRoomScalarFieldEnum = (typeof TemporaryRoomScalarFieldEnum)[keyof typeof TemporaryRoomScalarFieldEnum]
+
+
+export const RoomPresenceScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  memberDiscordId: 'memberDiscordId',
+  isBot: 'isBot',
+  joinedAt: 'joinedAt'
+} as const
+
+export type RoomPresenceScalarFieldEnum = (typeof RoomPresenceScalarFieldEnum)[keyof typeof RoomPresenceScalarFieldEnum]
+
+
+export const RoomAllowedMemberScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  memberDiscordId: 'memberDiscordId'
+} as const
+
+export type RoomAllowedMemberScalarFieldEnum = (typeof RoomAllowedMemberScalarFieldEnum)[keyof typeof RoomAllowedMemberScalarFieldEnum]
+
+
+export const PendingOwnershipTransferScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  ownerDiscordId: 'ownerDiscordId',
+  targetDiscordId: 'targetDiscordId',
+  controlVersion: 'controlVersion',
+  expiresAt: 'expiresAt'
+} as const
+
+export type PendingOwnershipTransferScalarFieldEnum = (typeof PendingOwnershipTransferScalarFieldEnum)[keyof typeof PendingOwnershipTransferScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -911,6 +1171,9 @@ export type PrismaClientOptions = PrismaClientOptionsWithAccelerateUrl | PrismaC
 export type GlobalOmitConfig = {
   voiceCreator?: Prisma.VoiceCreatorOmit
   temporaryRoom?: Prisma.TemporaryRoomOmit
+  roomPresence?: Prisma.RoomPresenceOmit
+  roomAllowedMember?: Prisma.RoomAllowedMemberOmit
+  pendingOwnershipTransfer?: Prisma.PendingOwnershipTransferOmit
 }
 
 /* Types for Logging */

@@ -10,4 +10,7 @@
  */
 export type * from './models/VoiceCreator.js'
 export type * from './models/TemporaryRoom.js'
+export type * from './models/RoomPresence.js'
+export type * from './models/RoomAllowedMember.js'
+export type * from './models/PendingOwnershipTransfer.js'
 export type * from './commonInputTypes.js'

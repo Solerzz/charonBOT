@@ -19,6 +19,7 @@ export const room: TemporaryRoom = {
   ownerDiscordId: '52345678901234567', controlMessageDiscordId: '62345678901234567',
   name: 'Game', userLimit: 0, visibility: 'PUBLIC', status: 'ACTIVE',
   createdAt: new Date(0), updatedAt: new Date(0), closedAt: null,
+  controlVersion: 0, priorityMemberDiscordId: null, priorityExpiresAt: null,
 };
 export const entry: VoiceTransition = {
   guildDiscordId: creator.guildDiscordId, memberDiscordId: room.ownerDiscordId!,
@@ -57,10 +58,20 @@ export function lifecycleFixture() {
     }),
     markActive: vi.fn(async (id: string, message: string | null) => change(id, { status: 'ACTIVE', controlMessageDiscordId: message })),
     clearOwner: vi.fn(async (id: string, expected: string) => {
-      return records.get(id)?.ownerDiscordId === expected ? change(id, { ownerDiscordId: null }) : records.get(id)!;
+      const current = records.get(id)!;
+      return current.ownerDiscordId === expected && current.status !== 'CLOSED'
+        ? change(id, { ownerDiscordId: null, controlVersion: current.controlVersion + 1, priorityMemberDiscordId: null, priorityExpiresAt: null }) : current;
     }),
-    beginClosing: vi.fn(async (id: string) => change(id, { status: 'CLOSING' })),
-    markClosed: vi.fn(async (id: string) => change(id, { status: 'CLOSED', closedAt: new Date() })),
+    beginClosing: vi.fn(async (id: string) => {
+      const current = records.get(id)!;
+      return current.status === 'CREATING' || current.status === 'ACTIVE'
+        ? change(id, { status: 'CLOSING', controlVersion: current.controlVersion + 1, priorityMemberDiscordId: null, priorityExpiresAt: null }) : current;
+    }),
+    markClosed: vi.fn(async (id: string) => {
+      const current = records.get(id)!;
+      return current.status === 'CLOSING'
+        ? change(id, { status: 'CLOSED', closedAt: new Date(), controlVersion: current.controlVersion + 1, priorityMemberDiscordId: null, priorityExpiresAt: null }) : current;
+    }),
   } satisfies TemporaryRoomRepository;
   const gateway = {
     createTemporaryChannel: vi.fn(async () => ({ channelDiscordId: room.channelDiscordId })),
