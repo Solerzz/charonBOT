@@ -44,7 +44,7 @@ export class OwnershipService {
     }
     // An elapsed deadline is the durable open-claim marker, even if its member left.
     if (state.room.priorityExpiresAt !== null && state.room.priorityExpiresAt <= new Date()) {
-      this.schedulePriority(state, gateway);
+      this.rebindPriorityLocked(state, gateway);
       return state;
     }
     const presentHumans = new Set(snapshot.members.filter((member) => !member.isBot).map((member) => member.memberDiscordId));
@@ -67,7 +67,7 @@ export class OwnershipService {
       state.room.priorityMemberDiscordId = candidate;
       state.room.priorityExpiresAt = expiresAt;
     }
-    this.schedulePriority(state, gateway);
+    this.rebindPriorityLocked(state, gateway);
     return state;
   }
 
@@ -102,11 +102,11 @@ export class OwnershipService {
     await this.refresh(roomId, gateway);
   }
 
-  private schedulePriority(state: RoomState, gateway: RoomDiscordGateway): void {
+  rebindPriorityLocked(state: RoomState, gateway: RoomDiscordGateway): void {
     if (this.dependencies.timers.isStopped) return;
     const { room } = state;
     const key = `priority:${room.id}`;
-    if (room.priorityExpiresAt === null || room.priorityExpiresAt <= new Date()) {
+    if (room.status !== 'ACTIVE' || room.ownerDiscordId !== null || room.priorityExpiresAt === null || room.priorityExpiresAt <= new Date()) {
       this.dependencies.timers.cancel(key);
       return;
     }

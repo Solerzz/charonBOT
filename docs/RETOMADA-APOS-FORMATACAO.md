@@ -68,7 +68,26 @@ sem credenciais ou conteúdo de mensagens de usuário.
 - Validação real PostgreSQL e caminhos Discord descritos no relatório: aprovados
   no escopo observado; testes humanos adicionais permanecem opcionais/pendentes.
 - Visual escolhido: **Minimalista Monocromático**.
-- Próxima etapa prevista: definir o design da `v0.3.0` — posse e controles — e
-  aprová-lo antes de escrever o plano e implementar.
-- A etapa anterior foi executada com subagentes e revisão por tarefa. Confirmar
-  o método desejado ao iniciar um novo plano.
+- `v0.3.0`: design/plano aprovados e implementação na branch local
+  `feature-v0.3.0-posse-controles` (não assumir que foi enviada ao GitHub).
+  Tasks 1–8 aprovadas; Task 9 e revisão da branch ficam com o controlador.
+- Antes de continuar, confira o SHA e os arquivos presentes no checkout.
+  Consulte [a validação v0.3.0](validation/2026-11-08-v0.3.0-validation.md):
+  execução real em 2026-11-09, sem substituir a evidência v0.2.0 acima.
+
+## Retomar a validação da v0.3.0
+
+1. Execute `npm ci`, `npm run typecheck`, a suíte comum com os dois opt-ins
+   explicitamente `false` e `npm run build` sem carregar `.env` remoto.
+2. Para integração, provisione **outro** PostgreSQL 17 descartável, loopback,
+   `charon_v030_test...`; injete URLs locais correspondentes no processo.
+   Não reutilize os caminhos/senhas do cluster temporário desta sessão.
+3. Siga o guard, geração, migrations e grants das
+   [notas v0.3.0](releases/v0.3.0.md). Execute ambos os opt-ins `true`, com
+   `npm run test:run -- tests/integration --maxWorkers=1` (reconciliação compartilha DB).
+4. A migration nova é `prisma/migrations/20261108010000_room_ownership_state`.
+   Não edite migrations antigas nem use reset; status e segundo deploy devem
+   continuar funcionando depois da RLS em `_prisma_migrations`.
+5. Peça autorização separada e confirme um servidor Discord de testes antes
+   do checklist humano. Deploy Supabase, login, push/tag e hospedagem continuam
+   pendentes; o bot não pode executar com múltiplos processos.

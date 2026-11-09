@@ -591,4 +591,24 @@ describe('room ownership database', () => {
       expect(d.message.delete).toHaveBeenCalledOnce();
     } finally { await runtime.stop(); await f.cleanup(); }
   });
+
+  integrationTest('logical creator deletion hides setup but preserves existing-room preference and live owner controls', async () => {
+    const f = await fixture(); const d = discordFixture();
+    d.channel.setName.mockImplementation(async (name) => { d.channel.name = name; });
+    const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));
+    try {
+      await f.client.temporaryRoom.updateMany({ where: { id: { in: [f.second, f.otherGuild] } }, data: { status: 'CLOSED' } });
+      await f.client.temporaryRoom.update({ where: { id: f.first }, data: { guildDiscordId: d.guild.id, channelDiscordId: d.channel.id, ownerDiscordId: d.member.id } });
+      d.states.clear(); d.states.set(d.member.id, { channelId: d.channel.id });
+      await runtime.start(async () => d.guild as unknown as Guild);
+      const creators = new PrismaVoiceCreatorRepository(f.client);
+      await creators.delete(f.creatorId);
+      expect(await creators.findById(f.creatorId)).toBeNull();
+      expect(await runtime.store.read(f.first)).toMatchObject({ controlsEnabled: true, room: { status: 'ACTIVE', controlVersion: 1 } });
+      const gateway = new DiscordRoomGateway(d.guild as unknown as Guild);
+      await runtime.controls.rename({ roomId: f.first, guildDiscordId: d.guild.id, memberDiscordId: d.member.id, controlVersion: 1 }, 'Retained', gateway);
+      expect(d.channel.name).toBe('Retained');
+      expect((await runtime.store.read(f.first))?.room.name).toBe('Retained');
+    } finally { await runtime.stop(); await f.cleanup(); }
+  });
 });

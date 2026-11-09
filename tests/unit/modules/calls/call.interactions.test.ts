@@ -102,6 +102,22 @@ describe('CallInteractions real controllers', () => {
     await f.timers.stop();
   });
 
+  it('rejects A original menu after real A -> B -> A transfers, but accepts A fresh menu', async () => {
+    const f = fixture(); const original = f.interaction('rename-save', 'modal');
+    const first = await f.transfers.begin(f.actorFor(OWNER), OTHER, f.gateway);
+    await f.transfers.confirm(f.actorFor(OWNER), first.id, f.gateway);
+    const second = await f.transfers.begin(f.actorFor(OTHER), OWNER, f.gateway);
+    await f.transfers.confirm(f.actorFor(OTHER), second.id, f.gateway);
+    expect(f.state().room).toMatchObject({ ownerDiscordId: OWNER, controlVersion: 2 });
+    await f.execute(original);
+    expect(f.state().room.name).toBe('Game');
+    expect(f.channel.name).toBe('Game');
+    expect(JSON.stringify(original.editReply.mock.calls)).toContain('expirou');
+    await f.execute(f.interaction('rename-save', 'modal'));
+    expect(f.channel.name).toBe('New');
+    await f.timers.stop();
+  });
+
   it('validates public claims with individual priority and rejects malformed branch input privately', async () => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = fixture(); f.state().room.ownerDiscordId = null;

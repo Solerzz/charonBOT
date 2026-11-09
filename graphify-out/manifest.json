@@ -6,15 +6,15 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1794191252.920129,
-    "seen": 1794192269.0415382,
-    "ast_hash": "7c336136b1ce7bc6904c6f0e78420207",
+    "mtime": 1794220656.8724687,
+    "seen": 1794220975.8383746,
+    "ast_hash": "dd66ce8297c1b31fbd853c4af36f49e5",
     "semantic_hash": ""
   },
   "package.json": {
-    "mtime": 1794191252.9380698,
-    "seen": 1794192269.0415382,
-    "ast_hash": "e883e686df721bec5757eea14f418583",
+    "mtime": 1794220656.8724687,
+    "seen": 1794220975.8383746,
+    "ast_hash": "0f9722b2e648c8007400e2c38c12dcc3",
     "semantic_hash": ""
   },
   "prisma.config.ts": {
@@ -72,50 +72,50 @@
     "semantic_hash": ""
   },
   "src/generated/prisma/browser.ts": {
-    "mtime": 1794191938.8594897,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "fa79fc5d4b218a99821114fff2501080",
     "semantic_hash": ""
   },
   "src/generated/prisma/client.ts": {
-    "mtime": 1794191938.8594897,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "32958fd123272f1707d9b4346fe6b6df",
     "semantic_hash": ""
   },
   "src/generated/prisma/commonInputTypes.ts": {
-    "mtime": 1794191938.8604932,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "caff993d8f1d1251f08bc2b347701292",
     "semantic_hash": ""
   },
   "src/generated/prisma/enums.ts": {
-    "mtime": 1794191938.8594897,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "42d58662ae1128e48c2210baca8ccdc6",
     "semantic_hash": ""
   },
   "src/generated/prisma/internal/class.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "42a22cc2307f2b095fa45909ac907478",
     "semantic_hash": ""
   },
   "src/generated/prisma/internal/prismaNamespace.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "074eb195023c27e806cc82a47109b98c",
     "semantic_hash": ""
   },
   "src/generated/prisma/internal/prismaNamespaceBrowser.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "0c3ad1f56056cc0c4292d557c216dd15",
     "semantic_hash": ""
   },
   "src/generated/prisma/models.ts": {
-    "mtime": 1794191938.8594897,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "aa7238469c0a7adb78f3ca15272c53ef",
     "semantic_hash": ""
   },
@@ -210,21 +210,21 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794191252.9231637,
-    "seen": 1794192269.0415382,
-    "ast_hash": "afe3f697ba82cb2fac1e6f309cd23e9f",
+    "mtime": 1794220827.6597278,
+    "seen": 1794220975.8541348,
+    "ast_hash": "be9cbc22e56b9ccc14f5ac5d6586e620",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1794191252.9231637,
-    "seen": 1794192269.0415382,
-    "ast_hash": "f62e5d05a64d0a7f6ec706cf7bd7d009",
+    "mtime": 1794220827.6597278,
+    "seen": 1794220975.8541348,
+    "ast_hash": "f205f46935b39e3e09aea237675b68a7",
     "semantic_hash": ""
   },
   "docs/architecture.md": {
-    "mtime": 1794191252.9248757,
-    "seen": 1794192269.0415382,
-    "ast_hash": "a8ba954b2270be7ea59674be10ebe7c2",
+    "mtime": 1794220885.6734164,
+    "seen": 1794220975.8541348,
+    "ast_hash": "5a92118baf60880df1f9c6cc8b410482",
     "semantic_hash": ""
   },
   "docs/releases/v0.1.0.md": {
@@ -246,14 +246,14 @@
     "semantic_hash": ""
   },
   "src/generated/prisma/models/TemporaryRoom.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "04ced31d8d8eb2ff02fa6517152a130b",
     "semantic_hash": ""
   },
   "src/generated/prisma/models/VoiceCreator.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "75c8baa9ba89d8ae8fc9c4cc69a9984d",
     "semantic_hash": ""
   },
@@ -456,9 +456,9 @@
     "semantic_hash": ""
   },
   "docs/RETOMADA-APOS-FORMATACAO.md": {
-    "mtime": 1794191252.9241817,
-    "seen": 1794192269.0415382,
-    "ast_hash": "374665b3c4e8b1893e5b14974a4505ae",
+    "mtime": 1794221022.3396065,
+    "seen": 1794221163.3067114,
+    "ast_hash": "fc6f9401a18c02846f3eeadeae5c82be",
     "semantic_hash": ""
   },
   "docs/validation/2026-11-07-v0.2.0-validation.md": {
@@ -480,20 +480,20 @@
     "semantic_hash": ""
   },
   "src/generated/prisma/models/PendingOwnershipTransfer.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "222a01af4af2dc1b4b6c37b50558e9ec",
     "semantic_hash": ""
   },
   "src/generated/prisma/models/RoomAllowedMember.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "b6f741af78e59cb7e88f4e97c69143ea",
     "semantic_hash": ""
   },
   "src/generated/prisma/models/RoomPresence.ts": {
-    "mtime": 1794191938.8617578,
-    "seen": 1794192269.0415382,
+    "mtime": 1794221115.5170362,
+    "seen": 1794221163.2872064,
     "ast_hash": "7e1ae561fbdc9983f03769a25a512575",
     "semantic_hash": ""
   },
@@ -516,9 +516,9 @@
     "semantic_hash": ""
   },
   "tests/integration/ownership-database.test.ts": {
-    "mtime": 1794219393.2791767,
-    "seen": 1794219711.3554392,
-    "ast_hash": "a43989ea1d17a82af1be7b3488a7be7c",
+    "mtime": 1794220711.8503404,
+    "seen": 1794220975.8383746,
+    "ast_hash": "66da44110b2f5fb08bd84d51f12c2776",
     "semantic_hash": ""
   },
   "tests/integration/prepare-database.ts": {
@@ -534,21 +534,21 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-state.repository.test.ts": {
-    "mtime": 1794194442.0641098,
-    "seen": 1794194792.4861107,
-    "ast_hash": "306b50ada9c5b1a5ec1712d003afb209",
+    "mtime": 1794220549.619914,
+    "seen": 1794220975.8383746,
+    "ast_hash": "e808bee2946a44385c96c8381aa5d9cf",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-08-charon-v0.3.0-posse-controles.md": {
-    "mtime": 1794191252.9279313,
-    "seen": 1794192269.0415382,
-    "ast_hash": "7567edcd895389b03ba1868b0fb35ca5",
+    "mtime": 1794220827.6622512,
+    "seen": 1794220975.8541348,
+    "ast_hash": "f0b02b95a22ae7ce445c3d87ea53609c",
     "semantic_hash": ""
   },
   "docs/superpowers/specs/2026-11-08-charon-v0.3.0-posse-controles-design.md": {
-    "mtime": 1794191252.9304378,
-    "seen": 1794192269.0415382,
-    "ast_hash": "eec5eb276bb5cf593b14c0e595838285",
+    "mtime": 1794220827.6638107,
+    "seen": 1794220975.8541348,
+    "ast_hash": "d0139cf5d981e051cf278b0183fae6db",
     "semantic_hash": ""
   },
   "src/modules/calls/room-context.ts": {
@@ -606,9 +606,9 @@
     "semantic_hash": ""
   },
   "src/modules/ownership/ownership.service.ts": {
-    "mtime": 1794219231.5744948,
-    "seen": 1794219711.3534365,
-    "ast_hash": "c37c31081b2ed1668f20cdaf57e643cd",
+    "mtime": 1794220594.8486602,
+    "seen": 1794220975.8383746,
+    "ast_hash": "e6ed2dcf9b643b68f12232c1bc2958ea",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.fixtures.ts": {
@@ -702,9 +702,9 @@
     "semantic_hash": ""
   },
   "src/modules/calls/room.runtime.ts": {
-    "mtime": 1794219587.66659,
-    "seen": 1794219711.3514338,
-    "ast_hash": "3dd8ccdcd028ab4275fce6d2116ed5ec",
+    "mtime": 1794220728.6540928,
+    "seen": 1794220975.8383746,
+    "ast_hash": "6568c24cbeb921fa869c267cc625a207",
     "semantic_hash": ""
   },
   "tests/unit/application.rooms.test.ts": {
@@ -714,9 +714,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/call.interactions.test.ts": {
-    "mtime": 1794219534.5492783,
-    "seen": 1794219711.357442,
-    "ast_hash": "0c97bc4f7760280f18470c8013376110",
+    "mtime": 1794220572.576016,
+    "seen": 1794220975.8383746,
+    "ast_hash": "0cb571b698fa670c525e23edaac2d145",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-lifecycle.fixtures.ts": {
@@ -726,15 +726,27 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room.runtime.test.ts": {
-    "mtime": 1794219575.213413,
-    "seen": 1794219711.3594441,
-    "ast_hash": "3e9ac7fd3bdd077c0f6bb90a11e837ba",
+    "mtime": 1794220711.8503404,
+    "seen": 1794220975.8383746,
+    "ast_hash": "4d74d1161cf5a1c9d7e152dc15875ec9",
+    "semantic_hash": ""
+  },
+  "docs/releases/v0.3.0.md": {
+    "mtime": 1794220959.6534758,
+    "seen": 1794220975.8541348,
+    "ast_hash": "9196aea094d1f43cbb86d59ca6d3ca2d",
+    "semantic_hash": ""
+  },
+  "docs/validation/2026-11-08-v0.3.0-validation.md": {
+    "mtime": 1794221103.5440865,
+    "seen": 1794221163.3107169,
+    "ast_hash": "c5d7f47e85ad7d5985e3eee61b15073b",
     "semantic_hash": ""
   },
   "package-lock.json": {
-    "mtime": 1794191252.9380698,
-    "seen": 1794192269.0415382,
-    "ast_hash": "ae06f1901b94e56536d63b473ea1f7ee",
+    "mtime": 1794220656.8724687,
+    "seen": 1794220975.8541348,
+    "ast_hash": "5d817f982f5c3b86e823edf334dbef1d",
     "semantic_hash": ""
   }
 }

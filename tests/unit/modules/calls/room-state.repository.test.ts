@@ -71,9 +71,12 @@ describe('PrismaRoomStateRepository', () => {
 
   it('translates owner uniqueness without exposing database details', async () => {
     const f = fixture();
-    f.temporaryRoom.updateMany.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('private details', { code: 'P2002', clientVersion: '7' }));
-    await expect(f.store.changeOwner(room.id, 0, room.ownerDiscordId, 'target')).rejects.toMatchObject({ code: 'ALREADY_OWNS_ROOM' });
-    expect(new RoomActionError('STALE_CONTROLS').message).not.toContain('private');
+    const sentinel = 'private-database-detail-sentinel';
+    f.temporaryRoom.updateMany.mockRejectedValue(new Prisma.PrismaClientKnownRequestError(sentinel, { code: 'P2002', clientVersion: '7' }));
+    const translated = await f.store.changeOwner(room.id, 0, room.ownerDiscordId, 'target').catch((error: unknown) => error);
+    expect(translated).toBeInstanceOf(RoomActionError);
+    expect(translated).toMatchObject({ code: 'ALREADY_OWNS_ROOM', message: 'ALREADY_OWNS_ROOM' });
+    expect((translated as Error).message).not.toContain(sentinel);
   });
 
   it('prepares only for the current enabled owner/version and rejects a duplicate pending row', async () => {

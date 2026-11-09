@@ -12,6 +12,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      RUN_DATABASE_TESTS: 'false'
+      RUN_DATABASE_SECURITY_TESTS: 'false'
 
     steps:
       - name: Checkout
@@ -34,3 +37,61 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  local-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: charon_test
+          POSTGRES_PASSWORD: disposable_ci_only
+          POSTGRES_DB: charon_v030_test
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U charon_test -d charon_v030_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://charon_test:disposable_ci_only@127.0.0.1:5432/charon_v030_test?schema=public
+      DIRECT_URL: postgresql://charon_test:disposable_ci_only@127.0.0.1:5432/charon_v030_test?schema=public
+      RUN_DATABASE_TESTS: 'true'
+      RUN_DATABASE_SECURITY_TESTS: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard local target and generate client
+        run: |
+          node --import tsx --input-type=module -e "import { assertDisposableDatabaseEnvironment as guard } from './tests/integration/database-test-utils.ts'; guard();"
+          npm run prisma:generate
+
+      - name: Guard and deploy local migrations
+        run: |
+          node --import tsx --input-type=module -e "import { assertDisposableDatabaseEnvironment as guard } from './tests/integration/database-test-utils.ts'; guard();"
+          npx --no-install prisma migrate deploy
+
+      - name: Prepare guarded local API roles and grants
+        run: node --import tsx tests/integration/prepare-database.ts
+
+      # Startup reconciles all tracked rooms: these suites share one disposable DB.
+      - name: Exercise transactions, partial index and RLS serially
+        run: npm run test:run -- tests/integration --maxWorkers=1
+
+      - name: Check history and idempotent deploy after RLS
+        run: |
+          node --import tsx --input-type=module -e "import { assertDisposableDatabaseEnvironment as guard } from './tests/integration/database-test-utils.ts'; guard();"
+          npx --no-install prisma migrate status
+          npx --no-install prisma migrate deploy

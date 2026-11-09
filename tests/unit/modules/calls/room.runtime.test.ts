@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaClient } from '../../../../src/core/database/prisma.js';
 import { createLogger } from '../../../../src/core/logger/logger.js';
 import { createRoomRuntime } from '../../../../src/modules/calls/room.runtime.js';
+import { PrismaVoiceCreatorRepository } from '../../../../src/modules/setup/setup.repository.js';
 import { OTHER, OLDEST, OWNER } from '../ownership/ownership.fixtures.js';
-import { deferred } from './call.fixtures.js';
+import { creator, deferred } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 
 function runtimeFixture() {
@@ -31,10 +32,22 @@ function runtimeFixture() {
     return Promise.resolve({ count: 1 }) as ReturnType<typeof database.temporaryRoom.updateMany>;
   });
   vi.spyOn(database.temporaryRoom, 'findUniqueOrThrow').mockImplementation(() => Promise.resolve(structuredClone(f.state().room)) as ReturnType<typeof database.temporaryRoom.findUniqueOrThrow>);
-  vi.spyOn(database.pendingOwnershipTransfer, 'deleteMany').mockResolvedValue({ count: 0 });
+  vi.spyOn(database.pendingOwnershipTransfer, 'deleteMany').mockImplementation(() => {
+    f.state().transfer = null;
+    return Promise.resolve({ count: 1 }) as ReturnType<typeof database.pendingOwnershipTransfer.deleteMany>;
+  });
+  vi.spyOn(database.voiceCreator, 'update').mockImplementation(({ data }) => {
+    f.state().controlsEnabled = data.roomCommandsEnabled as boolean;
+    return Promise.resolve({ ...creator, roomCommandsEnabled: f.state().controlsEnabled }) as ReturnType<typeof database.voiceCreator.update>;
+  });
+  const creators = new PrismaVoiceCreatorRepository(database);
   const guild = f.guild as unknown as Guild;
   const observe = () => runtime.coordinator.room(guild.id, f.state().room.channelDiscordId, () => runtime.observeLocked(f.state().room.id, f.gateway));
-  return { ...f, database, runtime, observe, resolveGuild: async () => guild };
+  const toggle = async (enabled: boolean) => {
+    await creators.setRoomCommandsEnabled(creator.id, enabled);
+    return runtime.synchronizeCreator(creator.id);
+  };
+  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild };
 }
 
 afterEach(() => { vi.useRealTimers(); });
@@ -74,6 +87,53 @@ describe('application-owned room runtime', () => {
     await vi.advanceTimersByTimeAsync(300_000);
     expect(f.state().presences.map((p) => p.memberDiscordId).sort()).toEqual([OLDEST, OTHER]);
     expect(f.projected().some((o) => o.id === OLDEST)).toBe(true);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([true, false])('rebinds priority after actual setup %s -> opposite without restarting its deadline', async (enabled) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER);
+    f.state().controlsEnabled = enabled; f.state().room.visibility = 'PRIVATE';
+    await f.runtime.start(f.resolveGuild);
+    const version = f.state().room.controlVersion;
+    await vi.advanceTimersByTimeAsync(1_234);
+    await expect(f.toggle(!enabled)).resolves.toEqual({ synced: 1, failed: 0 });
+    expect(f.state().room).toMatchObject({ controlVersion: version + 1, priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
+    f.join(OLDEST); // No voice event: expiry itself must reconcile and project.
+    await vi.advanceTimersByTimeAsync(298_765);
+    expect(f.state().presences.map((p) => p.memberDiscordId)).toEqual([OTHER]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().presences.map((p) => p.memberDiscordId).sort()).toEqual([OLDEST, OTHER]);
+    expect(f.projected().some((o) => o.id === OLDEST)).toBe(true);
+    expect(f.state().room.priorityExpiresAt).toEqual(new Date(300_000));
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('disable at 4999ms defeats timeout even after reenable and invalidates the old operation', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    const actor = f.actor();
+    const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway);
+    await f.runtime.transfers.activate(actor, pending.id, f.gateway);
+    await vi.advanceTimersByTimeAsync(4_999);
+    await f.toggle(false); await f.toggle(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().transfer).toBeNull();
+    expect(f.state().room.ownerDiscordId).toBe(OWNER);
+    await f.runtime.transfers.confirm(actor, pending.id, f.gateway);
+    expect(f.state().room.ownerDiscordId).toBe(OWNER);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('keeps the expired open marker through candidate departure and setup off/on, allowing another human to claim', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.leave(OWNER); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    await vi.advanceTimersByTimeAsync(300_000);
+    f.leave(OTHER); f.join(OLDEST); await f.observe();
+    await f.toggle(false); await f.toggle(true);
+    expect(f.state().room).toMatchObject({ priorityMemberDiscordId: OTHER, priorityExpiresAt: new Date(300_000) });
+    await f.runtime.ownership.claim(f.actorFor(OLDEST), f.gateway);
+    expect(f.state().room.ownerDiscordId).toBe(OLDEST);
     await f.runtime.stop(); await f.database.$disconnect();
   });
 

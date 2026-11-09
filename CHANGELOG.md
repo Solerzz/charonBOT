@@ -4,6 +4,24 @@ Todas as mudanças relevantes serão documentadas neste arquivo.
 
 ## [Unreleased]
 
+### 0.3.0 — preparação local em 2026-11-09 (não publicada)
+
+- Painel B nativo com ações privadas, nome de 11 grafemas, limite `0..99`,
+  acesso privado e lista de autorizados preservada em transferências/toggles.
+- Transferência de 5 segundos após entrega privada confirmada, confirmação/
+  desfazer pelo dono e execução por silêncio; reivindicação com prioridade de
+  5 minutos, presença humana e unicidade de dono por servidor no PostgreSQL.
+- Runtime compartilhado, cancelamento no reinício, reconciliação limitada de
+  salas acompanhadas, drenagem de timers/despachos e toggle integral dos painéis.
+- Migration `20261108010000_room_ownership_state`, RLS backend-only nas seis
+  tabelas e CI separada com PostgreSQL 17 loopback/opt-ins explícitos/execução serial.
+- Regressão corrigida: toggle reprograma o timer de prioridade na nova geração
+  sem reiniciar candidato/prazo. Validação local: 711 testes comuns aprovados,
+  29 opt-in pulados nessa execução; todos os 29 aprovados no PostgreSQL local.
+
+Limites e ações humanas pendentes: [notas v0.3.0](docs/releases/v0.3.0.md).
+Nenhum login/smoke Discord, migration remota, hospedagem ou publicação foi feito.
+
 ## [0.2.0] - 2026-11-06
 
 ### Added

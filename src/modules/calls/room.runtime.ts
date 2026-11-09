@@ -62,7 +62,8 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
   };
   return { store, coordinator, panels, access, controls, ownership, transfers, timers, observeLocked,
     async synchronizeCreator(creatorId: string): Promise<{ synced: number; failed: number }> {
-      if (!guildResolver) throw new RoomActionError('ROOM_UNAVAILABLE');
+      const resolveGuild = guildResolver;
+      if (!resolveGuild) throw new RoomActionError('ROOM_UNAVAILABLE');
       // The setup transaction has already invalidated SQL operations. Cancel
       // process-local futures under the same per-room coordinator, even after row deletion.
       for (const room of await store.listForCreator(creatorId)) {
@@ -72,9 +73,16 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
             timers.cancel(`transfer:${room.id}`);
             timers.cancel(`countdown:${room.id}`);
           }
+          if (state?.room.status === 'ACTIVE' && state.room.ownerDiscordId === null
+            && state.room.priorityExpiresAt !== null && state.room.priorityExpiresAt > new Date()) {
+            const guild = await resolveGuild(room.guildDiscordId);
+            if (!guild || guild.id !== room.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
+            // Setup bumped the generation, not the reservation's candidate/deadline.
+            ownership.rebindPriorityLocked(state, new DiscordRoomGateway(guild));
+          } else timers.cancel(`priority:${room.id}`);
         });
       }
-      return panels.synchronizeCreator(creatorId, guildResolver);
+      return panels.synchronizeCreator(creatorId, resolveGuild);
     },
     start(resolveGuild: RoomGuildResolver): Promise<void> {
       guildResolver = resolveGuild;
