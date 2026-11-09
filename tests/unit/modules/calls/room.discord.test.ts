@@ -17,6 +17,17 @@ function fixture() {
 function bits(value: OverwriteData['allow']) { return new PermissionsBitField(value).bitfield; }
 
 describe('DiscordRoomGateway', () => {
+  it('exposes only genuine unknown-message edits as replaceable, not forbidden or missing channels', async () => {
+    const f = fixture();
+    f.channel.messages.fetch.mockRejectedValueOnce({ code: 10008 });
+    await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'PANEL_MISSING' });
+    f.message.edit.mockRejectedValueOnce({ code: 10008 });
+    await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'PANEL_MISSING' });
+    f.channel.messages.fetch.mockRejectedValueOnce({ code: 50013 });
+    await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    f.guild.channels.fetch.mockRejectedValueOnce({ code: 10003 });
+    await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'ROOM_UNAVAILABLE' });
+  });
   it('reads forced native channels and resolves real participant bot flags without bulk fetching', async () => {
     const f = fixture();
     expect(await f.gateway.snapshot(room.channelDiscordId)).toEqual({ guildDiscordId: creator.guildDiscordId, channelDiscordId: room.channelDiscordId, name: 'Game', userLimit: 0, members: [{ memberDiscordId: f.member.id, isBot: false }] });

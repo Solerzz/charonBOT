@@ -32,14 +32,17 @@ const secondCreator: VoiceCreator = {
 };
 
 function createPrismaDouble() {
-  return {
+  const prisma = {
     voiceCreator: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
+    temporaryRoom: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    pendingOwnershipTransfer: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   };
+  return { ...prisma, $transaction: async <T>(work: (tx: typeof prisma) => Promise<T>) => work(prisma) };
 }
 
 describe('PrismaVoiceCreatorRepository', () => {

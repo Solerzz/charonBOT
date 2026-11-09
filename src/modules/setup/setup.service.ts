@@ -1,3 +1,6 @@
+import type { Logger } from 'pino';
+
+import { createLogger } from '../../core/logger/logger.js';
 import {
   type CreateVoiceCreatorInput,
   type VoiceCreatorConfiguration,
@@ -15,7 +18,11 @@ export interface SetupChannelGateway {
 }
 
 export class SetupService {
-  constructor(private readonly repository: VoiceCreatorRepository) {}
+  constructor(
+    private readonly repository: VoiceCreatorRepository,
+    private readonly onControlsChanged?: (creatorId: string) => Promise<{ synced: number; failed: number }>,
+    private readonly logger: Logger = createLogger({ level: 'warn' }),
+  ) {}
 
   async list(guildDiscordId: string): Promise<VoiceCreatorConfiguration[]> {
     return this.repository.listByGuild(discordIdSchema.parse(guildDiscordId));
@@ -62,17 +69,27 @@ export class SetupService {
     );
   }
 
-  async toggleRoomCommands(id: string): Promise<VoiceCreatorConfiguration> {
+  async toggleRoomCommands(id: string): Promise<{ configuration: VoiceCreatorConfiguration; synchronization: { synced: number; failed: number } | null }> {
     const parsedId = voiceCreatorIdSchema.parse(id);
     const configuration = await this.repository.findById(parsedId);
     if (configuration === null) {
       throw new VoiceCreatorNotFoundError();
     }
 
-    return this.repository.setRoomCommandsEnabled(
+    const saved = await this.repository.setRoomCommandsEnabled(
       parsedId,
       !configuration.roomCommandsEnabled,
     );
+    let synchronization: { synced: number; failed: number } | null = null;
+    if (this.onControlsChanged) {
+      try {
+        synchronization = await this.onControlsChanged(parsedId);
+      } catch {
+        // The flag is already committed. Never present panel failure as a failed save.
+        this.logger.warn({ creatorId: parsedId, operation: 'synchronizeCreator' }, 'Creator controls synchronization unconfirmed');
+      }
+    }
+    return { configuration: saved, synchronization };
   }
 
   async remove(id: string): Promise<void> {

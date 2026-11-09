@@ -33,7 +33,7 @@ export type RoomActionErrorCode =
   | 'ROOM_UNAVAILABLE' | 'CONTROLS_DISABLED' | 'NOT_PRESENT' | 'NOT_OWNER'
   | 'STALE_CONTROLS' | 'ALREADY_OWNS_ROOM' | 'PRIORITY_RESERVED' | 'TRANSFER_PENDING'
   | 'TRANSFER_EXPIRED' | 'UNKNOWN_MEMBER' | 'PERMISSIONS_UNAVAILABLE' | 'DISCORD_FAILURE'
-  | 'PERSISTENCE_FAILURE';
+  | 'PERSISTENCE_FAILURE' | 'PANEL_MISSING';
 
 export class RoomActionError extends Error {
   constructor(readonly code: RoomActionErrorCode) {

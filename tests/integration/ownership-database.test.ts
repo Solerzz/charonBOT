@@ -12,6 +12,12 @@ import type { RoomActor, RoomDiscordGateway, RoomState } from '../../src/modules
 import { OwnershipTimers } from '../../src/modules/ownership/ownership.timers.js';
 import { TransferService } from '../../src/modules/ownership/transfer.service.js';
 import { KeyedMutex } from '../../src/shared/keyed-mutex.js';
+import { PrismaVoiceCreatorRepository } from '../../src/modules/setup/setup.repository.js';
+import { createLogger } from '../../src/core/logger/logger.js';
+import { RoomPanelService } from '../../src/modules/calls/room-panel.service.js';
+import { DiscordRoomGateway } from '../../src/modules/calls/room.discord.js';
+import type { Guild } from 'discord.js';
+import { discordFixture } from '../unit/modules/calls/call.discord.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 import { roomSettingsFixture } from '../unit/modules/calls/room-settings.fixtures.js';
 
@@ -84,6 +90,94 @@ describe('room ownership database', () => {
     }
     return { client, store, guild, creatorId, first: roomIds[0]!, second: roomIds[1]!, otherGuild: roomIds[2]!, cleanup };
   }
+
+  integrationTest('creator off/on atomically invalidates tracked versions and transfers without changing room settings', async () => {
+    const f = await fixture();
+    try {
+      const creators = new PrismaVoiceCreatorRepository(f.client);
+      await f.client.temporaryRoom.update({ where: { id: f.second }, data: { status: 'CREATING', visibility: 'PRIVATE', userLimit: 3, priorityMemberDiscordId: 'candidate', priorityExpiresAt: new Date(300000) } });
+      await f.client.temporaryRoom.update({ where: { id: f.otherGuild }, data: { status: 'CLOSING' } });
+      const transfer = await f.store.createTransfer({ roomId: f.first, ownerDiscordId: OWNER, targetDiscordId: 'target', controlVersion: 0 });
+      await f.store.armTransfer(transfer.id, 0, new Date(5000));
+      expect(await creators.setRoomCommandsEnabled(f.creatorId, false)).toMatchObject({ roomCommandsEnabled: false });
+      for (const id of [f.first, f.second, f.otherGuild]) {
+        expect(await f.store.read(id)).toMatchObject({ controlsEnabled: false, room: { controlVersion: 1 }, transfer: null });
+      }
+      expect(await f.store.finishTransfer(transfer.id, 0, new Date(1000), 'confirm')).toBe(false);
+      expect(await f.store.finishTransfer(transfer.id, 0, new Date(6000), 'timeout')).toBe(false);
+      expect(await f.store.setPanelId(f.first, 0, null, 'stale')).toBe(false);
+      await creators.setRoomCommandsEnabled(f.creatorId, true);
+      expect(await f.store.setPanelId(f.first, 0, null, 'stale')).toBe(false);
+      expect(await f.store.read(f.first)).toMatchObject({ controlsEnabled: true, room: { controlVersion: 2, ownerDiscordId: OWNER }, transfer: null });
+      expect(await f.store.read(f.second)).toMatchObject({ room: { controlVersion: 2, visibility: 'PRIVATE', userLimit: 3, priorityMemberDiscordId: 'candidate', priorityExpiresAt: new Date(300000) } });
+      await f.client.temporaryRoom.update({ where: { id: f.otherGuild }, data: { status: 'CLOSED' } });
+      await creators.setRoomCommandsEnabled(f.creatorId, false);
+      expect((await f.store.read(f.otherGuild))?.room.controlVersion).toBe(2);
+      await creators.delete(f.creatorId);
+      expect(await creators.findById(f.creatorId)).toBeNull();
+      expect(await creators.listByGuild(f.guild)).toEqual([]);
+      expect(await f.store.read(f.first)).toMatchObject({ controlsEnabled: false, room: { status: 'ACTIVE' } });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('a failed version increment rolls back the saved creator flag and pending-transfer cancellation', async () => {
+    const f = await fixture();
+    try {
+      const creators = new PrismaVoiceCreatorRepository(f.client);
+      const transfer = await f.store.createTransfer({ roomId: f.first, ownerDiscordId: OWNER, targetDiscordId: 'target', controlVersion: 0 });
+      await f.client.temporaryRoom.update({ where: { id: f.second }, data: { controlVersion: 2147483647 } });
+      await expect(creators.setRoomCommandsEnabled(f.creatorId, false)).rejects.toThrow();
+      expect(await creators.findById(f.creatorId)).toMatchObject({ roomCommandsEnabled: true });
+      expect(await f.store.read(f.first)).toMatchObject({ room: { controlVersion: 0 }, transfer: { id: transfer.id } });
+      expect((await f.store.read(f.second))?.room.controlVersion).toBe(2147483647);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('a concurrent pending-transfer creation cannot survive a committed controls toggle', async () => {
+    const f = await fixture();
+    try {
+      const creators = new PrismaVoiceCreatorRepository(f.client);
+      const [toggle, transfer] = await Promise.allSettled([
+        creators.setRoomCommandsEnabled(f.creatorId, false),
+        f.store.createTransfer({ roomId: f.first, ownerDiscordId: OWNER, targetDiscordId: 'target', controlVersion: 0 }),
+      ]);
+      expect(toggle.status).toBe('fulfilled');
+      if (transfer.status === 'rejected') expect(transfer.reason).toMatchObject({ code: expect.stringMatching(/^(CONTROLS_DISABLED|STALE_CONTROLS)$/) });
+      expect(await f.store.read(f.first)).toMatchObject({ controlsEnabled: false, room: { controlVersion: 1, ownerDiscordId: OWNER }, transfer: null });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('SQL panel installation CAS loses after off/on and compensation deletes only the REST-created duplicate', async () => {
+    const f = await fixture();
+    try {
+      const d = discordFixture();
+      const creators = new PrismaVoiceCreatorRepository(f.client);
+      await f.client.temporaryRoom.update({ where: { id: f.first }, data: { guildDiscordId: d.guild.id, channelDiscordId: d.channel.id } });
+      d.states.clear(); d.states.set(d.member.id, { channelId: d.channel.id });
+      const createdId = '70000000000000000'; const winnerId = '80000000000000000';
+      const messages = new Set<string>();
+      d.channel.send.mockImplementation(async () => {
+        messages.add(createdId);
+        await creators.setRoomCommandsEnabled(f.creatorId, false);
+        await creators.setRoomCommandsEnabled(f.creatorId, true);
+        messages.add(winnerId);
+        expect(await f.store.setPanelId(f.first, 2, null, winnerId)).toBe(true);
+        return { ...d.message, id: createdId };
+      });
+      d.channel.messages.fetch.mockImplementation(async (...args: unknown[]) => {
+        const id = args[0] as string;
+        if (!messages.has(id)) throw { code: 10008 };
+        d.message.delete.mockImplementation(async () => { messages.delete(id); });
+        return { ...d.message, id };
+      });
+      const coordinator = new RoomCoordinator(new KeyedMutex());
+      const service = new RoomPanelService({ store: f.store, coordinator, logger: createLogger({ level: 'silent' }) });
+      await expect(coordinator.room(d.guild.id, d.channel.id, () => service.synchronizeLocked(f.first, new DiscordRoomGateway(d.guild as unknown as Guild))))
+        .rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+      expect([...messages]).toEqual([winnerId]);
+      expect(await f.store.read(f.first)).toMatchObject({ controlsEnabled: true, room: { controlVersion: 2, controlMessageDiscordId: winnerId } });
+    } finally { await f.cleanup(); }
+  });
 
   integrationTest('owner CAS has one winner, translates conflicts, and releases closed history', async () => {
     const f = await fixture();

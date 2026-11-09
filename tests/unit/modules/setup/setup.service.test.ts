@@ -140,12 +140,41 @@ describe('SetupService', () => {
     const service = new SetupService(repository);
 
     await expect(service.toggleRoomCommands(configuration.id)).resolves.toMatchObject({
-      roomCommandsEnabled: false,
+      configuration: { roomCommandsEnabled: false }, synchronization: null,
     });
     expect(repository.setRoomCommandsEnabled).toHaveBeenCalledWith(
       configuration.id,
       false,
     );
+  });
+
+  it.each([{ synced: 2, failed: 0 }, { synced: 1, failed: 1 }])('returns known synchronization counts after saving: %j', async (counts) => {
+    const saved = { ...configuration };
+    const repository = createRepositoryDouble({
+      findById: async () => ({ ...saved }),
+      setRoomCommandsEnabled: async (_id, enabled) => { saved.roomCommandsEnabled = enabled; return { ...saved }; },
+    });
+    const service = new SetupService(repository, async (id) => {
+      expect(id).toBe(configuration.id);
+      expect(saved.roomCommandsEnabled).toBe(false);
+      return counts;
+    });
+    expect(await service.toggleRoomCommands(configuration.id)).toMatchObject({ configuration: { roomCommandsEnabled: false }, synchronization: counts });
+  });
+
+  it('reports unconfirmed synchronization without undoing the saved flag and logs no raw error', async () => {
+    const lines: string[] = [];
+    const { createLogger } = await import('../../../../src/core/logger/logger.js');
+    const logger = createLogger({ level: 'warn', destination: { write: (line: string) => { lines.push(line); } } });
+    const saved = { ...configuration };
+    const service = new SetupService(createRepositoryDouble({
+      findById: async () => ({ ...saved }),
+      setRoomCommandsEnabled: async (_id, enabled) => { saved.roomCommandsEnabled = enabled; return { ...saved }; },
+    }), async () => { throw new Error('private-response-secret'); }, logger);
+    expect(await service.toggleRoomCommands(configuration.id)).toMatchObject({ configuration: { roomCommandsEnabled: false }, synchronization: null });
+    expect(saved.roomCommandsEnabled).toBe(false);
+    expect(lines.join('')).toContain(configuration.id);
+    expect(lines.join('')).not.toContain('private-response-secret');
   });
 
   it('validates the configuration ID before removal', async () => {

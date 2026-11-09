@@ -143,7 +143,12 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
   updateControlPanel(channelId: string, messageId: string, payload: CallPanelPayload): Promise<void> {
     return this.checked(async () => {
       const { channel } = await this.authorized(channelId, [P.ViewChannel, P.SendMessages, P.EmbedLinks, P.ReadMessageHistory]);
-      await (await channel.messages.fetch(discordIdSchema.parse(messageId))).edit(payload);
+      try {
+        await (await channel.messages.fetch(discordIdSchema.parse(messageId))).edit(payload);
+      } catch (error) {
+        if (hasCode(error, 10008)) throw new RoomActionError('PANEL_MISSING');
+        throw error;
+      }
     });
   }
 
