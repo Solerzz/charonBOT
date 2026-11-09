@@ -516,9 +516,9 @@
     "semantic_hash": ""
   },
   "tests/integration/ownership-database.test.ts": {
-    "mtime": 1794195910.4846191,
-    "seen": 1794196058.6893976,
-    "ast_hash": "125550bca4c059cdf31d3fb15d66d710",
+    "mtime": 1794198705.8861022,
+    "seen": 1794198941.7054377,
+    "ast_hash": "6ebcda14338ad68fd301548ad9211c97",
     "semantic_hash": ""
   },
   "tests/integration/prepare-database.ts": {
@@ -633,6 +633,42 @@
     "mtime": 1794197961.5564556,
     "seen": 1794197987.5146995,
     "ast_hash": "98270a0e029808cc5a02e3fe101be87e",
+    "semantic_hash": ""
+  },
+  "src/modules/calls/room-access.service.ts": {
+    "mtime": 1794198851.7356167,
+    "seen": 1794198941.703674,
+    "ast_hash": "f76f49ea5ddeefc67309457a94dc17bc",
+    "semantic_hash": ""
+  },
+  "src/modules/calls/room-controls.service.ts": {
+    "mtime": 1794198565.7464588,
+    "seen": 1794198941.703674,
+    "ast_hash": "c696696ce33c78135ae918fdbaf2f873",
+    "semantic_hash": ""
+  },
+  "src/modules/calls/room-mutation.ts": {
+    "mtime": 1794198565.7464588,
+    "seen": 1794198941.703674,
+    "ast_hash": "496f777490f26ac43b35e17d12897663",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/room-access.service.test.ts": {
+    "mtime": 1794198917.5830722,
+    "seen": 1794198941.7054377,
+    "ast_hash": "1df5e953df7e547e374ed752ef97e48d",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/room-controls.service.test.ts": {
+    "mtime": 1794198917.5907872,
+    "seen": 1794198941.7054377,
+    "ast_hash": "f391612ec083621655c03d28c8e4c3b5",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/calls/room-settings.fixtures.ts": {
+    "mtime": 1794198446.5077233,
+    "seen": 1794198941.7054377,
+    "ast_hash": "f7549f9e2b14cc949d28c05cf2d8d540",
     "semantic_hash": ""
   },
   "package-lock.json": {

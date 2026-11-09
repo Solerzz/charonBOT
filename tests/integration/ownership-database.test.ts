@@ -5,12 +5,15 @@ import { describe, expect, it } from 'vitest';
 
 import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
 import type { RoomStateRepository } from '../../src/modules/calls/room-state.repository.js';
+import { RoomAccessService } from '../../src/modules/calls/room-access.service.js';
+import { RoomControlsService } from '../../src/modules/calls/room-controls.service.js';
 import { RoomCoordinator } from '../../src/modules/calls/room.coordinator.js';
 import type { RoomActor, RoomDiscordGateway, RoomState } from '../../src/modules/calls/room.types.js';
 import { OwnershipTimers } from '../../src/modules/ownership/ownership.timers.js';
 import { TransferService } from '../../src/modules/ownership/transfer.service.js';
 import { KeyedMutex } from '../../src/shared/keyed-mutex.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
+import { roomSettingsFixture } from '../unit/modules/calls/room-settings.fixtures.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
 const OWNER = 'owner';
@@ -339,5 +342,97 @@ describe('room ownership database', () => {
       expect(states.every((s) => s!.transfer === null)).toBe(true);
       expect(a.changed.length + b.changed.length).toBe(1);
     } finally { await a.timers.stop(); await b.timers.stop(); await f.cleanup(); }
+  });
+
+  async function settingsRuntime(f: Awaited<ReturnType<typeof fixture>>, store: RoomStateRepository = f.store) {
+    const boundaries = roomSettingsFixture();
+    const owner = boundaries.actor().memberDiscordId;
+    await f.client.temporaryRoom.update({ where: { id: f.first }, data: {
+      guildDiscordId: boundaries.guild.id, channelDiscordId: boundaries.channel.id, ownerDiscordId: owner,
+    } });
+    const access = new RoomAccessService(store);
+    const changed: RoomState[] = [];
+    const controls = new RoomControlsService({ store, coordinator: boundaries.coordinator, access,
+      onChangedLocked: async (id) => { changed.push((await f.store.read(id))!); } });
+    return { ...boundaries, access, controls, changed,
+      actor: (): RoomActor => ({ ...boundaries.actor(), roomId: f.first }) };
+  }
+
+  integrationTest('settings service round trips names, limits, room-specific access and privacy across ownership', async () => {
+    const f = await fixture(); const r = await settingsRuntime(f); const guest = '72345678901234567';
+    try {
+      await r.controls.rename(r.actor(), `  ${'👨‍👩‍👧‍👦'.repeat(11)}  `, r.gateway);
+      await r.controls.setLimit(r.actor(), 1, r.gateway);
+      await r.controls.setAllowed(r.actor(), guest, true, r.gateway);
+      await r.controls.setVisibility(r.actor(), 'PRIVATE', r.gateway);
+      expect(await f.store.read(f.first)).toMatchObject({ room: { name: '👨‍👩‍👧‍👦'.repeat(11), userLimit: 1, visibility: 'PRIVATE' }, allowedMemberIds: [guest] });
+      expect(r.changed).toHaveLength(4); expect(r.changed[3]?.room.visibility).toBe('PRIVATE');
+      expect((await f.store.read(f.second))?.allowedMemberIds).toEqual([]);
+      const next = '82345678901234567';
+      expect(await f.store.changeOwner(f.first, 0, r.actor().memberDiscordId, next)).toBe(true);
+      r.join(next); r.leave(r.actor().memberDiscordId);
+      const actor = { ...r.actor(), memberDiscordId: next, controlVersion: 1 };
+      await r.controls.setVisibility(actor, 'PUBLIC', r.gateway);
+      await r.controls.setVisibility(actor, 'PRIVATE', r.gateway);
+      expect((await f.store.read(f.first))?.allowedMemberIds).toEqual([guest]);
+      await r.controls.setAllowed(actor, guest, false, r.gateway);
+      expect((await f.store.read(f.first))?.allowedMemberIds).toEqual([]);
+      expect(r.member.voice.setChannel).not.toHaveBeenCalled();
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('settings/list CAS rejects stale, disabled and inactive writes without changing stored values', async () => {
+    const f = await fixture();
+    try {
+      expect(await f.store.updateSettings(f.first, 0, { name: 'Kept', userLimit: 9, visibility: 'PRIVATE' })).toBe(true);
+      expect(await f.store.setAllowed(f.first, 0, 'kept', true)).toBe(true);
+      expect(await f.store.updateSettings(f.first, 1, { name: 'Lost' })).toBe(false);
+      expect(await f.store.setAllowed(f.first, 1, 'kept', false)).toBe(false);
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      expect(await f.store.updateSettings(f.first, 0, { name: 'Lost' })).toBe(false);
+      expect(await f.store.setAllowed(f.first, 0, 'kept', false)).toBe(false);
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: true } });
+      for (const status of ['CREATING', 'CLOSING', 'CLOSED'] as const) {
+        await f.client.temporaryRoom.update({ where: { id: f.first }, data: { status } });
+        expect(await f.store.updateSettings(f.first, 0, { name: 'Lost' })).toBe(false);
+        expect(await f.store.setAllowed(f.first, 0, 'kept', false)).toBe(false);
+      }
+      expect(await f.store.read(f.first)).toMatchObject({ room: { name: 'Kept', userLimit: 9, visibility: 'PRIVATE' }, allowedMemberIds: ['kept'] });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('no SQL transaction spans Discord I/O; config changes there compensate actual prior settings', async () => {
+    const f = await fixture(); const r = await settingsRuntime(f);
+    try {
+      r.channel.name = 'External';
+      r.channel.setName.mockImplementationOnce(async (name) => {
+        r.channel.name = name;
+        await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      });
+      await expect(r.controls.rename(r.actor(), 'Rejected', r.gateway)).rejects.toMatchObject({ code: 'CONTROLS_DISABLED' });
+      expect(r.channel.name).toBe('External'); expect((await f.store.read(f.first))?.room.name).toBe('Room'); expect(r.changed).toEqual([]);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('a guarded local CAS loss after permission writes restores private overwrites and commits no allowlist', async () => {
+    const f = await fixture();
+    const racingStore: RoomStateRepository = Object.create(f.store);
+    racingStore.setAllowed = async (id, version, member, allowed) => {
+      await f.client.temporaryRoom.update({ where: { id }, data: { controlVersion: { increment: 1 } } });
+      return f.store.setAllowed(id, version, member, allowed);
+    };
+    const r = await settingsRuntime(f, racingStore);
+    try {
+      await r.controls.setVisibility(r.actor(), 'PRIVATE', r.gateway);
+      const previous = await r.gateway.readAccess(r.channel.id);
+      await expect(r.controls.setAllowed(r.actor(), '72345678901234567', true, r.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+      expect(await r.gateway.readAccess(r.channel.id)).toEqual(previous);
+      expect(await f.store.read(f.first)).toMatchObject({ room: { visibility: 'PRIVATE', controlVersion: 1 }, allowedMemberIds: [] });
+      expect(r.changed).toHaveLength(1);
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      const state = (await f.store.read(f.first))!;
+      await r.access.synchronizeLocked(state, (await r.gateway.snapshot(r.channel.id))!, r.gateway);
+      expect((await f.store.read(f.first))?.room.visibility).toBe('PRIVATE');
+    } finally { await f.cleanup(); }
   });
 });
