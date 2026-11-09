@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
+
 import { vi } from 'vitest';
 
 import { RoomCoordinator } from '../../../../src/modules/calls/room.coordinator.js';
 import type { RoomStateRepository } from '../../../../src/modules/calls/room-state.repository.js';
-import { RoomActionError, type RoomActor, type RoomDiscordGateway, type RoomMember, type RoomSnapshot, type RoomState } from '../../../../src/modules/calls/room.types.js';
+import { RoomActionError, type PendingOwnershipTransfer, type RoomActor, type RoomDiscordGateway, type RoomMember, type RoomSnapshot, type RoomState } from '../../../../src/modules/calls/room.types.js';
 import { OwnershipService } from '../../../../src/modules/ownership/ownership.service.js';
 import { OwnershipTimers } from '../../../../src/modules/ownership/ownership.timers.js';
 import { KeyedMutex } from '../../../../src/shared/keyed-mutex.js';
@@ -46,14 +48,52 @@ export function ownershipFixture() {
       current.transfer = null;
       return true;
     }),
-    readTransfer: unused, listTracked: unused, listForCreator: unused,
-    createTransfer: unused, armTransfer: unused, cancelTransfer: unused, discardTransfer: unused,
-    invalidateTransfers: unused, cancelPreviousRunTransfers: unused, finishTransfer: unused,
+    readTransfer: vi.fn(async (id: string) => structuredClone([...states.values()].find((s) => s.transfer?.id === id)?.transfer ?? null)),
+    createTransfer: vi.fn(async (input: Pick<PendingOwnershipTransfer, 'roomId' | 'ownerDiscordId' | 'targetDiscordId' | 'controlVersion'>) => {
+      const current = states.get(input.roomId);
+      if (!current || current.room.status !== 'ACTIVE') throw new RoomActionError('ROOM_UNAVAILABLE');
+      if (!current.controlsEnabled) throw new RoomActionError('CONTROLS_DISABLED');
+      if (current.room.controlVersion !== input.controlVersion) throw new RoomActionError('STALE_CONTROLS');
+      if (current.room.ownerDiscordId !== input.ownerDiscordId) throw new RoomActionError('NOT_OWNER');
+      if (current.transfer) throw new RoomActionError('TRANSFER_PENDING');
+      current.transfer = { ...input, id: randomUUID(), expiresAt: null };
+      return structuredClone(current.transfer);
+    }),
+    armTransfer: vi.fn(async (id: string, version: number, expiresAt: Date) => {
+      const current = [...states.values()].find((s) => s.transfer?.id === id);
+      if (!current?.transfer || current.transfer.controlVersion !== version || !current.controlsEnabled || current.room.status !== 'ACTIVE'
+        || current.room.controlVersion !== version || current.room.ownerDiscordId !== current.transfer.ownerDiscordId || current.transfer.expiresAt !== null) return false;
+      current.transfer.expiresAt = expiresAt;
+      return true;
+    }),
+    cancelTransfer: vi.fn(async (id: string, owner: string, at: Date) => {
+      const current = [...states.values()].find((s) => s.transfer?.id === id);
+      if (!current?.transfer || !current.controlsEnabled || current.room.status !== 'ACTIVE'
+        || current.room.controlVersion !== current.transfer.controlVersion || current.room.ownerDiscordId !== owner
+        || current.transfer.ownerDiscordId !== owner || (current.transfer.expiresAt !== null && current.transfer.expiresAt <= at)) return false;
+      current.transfer = null;
+      return true;
+    }),
+    discardTransfer: vi.fn(async (id: string) => {
+      const current = [...states.values()].find((s) => s.transfer?.id === id);
+      if (current) current.transfer = null;
+    }),
+    invalidateTransfers: vi.fn(async (id: string) => { const current = states.get(id); if (current) current.transfer = null; }),
+    finishTransfer: vi.fn(async (id: string, version: number, at: Date, cause: 'confirm' | 'timeout'): Promise<boolean> => {
+      const current = [...states.values()].find((s) => s.transfer?.id === id);
+      if (!current?.transfer || current.transfer.controlVersion !== version || !current.controlsEnabled || current.room.status !== 'ACTIVE'
+        || current.room.controlVersion !== version || current.room.ownerDiscordId !== current.transfer.ownerDiscordId) return false;
+      const deadline = current.transfer.expiresAt;
+      if (cause === 'timeout' ? deadline === null || deadline > at : deadline !== null && deadline <= at) return false;
+      return store.changeOwner(current.room.id, version, current.transfer.ownerDiscordId, current.transfer.targetDiscordId);
+    }),
+    listTracked: unused, listForCreator: unused, cancelPreviousRunTransfers: unused,
     setAllowed: unused, updateSettings: unused, setPanelId: unused, invalidateControls: unused,
   } satisfies RoomStateRepository;
   const gateway = {
     snapshot: vi.fn(async (_id: string) => { await hooks.beforeSnapshot(); return structuredClone(live.snapshot); }),
-    resolveMember: unused, rename: unused, setLimit: unused, readAccess: unused,
+    resolveMember: vi.fn(async (id: string) => structuredClone(live.snapshot?.members.find((m) => m.memberDiscordId === id) ?? null)),
+    rename: unused, setLimit: unused, readAccess: unused,
     setPrivateAccess: unused, setPublicAccess: unused, restoreAccess: unused,
     sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,
   } satisfies RoomDiscordGateway;
@@ -73,5 +113,5 @@ export function ownershipFixture() {
     const id = `other-${member}`;
     states.set(id, { ...structuredClone(state()), room: { ...room, id, channelDiscordId: id, guildDiscordId: guild, ownerDiscordId: member, status } });
   };
-  return { states, state, live, store, gateway, coordinator, locks, timers, timerErrors, refreshes, hooks, service, actor, observe, ownElsewhere };
+  return { states, state, live, store, gateway, coordinator, locks, timers, timerErrors, refreshes, hooks, service, actor, observe, ownElsewhere, onChangedLocked };
 }

@@ -4,6 +4,12 @@ import { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
+import type { RoomStateRepository } from '../../src/modules/calls/room-state.repository.js';
+import { RoomCoordinator } from '../../src/modules/calls/room.coordinator.js';
+import type { RoomActor, RoomDiscordGateway, RoomState } from '../../src/modules/calls/room.types.js';
+import { OwnershipTimers } from '../../src/modules/ownership/ownership.timers.js';
+import { TransferService } from '../../src/modules/ownership/transfer.service.js';
+import { KeyedMutex } from '../../src/shared/keyed-mutex.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
@@ -242,5 +248,96 @@ describe('room ownership database', () => {
       expect(await f.store.changeOwner(f.first, 0, OWNER, null)).toBe(true);
       expect((await f.store.read(f.first))?.room.ownerDiscordId).toBeNull();
     } finally { await f.cleanup(); }
+  });
+
+  async function transferRuntime(f: Awaited<ReturnType<typeof fixture>>, store: RoomStateRepository = f.store) {
+    const rooms = (await Promise.all([f.store.read(f.first), f.store.read(f.second)])).map((state) => state!.room);
+    const unused = async (): Promise<never> => { throw new Error('Unused Discord boundary'); };
+    const gateway: RoomDiscordGateway = {
+      snapshot: async (id) => {
+        const room = rooms.find((r) => r.channelDiscordId === id);
+        return room ? { guildDiscordId: f.guild, channelDiscordId: id, name: room.name, userLimit: 0,
+          members: [OWNER, 'second-owner', 'target'].map((memberDiscordId) => ({ memberDiscordId, isBot: false })) } : null;
+      },
+      resolveMember: async (memberDiscordId) => ({ memberDiscordId, isBot: false }),
+      rename: unused, setLimit: unused, readAccess: unused, setPrivateAccess: unused, setPublicAccess: unused,
+      restoreAccess: unused, sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,
+    };
+    const timers = new OwnershipTimers({ error: () => { throw new Error('Unexpected timer error'); } });
+    const changed: RoomState[] = [];
+    const service = new TransferService({ store, coordinator: new RoomCoordinator(new KeyedMutex()), timers,
+      onChangedLocked: async (id) => { changed.push((await f.store.read(id))!); } });
+    const actor = (id = f.first, owner = OWNER): RoomActor => ({ roomId: id, guildDiscordId: f.guild, memberDiscordId: owner, controlVersion: 0 });
+    return { service, gateway, timers, changed, actor };
+  }
+
+  integrationTest('transfer service confirms a prepared operation once and synchronizes only committed state', async () => {
+    const f = await fixture();
+    const runtime = await transferRuntime(f);
+    try {
+      await f.store.setAllowed(f.first, 0, 'allowed', true);
+      const pending = await runtime.service.begin(runtime.actor(), 'target', runtime.gateway);
+      expect(pending.expiresAt).toBeNull();
+      await Promise.all([
+        runtime.service.confirm(runtime.actor(), pending.id, runtime.gateway),
+        runtime.service.confirm(runtime.actor(), pending.id, runtime.gateway),
+      ]);
+      expect(await runtime.service.activate(runtime.actor(), pending.id, runtime.gateway)).toBeNull();
+      expect(runtime.changed).toHaveLength(1);
+      expect(runtime.changed[0]).toMatchObject({ room: { ownerDiscordId: 'target', controlVersion: 1 }, transfer: null, allowedMemberIds: ['allowed'] });
+    } finally { await runtime.timers.stop(); await f.cleanup(); }
+  });
+
+  integrationTest('service undo preserves an elapsed operation; exact failed-publication cleanup preserves its replacement', async () => {
+    const f = await fixture();
+    const runtime = await transferRuntime(f);
+    try {
+      const first = await runtime.service.begin(runtime.actor(), 'target', runtime.gateway);
+      await runtime.service.undo(runtime.actor(), first.id, runtime.gateway);
+      const second = await runtime.service.begin(runtime.actor(), 'target', runtime.gateway);
+      await runtime.service.activate(runtime.actor(), second.id, runtime.gateway);
+      await runtime.service.abortUnpublished(first.id, runtime.gateway);
+      expect((await f.store.read(f.first))?.transfer?.id).toBe(second.id);
+      await runtime.service.abortUnpublished(second.id, runtime.gateway);
+      const elapsed = await runtime.service.begin(runtime.actor(), 'target', runtime.gateway);
+      expect(await f.store.armTransfer(elapsed.id, 0, new Date(0))).toBe(true);
+      await expect(runtime.service.undo(runtime.actor(), elapsed.id, runtime.gateway)).rejects.toMatchObject({ code: 'TRANSFER_EXPIRED' });
+      expect((await f.store.read(f.first))?.transfer?.id).toBe(elapsed.id);
+      await Promise.all([runtime.service.expire(elapsed.id, runtime.gateway), runtime.service.expire(elapsed.id, runtime.gateway)]);
+      expect((await f.store.read(f.first))?.room).toMatchObject({ ownerDiscordId: 'target', controlVersion: 1 });
+      expect(runtime.changed).toHaveLength(1);
+    } finally { await runtime.timers.stop(); await f.cleanup(); }
+  });
+
+  integrationTest('independent transfer services racing for the same target have one transactional owner-slot winner', async () => {
+    const f = await fixture();
+    await f.store.changeOwner(f.second, 0, null, 'second-owner');
+    let arrived = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    let racing = false;
+    const racingStore: RoomStateRepository = Object.create(f.store);
+    racingStore.findOwnedRoom = async (guild, member) => {
+      const owned = await f.store.findOwnedRoom(guild, member);
+      if (racing && member === 'target') { if (++arrived === 2) release(); await barrier; }
+      return owned;
+    };
+    const a = await transferRuntime(f, racingStore);
+    const b = await transferRuntime(f, racingStore);
+    try {
+      const first = await a.service.begin(a.actor(), 'target', a.gateway);
+      const secondActor = { ...b.actor(f.second, 'second-owner'), controlVersion: 1 };
+      const second = await b.service.begin(secondActor, 'target', b.gateway);
+      racing = true;
+      const results = await Promise.allSettled([
+        a.service.confirm(a.actor(), first.id, a.gateway), b.service.confirm(secondActor, second.id, b.gateway),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(results.filter((r) => r.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ code: 'ALREADY_OWNS_ROOM' }) })]);
+      const states = await Promise.all([f.store.read(f.first), f.store.read(f.second)]);
+      expect(states.filter((s) => s!.room.ownerDiscordId === 'target')).toHaveLength(1);
+      expect(states.every((s) => s!.transfer === null)).toBe(true);
+      expect(a.changed.length + b.changed.length).toBe(1);
+    } finally { await a.timers.stop(); await b.timers.stop(); await f.cleanup(); }
   });
 });

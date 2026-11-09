@@ -516,9 +516,9 @@
     "semantic_hash": ""
   },
   "tests/integration/ownership-database.test.ts": {
-    "mtime": 1794194442.0641098,
-    "seen": 1794194792.4861107,
-    "ast_hash": "aeda65e8c7a2a8d1d8299fdab7ab81c3",
+    "mtime": 1794195910.4846191,
+    "seen": 1794196058.6893976,
+    "ast_hash": "125550bca4c059cdf31d3fb15d66d710",
     "semantic_hash": ""
   },
   "tests/integration/prepare-database.ts": {
@@ -612,15 +612,27 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.fixtures.ts": {
-    "mtime": 1794194597.0158799,
-    "seen": 1794194792.4861107,
-    "ast_hash": "8aa04114e463880976da9269b8e01901",
+    "mtime": 1794196036.2197306,
+    "seen": 1794196058.6893976,
+    "ast_hash": "029f72d2b3b5043bfc50a7fdaa1f27d4",
     "semantic_hash": ""
   },
   "tests/unit/modules/ownership/ownership.service.test.ts": {
     "mtime": 1794195300.778159,
     "seen": 1794195330.2984314,
     "ast_hash": "d2f166585f656b471a052878a8094c5c",
+    "semantic_hash": ""
+  },
+  "src/modules/ownership/transfer.service.ts": {
+    "mtime": 1794195840.086731,
+    "seen": 1794196058.6748621,
+    "ast_hash": "27445ddb26fdacd486e8f9eabcf60b78",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/ownership/transfer.service.test.ts": {
+    "mtime": 1794195955.368272,
+    "seen": 1794196058.6893976,
+    "ast_hash": "7ff586cdedc9d06f2c98beee6565714a",
     "semantic_hash": ""
   },
   "package-lock.json": {
