@@ -1,14 +1,15 @@
 import type { Guild, OverwriteData } from 'discord.js';
 
-import type { PendingOwnershipTransfer, RoomPresence, RoomVisibility } from '../../generated/prisma/client.js';
+import type { PendingOwnershipTransfer, RoomMemberBlock, RoomPresence, RoomVisibility } from '../../generated/prisma/client.js';
 import type { CallPanelPayload } from './call-panel.view.js';
 import type { TemporaryRoomRecord } from './call.repository.js';
 
-export type { PendingOwnershipTransfer, RoomPresence } from '../../generated/prisma/client.js';
+export type { PendingOwnershipTransfer, RoomMemberBlock, RoomPresence } from '../../generated/prisma/client.js';
 export type RoomActor = { roomId: string; guildDiscordId: string; memberDiscordId: string; controlVersion: number };
 export type RoomMember = { memberDiscordId: string; isBot: boolean };
 export type RoomSnapshot = { guildDiscordId: string; channelDiscordId: string; members: RoomMember[]; name: string; userLimit: number };
-export type RoomState = { room: TemporaryRoomRecord; controlsEnabled: boolean; presences: RoomPresence[]; allowedMemberIds: string[]; transfer: PendingOwnershipTransfer | null };
+export type RoomState = { room: TemporaryRoomRecord; controlsEnabled: boolean; presences: RoomPresence[]; allowedMemberIds: string[]; memberBlocks: RoomMemberBlock[]; transfer: PendingOwnershipTransfer | null };
+export type RoomBlockWrite = { block: RoomMemberBlock; controlVersion: number; changed: boolean };
 export type RoomSettingsPatch = Partial<Pick<TemporaryRoomRecord, 'name' | 'userLimit' | 'visibility' | 'isLocked'>>;
 export type RoomAccessPolicy = { isLocked: boolean; visibility: RoomVisibility };
 export type RoomChanged = (roomId: string, gateway: RoomDiscordGateway) => Promise<void>;

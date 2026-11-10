@@ -89,6 +89,7 @@ export class PrismaTemporaryRoomRepository implements TemporaryRoomRepository {
       if (result.count) await tx.pendingOwnershipTransfer.deleteMany({ where: { roomId: id } });
       const record = await tx.temporaryRoom.findUniqueOrThrow({ where: { id } });
       if (record.status !== 'CLOSED') throw new TemporaryRoomTransitionError();
+      await tx.roomMemberBlock.deleteMany({ where: { roomId: id } });
       return record;
     });
   }

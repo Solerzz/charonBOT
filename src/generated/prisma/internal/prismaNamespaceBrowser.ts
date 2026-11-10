@@ -55,7 +55,8 @@ export const ModelName = {
   TemporaryRoom: 'TemporaryRoom',
   RoomPresence: 'RoomPresence',
   RoomAllowedMember: 'RoomAllowedMember',
-  PendingOwnershipTransfer: 'PendingOwnershipTransfer'
+  PendingOwnershipTransfer: 'PendingOwnershipTransfer',
+  RoomMemberBlock: 'RoomMemberBlock'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -142,6 +143,18 @@ export const PendingOwnershipTransferScalarFieldEnum = {
 } as const
 
 export type PendingOwnershipTransferScalarFieldEnum = (typeof PendingOwnershipTransferScalarFieldEnum)[keyof typeof PendingOwnershipTransferScalarFieldEnum]
+
+
+export const RoomMemberBlockScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  memberDiscordId: 'memberDiscordId',
+  createdAt: 'createdAt',
+  state: 'state',
+  deniedBefore: 'deniedBefore'
+} as const
+
+export type RoomMemberBlockScalarFieldEnum = (typeof RoomMemberBlockScalarFieldEnum)[keyof typeof RoomMemberBlockScalarFieldEnum]
 
 
 export const SortOrder = {

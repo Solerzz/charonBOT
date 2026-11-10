@@ -10,7 +10,7 @@ const payload = (title: string): CallPanelPayload => ({ embeds: [{ title }], com
 const access: CallWorkspaceView = { kind: 'access', payload: payload('access') };
 const target: CallWorkspaceView = { kind: 'transfer-target', payload: payload('target') };
 const pending = (id: string): CallWorkspaceView => ({ kind: 'transfer-pending', operationId: id, payload: payload(id) });
-const state = (): RoomState => ({ room: structuredClone(room), controlsEnabled: true, presences: [], allowedMemberIds: [], transfer: null });
+const state = (): RoomState => ({ room: structuredClone(room), controlsEnabled: true, presences: [], allowedMemberIds: [], memberBlocks: [], transfer: null });
 function delivery(messageId = 'private-1', expiresAt = 900_000) {
   return { messageId, expiresAt, edit: vi.fn(async (_payload: CallPanelPayload) => ({ id: messageId })), deactivate: vi.fn(async () => {}) };
 }

@@ -41,6 +41,10 @@ function runtimeFixture() {
     f.state().transfer = null;
     return Promise.resolve({ count: 1 }) as ReturnType<typeof database.pendingOwnershipTransfer.deleteMany>;
   });
+  vi.spyOn(database.roomMemberBlock, 'deleteMany').mockImplementation(() => {
+    const count = f.state().memberBlocks.length; f.state().memberBlocks = [];
+    return Promise.resolve({ count }) as ReturnType<typeof database.roomMemberBlock.deleteMany>;
+  });
   vi.spyOn(database.voiceCreator, 'update').mockImplementation(({ data }) => {
     f.state().controlsEnabled = data.roomCommandsEnabled as boolean;
     return Promise.resolve({ ...creator, roomCommandsEnabled: f.state().controlsEnabled }) as ReturnType<typeof database.voiceCreator.update>;

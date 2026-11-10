@@ -25,3 +25,11 @@ export const TemporaryRoomStatus = {
 } as const
 
 export type TemporaryRoomStatus = (typeof TemporaryRoomStatus)[keyof typeof TemporaryRoomStatus]
+
+
+export const RoomMemberBlockState = {
+  BLOCKED: 'BLOCKED',
+  UNBLOCK_PENDING: 'UNBLOCK_PENDING'
+} as const
+
+export type RoomMemberBlockState = (typeof RoomMemberBlockState)[keyof typeof RoomMemberBlockState]

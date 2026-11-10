@@ -1,6 +1,6 @@
 import { Prisma, type PendingOwnershipTransfer, type PrismaClient } from '../../generated/prisma/client.js';
 import type { TemporaryRoomRecord } from './call.repository.js';
-import { RoomActionError, type RoomMember, type RoomSettingsPatch, type RoomState } from './room.types.js';
+import { RoomActionError, type RoomActor, type RoomBlockWrite, type RoomMember, type RoomSettingsPatch, type RoomState } from './room.types.js';
 import { measureCallStage } from './call-action.metrics.js';
 
 type TransferInput = Pick<PendingOwnershipTransfer, 'roomId' | 'ownerDiscordId' | 'targetDiscordId' | 'controlVersion'>;
@@ -27,6 +27,10 @@ export interface RoomStateRepository {
   cancelPreviousRunTransfers(): Promise<void>;
   finishTransfer(id: string, controlVersion: number, at: Date, cause: 'confirm' | 'timeout'): Promise<boolean>;
   setAllowed(roomId: string, version: number, memberDiscordId: string, allowed: boolean): Promise<boolean>;
+  stageRoomBlock(actor: RoomActor, memberId: string, deniedBefore: bigint): Promise<RoomBlockWrite | null>;
+  stageRoomUnblock(actor: RoomActor, blockId: string): Promise<RoomBlockWrite | null>;
+  completeRoomUnblock(roomId: string, expectedVersion: number, blockId: string): Promise<boolean>;
+  purgeClosedRoomBlocks(): Promise<number>;
   updateSettings(roomId: string, version: number, patch: RoomSettingsPatch): Promise<boolean>;
   setPanelId(roomId: string, version: number, expectedId: string | null, nextId: string | null): Promise<boolean>;
   invalidateControls(roomId: string, expectedVersion: number): Promise<boolean>;
@@ -49,11 +53,11 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
   async read(roomId: string): Promise<RoomState | null> {
     const record = await measureCallStage('state', () => this.prisma.temporaryRoom.findUnique({
       where: { id: roomId },
-      include: { voiceCreator: true, presences: { orderBy: [{ joinedAt: 'asc' }, { memberDiscordId: 'asc' }] }, allowedMembers: true, pendingTransfer: true },
+      include: { voiceCreator: true, presences: { orderBy: [{ joinedAt: 'asc' }, { memberDiscordId: 'asc' }] }, allowedMembers: true, memberBlocks: { orderBy: [{ memberDiscordId: 'asc' }, { id: 'asc' }] }, pendingTransfer: true },
     }));
     if (!record) return null;
-    const { voiceCreator, presences, allowedMembers, pendingTransfer, ...room } = record;
-    return { room, controlsEnabled: voiceCreator.roomCommandsEnabled, presences, allowedMemberIds: allowedMembers.map(({ memberDiscordId }) => memberDiscordId), transfer: pendingTransfer };
+    const { voiceCreator, presences, allowedMembers, memberBlocks, pendingTransfer, ...room } = record;
+    return { room, controlsEnabled: voiceCreator.roomCommandsEnabled, presences, allowedMemberIds: allowedMembers.map(({ memberDiscordId }) => memberDiscordId), memberBlocks, transfer: pendingTransfer };
   }
 
   async settleAccess(roomId: string, attemptedVersion: number): Promise<RoomState | null> {
@@ -108,10 +112,11 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
   async changeOwner(roomId: string, version: number, expectedOwner: string | null, nextOwner: string | null): Promise<boolean> {
     try {
       return await measureCallStage('persist', () => this.prisma.$transaction(async (tx) => {
+        if (nextOwner !== null) await this.lockRoom(tx, roomId);
         const result = await tx.temporaryRoom.updateMany({
           where: nextOwner === null
             ? { id: roomId, controlVersion: version, ownerDiscordId: expectedOwner, status: { in: [...trackedStatuses] } }
-            : { ...activeWhere(roomId, version), ownerDiscordId: expectedOwner },
+            : { ...activeWhere(roomId, version), ownerDiscordId: expectedOwner, memberBlocks: { none: { memberDiscordId: nextOwner } } },
           data: ownerChange(nextOwner),
         });
         if (!result.count) return false;
@@ -132,6 +137,7 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
         if (!room.voiceCreator.roomCommandsEnabled) throw new RoomActionError('CONTROLS_DISABLED');
         if (room.controlVersion !== input.controlVersion) throw new RoomActionError('STALE_CONTROLS');
         if (room.ownerDiscordId !== input.ownerDiscordId) throw new RoomActionError('NOT_OWNER');
+        if (await tx.roomMemberBlock.findUnique({ where: { roomId_memberDiscordId: { roomId: input.roomId, memberDiscordId: input.targetDiscordId } } })) throw new RoomActionError('ROOM_UNAVAILABLE');
         return tx.pendingOwnershipTransfer.create({ data: input });
       }));
     } catch (error) {
@@ -184,7 +190,7 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
           ? transfer.expiresAt === null || transfer.expiresAt > at
           : transfer.expiresAt !== null && transfer.expiresAt <= at) return false;
         const result = await tx.temporaryRoom.updateMany({
-          where: { ...activeWhere(transfer.roomId, controlVersion), ownerDiscordId: transfer.ownerDiscordId },
+          where: { ...activeWhere(transfer.roomId, controlVersion), ownerDiscordId: transfer.ownerDiscordId, memberBlocks: { none: { memberDiscordId: transfer.targetDiscordId } } },
           data: ownerChange(transfer.targetDiscordId),
         });
         if (!result.count) return false;
@@ -200,12 +206,53 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
   async setAllowed(roomId: string, version: number, memberDiscordId: string, allowed: boolean): Promise<boolean> {
     return measureCallStage('persist', () => this.prisma.$transaction(async (tx) => {
       if (!available(await this.lockRoom(tx, roomId), version)) return false;
+      if (allowed && await tx.roomMemberBlock.findUnique({ where: { roomId_memberDiscordId: { roomId, memberDiscordId } } })) return false;
       if (allowed) await tx.roomAllowedMember.upsert({
         where: { roomId_memberDiscordId: { roomId, memberDiscordId } }, create: { roomId, memberDiscordId }, update: {},
       });
       else await tx.roomAllowedMember.deleteMany({ where: { roomId, memberDiscordId } });
       return true;
     }));
+  }
+
+  stageRoomBlock(actor: RoomActor, memberId: string, deniedBefore: bigint): Promise<RoomBlockWrite | null> {
+    return measureCallStage('persist', () => this.prisma.$transaction(async (tx) => {
+      if (!await this.lockBlockActor(tx, actor, memberId)) return null;
+      const existing = await tx.roomMemberBlock.findUnique({ where: { roomId_memberDiscordId: { roomId: actor.roomId, memberDiscordId: memberId } } });
+      if (existing?.state === 'BLOCKED') return { block: existing, controlVersion: actor.controlVersion, changed: false };
+      const block = existing
+        ? await tx.roomMemberBlock.update({ where: { id: existing.id }, data: { state: 'BLOCKED' } })
+        : await tx.roomMemberBlock.create({ data: { roomId: actor.roomId, memberDiscordId: memberId, deniedBefore } });
+      await tx.roomAllowedMember.deleteMany({ where: { roomId: actor.roomId, memberDiscordId: memberId } });
+      await tx.temporaryRoom.update({ where: { id: actor.roomId }, data: { controlVersion: { increment: 1 } } });
+      return { block, controlVersion: actor.controlVersion + 1, changed: true };
+    }));
+  }
+
+  stageRoomUnblock(actor: RoomActor, blockId: string): Promise<RoomBlockWrite | null> {
+    return measureCallStage('persist', () => this.prisma.$transaction(async (tx) => {
+      if (!await this.lockBlockActor(tx, actor)) return null;
+      const existing = await tx.roomMemberBlock.findFirst({ where: { id: blockId, roomId: actor.roomId } });
+      if (!existing) return null;
+      if (existing.state === 'UNBLOCK_PENDING') return { block: existing, controlVersion: actor.controlVersion, changed: false };
+      const block = await tx.roomMemberBlock.update({ where: { id: blockId }, data: { state: 'UNBLOCK_PENDING' } });
+      await tx.temporaryRoom.update({ where: { id: actor.roomId }, data: { controlVersion: { increment: 1 } } });
+      return { block, controlVersion: actor.controlVersion + 1, changed: true };
+    }));
+  }
+
+  completeRoomUnblock(roomId: string, expectedVersion: number, blockId: string): Promise<boolean> {
+    return measureCallStage('persist', () => this.prisma.$transaction(async (tx) => {
+      const room = await this.lockRoom(tx, roomId);
+      if (!room || room.controlVersion !== expectedVersion) return false;
+      const result = await tx.roomMemberBlock.deleteMany({ where: { id: blockId, roomId, state: 'UNBLOCK_PENDING' } });
+      return result.count === 1;
+    }));
+  }
+
+  async purgeClosedRoomBlocks(): Promise<number> {
+    const result = await measureCallStage('persist', () => this.prisma.roomMemberBlock.deleteMany({ where: { room: { status: 'CLOSED' } } }));
+    return result.count;
   }
 
   async updateSettings(roomId: string, version: number, patch: RoomSettingsPatch): Promise<boolean> {
@@ -240,6 +287,17 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
     // Serialize pending-transfer/presence writes with ownership and lifecycle CAS.
     await tx.$queryRaw`SELECT id FROM "TemporaryRoom" WHERE id = ${roomId}::uuid FOR UPDATE`;
     return tx.temporaryRoom.findUnique({ where: { id: roomId }, include: { voiceCreator: true } });
+  }
+
+  private async lockBlockActor(tx: Prisma.TransactionClient, actor: RoomActor, memberId?: string): Promise<boolean> {
+    await this.lockRoom(tx, actor.roomId);
+    // Keep actor/guild/owner and target-owner guards in SQL, after the shared
+    // room lock. Completion deliberately does not require controls enabled.
+    return await tx.temporaryRoom.findFirst({ where: {
+      ...activeWhere(actor.roomId, actor.controlVersion), guildDiscordId: actor.guildDiscordId,
+      ownerDiscordId: actor.memberDiscordId, pendingTransfer: null,
+      ...(memberId === undefined ? {} : { NOT: { ownerDiscordId: memberId } }),
+    } }) !== null;
   }
 
   private currentTransfer(transfer: PendingOwnershipTransfer, room: ConfiguredRoom | null, version: number): boolean {

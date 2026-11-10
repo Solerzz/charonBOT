@@ -30,7 +30,7 @@ function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
   const disconnect = vi.spyOn(database, '$disconnect').mockResolvedValue(undefined);
   const rows = () => tracked && record.status !== 'CLOSED' ? [structuredClone(record)] : [];
   const list = sqlSpy(database.temporaryRoom, 'findMany').mockImplementation(async () => rows());
-  sqlSpy(database.temporaryRoom, 'findUnique').mockImplementation(async () => ({ ...structuredClone(record), voiceCreator: structuredClone(configuration), presences: structuredClone(presences), allowedMembers: [], pendingTransfer: structuredClone(pending) }));
+  sqlSpy(database.temporaryRoom, 'findUnique').mockImplementation(async () => ({ ...structuredClone(record), voiceCreator: structuredClone(configuration), presences: structuredClone(presences), allowedMembers: [], memberBlocks: [], pendingTransfer: structuredClone(pending) }));
   sqlSpy(database.temporaryRoom, 'findUniqueOrThrow').mockImplementation(async () => structuredClone(record));
   sqlSpy(database.temporaryRoom, 'findFirst').mockImplementation(async (input) => {
     const where = input?.where;
@@ -59,6 +59,8 @@ function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
     return presences.at(-1)! as never;
   });
   sqlSpy(database.pendingOwnershipTransfer, 'findUnique').mockImplementation(async (input) => pending?.id === input.where.id ? structuredClone(pending) : null);
+  sqlSpy(database.roomMemberBlock, 'findUnique').mockResolvedValue(null);
+  sqlSpy(database.roomMemberBlock, 'deleteMany').mockResolvedValue({ count: 0 });
   sqlSpy(database.pendingOwnershipTransfer, 'deleteMany').mockImplementation(async () => { pending = null; return { count: 1 }; });
   sqlSpy(database.pendingOwnershipTransfer, 'create').mockImplementation(async (input) => {
     pending = { ...input.data, id: '323e4567-e89b-42d3-a456-426614174000', expiresAt: null } as PendingOwnershipTransfer; return structuredClone(pending);

@@ -23,12 +23,25 @@ function fixture() {
   };
   const roomPresence = { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn(), upsert: vi.fn() };
   const roomAllowedMember = { findMany: vi.fn().mockResolvedValue([]), upsert: vi.fn(), deleteMany: vi.fn() };
-  const tx = { temporaryRoom, pendingOwnershipTransfer, roomPresence, roomAllowedMember, $queryRaw: vi.fn().mockResolvedValue([{ id: room.id }]) };
+  const roomMemberBlock = { findUnique: vi.fn().mockResolvedValue(null) };
+  const tx = { temporaryRoom, pendingOwnershipTransfer, roomPresence, roomAllowedMember, roomMemberBlock, $queryRaw: vi.fn().mockResolvedValue([{ id: room.id }]) };
   const prisma = { ...tx, $transaction: vi.fn(async (fn) => fn(tx)) };
   return { ...tx, prisma, store: new PrismaRoomStateRepository(prisma as unknown as PrismaClient) };
 }
 
 describe('PrismaRoomStateRepository', () => {
+  it('refuses intent admission when the SQL actor/guild/owner/version guard finds no room', async () => {
+    const f = fixture(); f.temporaryRoom.findFirst.mockResolvedValue(null);
+    const actor = { roomId: room.id, guildDiscordId: room.guildDiscordId, memberDiscordId: room.ownerDiscordId!, controlVersion: 0 };
+    expect(await f.store.stageRoomBlock(actor, 'guest', 0n)).toBeNull();
+    expect(await f.store.stageRoomUnblock(actor, pending.id)).toBeNull();
+    expect(f.temporaryRoom.findFirst).toHaveBeenNthCalledWith(1, { where: {
+      id: room.id, guildDiscordId: room.guildDiscordId, ownerDiscordId: actor.memberDiscordId,
+      controlVersion: 0, status: 'ACTIVE', voiceCreator: { roomCommandsEnabled: true },
+      pendingTransfer: null, NOT: { ownerDiscordId: 'guest' },
+    } });
+    expect(f.temporaryRoom.updateMany).not.toHaveBeenCalled();
+  });
   it('measures repository reads and persistence operations without logging SQL or IDs', async () => {
     const f = fixture(); const lines: string[] = [];
     const logger = createLogger({ level: 'info', destination: { write: line => { lines.push(line); } } });
@@ -44,8 +57,9 @@ describe('PrismaRoomStateRepository', () => {
   });
   it('reads state with logically deleted creator configuration and related members', async () => {
     const f = fixture();
-    f.temporaryRoom.findUnique.mockResolvedValue({ ...room, voiceCreator: { ...creator, deletedAt: new Date() }, presences: [], allowedMembers: [{ memberDiscordId: 'guest' }], pendingTransfer: pending });
-    await expect(f.store.read(room.id)).resolves.toMatchObject({ controlsEnabled: true, allowedMemberIds: ['guest'], transfer: pending });
+    const memberBlocks = [{ id: pending.id, roomId: room.id, memberDiscordId: 'blocked', state: 'UNBLOCK_PENDING', deniedBefore: 16n, createdAt: new Date() }];
+    f.temporaryRoom.findUnique.mockResolvedValue({ ...room, voiceCreator: { ...creator, deletedAt: new Date() }, presences: [], allowedMembers: [{ memberDiscordId: 'guest' }], memberBlocks, pendingTransfer: pending });
+    await expect(f.store.read(room.id)).resolves.toMatchObject({ controlsEnabled: true, allowedMemberIds: ['guest'], memberBlocks, transfer: pending });
     f.temporaryRoom.findUnique.mockResolvedValue(null);
     await expect(f.store.read(room.id)).resolves.toBeNull();
   });
@@ -64,7 +78,7 @@ describe('PrismaRoomStateRepository', () => {
     const f = fixture();
     await expect(f.store.changeOwner(room.id, 0, room.ownerDiscordId, 'target')).resolves.toBe(true);
     expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({
-      where: { id: room.id, controlVersion: 0, ownerDiscordId: room.ownerDiscordId, status: 'ACTIVE', voiceCreator: { roomCommandsEnabled: true } },
+      where: { id: room.id, controlVersion: 0, ownerDiscordId: room.ownerDiscordId, status: 'ACTIVE', voiceCreator: { roomCommandsEnabled: true }, memberBlocks: { none: { memberDiscordId: 'target' } } },
       data: { ownerDiscordId: 'target', controlVersion: { increment: 1 }, priorityMemberDiscordId: null, priorityExpiresAt: null },
     });
     expect(f.pendingOwnershipTransfer.deleteMany).toHaveBeenCalledWith({ where: { roomId: room.id } });
