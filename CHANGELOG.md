@@ -4,24 +4,40 @@ Todas as mudanças relevantes serão documentadas neste arquivo.
 
 ## [Unreleased]
 
-### 0.3.0 — preparação local em 2026-11-09 (não publicada)
+### 0.3.0 — integrada e validada no servidor de testes em 2026-11-10
 
-- Painel B nativo com ações privadas, nome de 11 grafemas, limite `0..99`,
-  acesso privado e lista de autorizados preservada em transferências/toggles.
+- Painel público nativo com botões em linhas 3+3+1, nome mostrado uma vez e
+  controles de gestão exclusivos do dono. Renomear mantém 11 grafemas; limite
+  `0..99` sem expulsar participantes. Seleções de autorizados/transferência
+  reutilizam uma área privada, sem confirmações genéricas repetidas.
+- Tranca e visibilidade independentes: trancar não oculta; mostrar não destranca.
+  Dono, autorizados e participantes atuais conservam acesso; a sala ocupada
+  mantém os estados ao perder o dono e a sala vazia é encerrada.
 - Transferência de 5 segundos após entrega privada confirmada, confirmação/
   desfazer pelo dono e execução por silêncio; reivindicação com prioridade de
   5 minutos, presença humana e unicidade de dono por servidor no PostgreSQL.
+- Setup guiado e limite padrão de participantes por canal de entrada.
 - Runtime compartilhado, cancelamento no reinício, reconciliação limitada de
   salas acompanhadas, drenagem de timers/despachos e toggle integral dos painéis.
-- Migration `20261108010000_room_ownership_state`, RLS backend-only nas seis
-  tabelas e CI separada com PostgreSQL 17 loopback/opt-ins explícitos/execução serial.
-- Regressão corrigida: toggle reprograma o timer de prioridade na nova geração
-  sem reiniciar candidato/prazo. Revalidação local pelo controlador no HEAD
-  corrigido: 713 testes comuns aprovados, 29 opt-in pulados nessa execução;
-  todos os 29 aprovados no PostgreSQL local.
+- Quarentena de acesso também cobre transferência/reivindicação após SQL incerto;
+  controles antigos são rejeitados sem reiniciar prazos. Métricas seguras por
+  etapa e exatamente um fetch de mensagem eliminado por edição no benchmark
+  simulado, sem reduzir verificações de autoridade ou prometer latência real.
+- Cinco migrations aplicadas no `charon-dev`, incluindo
+  `20261110010000_voice_creator_default_limit` e
+  `20261110020000_room_lock_state`; novo backup privado e verificação independente
+  de TLS, backfill, dados preservados e RLS backend-only nas seis tabelas.
+- Gates finais registrados: **1.259 testes comuns + 45 integrações locais**,
+  typecheck e build aprovados. [PR #5](https://github.com/Solerzz/charonBOT/pull/5)
+  mesclado em `main` (`b67f475`), com CI aprovado antes e depois do merge.
+- Bot iniciado localmente no servidor de testes; usuário aprovou o visual e
+  todos os botões, sem erros nem mensagens repetidas. Isso não certifica toda a
+  matriz multiusuário/mobile ou latência medida.
 
-Limites e ações humanas pendentes: [notas v0.3.0](docs/releases/v0.3.0.md).
-Nenhum login/smoke Discord, migration remota, hospedagem ou publicação foi feito.
+Evidências e limites: [notas v0.3.0](docs/releases/v0.3.0.md) e
+[validação/rollout](docs/validation/2026-11-10-painel-publico-tranca-visibilidade.md).
+Reputação adiada pelo usuário. Hospedagem permanente fica para o final;
+esta atualização documental não cria tag nem GitHub Release.
 
 ## [0.2.0] - 2026-11-06
 

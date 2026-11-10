@@ -210,9 +210,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794222136.301379,
-    "seen": 1794222161.4979293,
-    "ast_hash": "936fa290375da63c4f5540d1bff284ba",
+    "mtime": 1794348667.0924425,
+    "seen": 1794348798.7444637,
+    "ast_hash": "dcc2b32c61bc363915255d1aa3ec3847",
     "semantic_hash": ""
   },
   "README.md": {
@@ -732,9 +732,9 @@
     "semantic_hash": ""
   },
   "docs/releases/v0.3.0.md": {
-    "mtime": 1794267258.3209786,
-    "seen": 1794267267.0323868,
-    "ast_hash": "65effde2c7bd214f680e02741ce222bc",
+    "mtime": 1794348667.093462,
+    "seen": 1794348798.746462,
+    "ast_hash": "23a622aae4d5b6947fee01f463c1a4c9",
     "semantic_hash": ""
   },
   "docs/validation/2026-11-08-v0.3.0-validation.md": {
@@ -822,15 +822,15 @@
     "semantic_hash": ""
   },
   "docs/superpowers/specs/2026-11-10-charon-painel-publico-tranca-visibilidade-design.md": {
-    "mtime": 1794346873.2947526,
-    "seen": 1794346907.9270318,
-    "ast_hash": "35e26c8b93a307fc0ed5879cce01975d",
+    "mtime": 1794348667.0948403,
+    "seen": 1794348798.7479649,
+    "ast_hash": "05de790d2e343a82ace5b36288a3bdee",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-10-charon-painel-publico-tranca-visibilidade.md": {
-    "mtime": 1794346873.2947526,
-    "seen": 1794346907.9259753,
-    "ast_hash": "1c521e52842e23e9980171dcfbaacac7",
+    "mtime": 1794348667.0958493,
+    "seen": 1794348798.7474618,
+    "ast_hash": "08508d1a655b126f4f0698262bd885d5",
     "semantic_hash": ""
   },
   "tests/integration/room-lock-database.test.ts": {
@@ -876,9 +876,9 @@
     "semantic_hash": ""
   },
   "docs/validation/2026-11-10-painel-publico-tranca-visibilidade.md": {
-    "mtime": 1794346873.2963436,
-    "seen": 1794346907.9270318,
-    "ast_hash": "c0eac98d78583a5d193ec934adc575f8",
+    "mtime": 1794348667.0948403,
+    "seen": 1794348798.748968,
+    "ast_hash": "ea276eaba66add21fa4014edb258dc16",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-quarantine.test.ts": {

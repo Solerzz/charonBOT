@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-10-charon-painel-publico-tranca-visibilidade-design.md`, aprovado pelo usuário. Ler também as regras preservadas em `2026-11-08-charon-v0.3.0-posse-controles-design.md`.
 
-**Execução local (2026-11-10): concluída.** As cinco tarefas foram implementadas e revisadas; a revisão final foi aprovada após uma onda consolidada de correções. Os checklists de passos abaixo preservam o plano entregue aos agentes; o ledger local registra a execução e a validação versionada contém a evidência final. Integração Git e aceitação/rollout reais aguardam decisão/autorização separada.
+**Execução (2026-11-10): concluída.** As cinco tarefas e a revisão final foram aprovadas após correções. Os checklists abaixo preservam o plano original, não uma lista de trabalho a repetir. Posteriormente, com autorizações específicas, PR #5 mesclado em `main` (`b67f475`), CI antes/depois verde, novo backup/migration no `charon-dev` e início local verificados. Usuário aprovou visual e todos os botões, sem erros/mensagens repetidas; demais cenários não relatados permanecem limites da aceitação. Evidência versionada no documento de validação. Reputação adiada pelo usuário; hospedagem continua para o final.
 
 ## Global Constraints
 
@@ -213,9 +213,9 @@ Mover os casos de erro de edição para messages.edit: 10008→PANEL_MISSING; 50
 - [ ] **Step 5 — executar gates completos e registrar evidências.** Ambiente comum com ambos opt-ins false: `npm run typecheck`, `npm run test:run`, `npm run build`, `git diff --check`. No ambiente PostgreSQL local guardado: generate → migrate deploy → prepare local → `npm run test:run -- tests/integration --maxWorkers=1` → migrate status/deploy idempotente. Atualizar grafo. Contar aprovados/pulados/falhos observados; não reutilizar números históricos. Testes de simulação de DOM da prévia não substituem esses gates nem a aceitação real.
 - [ ] **Step 6 — revisão final e commit local.** Commit explícito da tarefa: `perf: measure call actions and avoid redundant panel fetch`. Depois, revisor novo avalia a branch completa contra spec/plano e casos de Review Focus. Corrigir achados com novo vermelho→verde e reverificar gates afetados. Manter o produto sem push/merge/hosting enquanto não autorizado.
 
-## Aceitação real e rollout — pendentes de autorização separada
+## Aceitação real e rollout — checklist original e estado posterior
 
-O documento de validação deve deixar estes itens **pendentes**, não executá-los durante a implementação local:
+Durante a implementação local, estes itens deveriam ficar **pendentes**, aguardando autorização separada. As autorizações posteriores e os resultados estão registrados em `docs/validation/2026-11-10-painel-publico-tranca-visibilidade.md`: backup/migration/início local concluídos e botões aprovados pelo usuário. A matriz completa multiusuário/mobile e latência real não foram especificamente relatadas. Preservar abaixo o checklist original para referência, sem repetir operações concluídas:
 
 1. Confirmar destino, processo real existente, novo backup privado e autorização específica antes da quinta migration no Supabase. Checar histórico/checksums, aplicar somente a migration nova, verificar backfill/default/NOT NULL/RLS/dados/TLS independentemente. Nunca executar prepare/grants/testes de escrita remotos.
 2. Com autorização de restart local, parar de forma limpa pelo stopFile da instância existente; confirmar PID/comando e encerramento antes de iniciar a nova. Não executar o código com isLocked contra o banco ainda não migrado. Preservar comandos apenas no servidor de teste e globais zero.
@@ -233,6 +233,6 @@ O documento de validação deve deixar estes itens **pendentes**, não executá-
 
 ## Handoff
 
-Execução realizada: **subagente implementador por tarefa + revisão independente antes da próxima + revisão final**, após confirmação explícita do plano pelo usuário. Checkpoint de produto final `5d4af1a`; evidência e limitações em `docs/validation/2026-11-10-painel-publico-tranca-visibilidade.md`. Próximo handoff: escolher integração da branch; não inferir autorização para push/merge ou operações reais.
+Execução realizada: **subagente implementador por tarefa + revisão independente antes da próxima + revisão final**, após confirmação explícita do plano pelo usuário. Checkpoint de produto final `5d4af1a`, integrado via PR #5/merge `b67f475`. Rollout autorizado e aceite manual dos botões registrados em `docs/validation/2026-11-10-painel-publico-tranca-visibilidade.md`. Handoff: entrega de painel/posse/controles documentada; reputação para outro dia e hospedagem reservada ao final. Não inferir autorização para novas operações remotas, tags/releases ou reinício adicional.
 
 Referências de API: [Discord — reconhecimento em três segundos e tokens de quinze minutos](https://docs.discord.com/developers/interactions/receiving-and-responding). O índice devolveu páginas SDK 14.26.2; os contratos foram conferidos na instalação **14.28.1**, em `node_modules/discord.js/typings/index.d.ts:3045-3077` (`followUp`, `deferUpdate`, `isFromMessage`) e `5298-5311` (`MessageManager.edit`). Essa conferência de assinatura não substitui testes/aceitação real; não alterar dependências para coincidir com a documentação indexada.
