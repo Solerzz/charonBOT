@@ -63,7 +63,12 @@ export class RoomControlsService {
           const snapshot = await safeRoomAction(() => gateway.snapshot(initial.room.channelDiscordId), 'DISCORD_FAILURE');
           if (!snapshot) throw new RoomActionError('ROOM_UNAVAILABLE');
           await access.synchronizeLocked(initial, snapshot, gateway);
-          await safeRoomAction(() => onChangedLocked(actor.roomId, gateway), 'DISCORD_FAILURE');
+          try { await safeRoomAction(() => onChangedLocked(actor.roomId, gateway), 'DISCORD_FAILURE'); }
+          catch (error) {
+            // Access confirmation does not confirm publication of this fence.
+            access.markUncertain(actor.roomId);
+            throw error;
+          }
         }
         const { state } = await currentOwnedRoom(store, actor, gateway);
         if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');

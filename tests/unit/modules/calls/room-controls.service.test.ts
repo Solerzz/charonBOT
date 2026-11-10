@@ -1,11 +1,45 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { currentOwnedRoom } from '../../../../src/modules/calls/room-mutation.js';
+import { createLogger } from '../../../../src/core/logger/logger.js';
+import { RoomPanelService } from '../../../../src/modules/calls/room-panel.service.js';
 import { OWNER, OTHER } from '../ownership/ownership.fixtures.js';
 import { deferred } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 
 describe('RoomControlsService', () => {
+  it('retries recovery publication after access resynchronization cleared uncertainty, without admitting the old action', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    const panels = new RoomPanelService({ store: f.store, coordinator: f.coordinator, logger: createLogger({ level: 'silent' }) });
+    let published: unknown;
+    f.message.edit.mockImplementation(async (...args: unknown[]) => { published = args[0]; });
+    const publishedVersions = () => [...new Set([...JSON.stringify(published).matchAll(/"custom_id":"call:v2:[^"]+:(\d+)"/g)].map((match) => Number(match[1])))];
+    await f.coordinator.room(f.guild.id, f.channel.id, () => panels.synchronizeLocked(f.state().room.id, f.gateway));
+    expect(publishedVersions()).toEqual([0]);
+    // Preserve the runtime's actual order: mark -> read -> access sync (which
+    // clears the mark) -> real panel service -> stateful Discord message edit.
+    f.onChangedLocked.mockImplementation(async (id) => {
+      f.access.markUncertain(id);
+      const state = (await f.store.read(id))!;
+      await f.access.synchronizeLocked(state, (await f.gateway.snapshot(state.room.channelDiscordId))!, f.gateway);
+      await panels.synchronizeLocked(id, f.gateway);
+    });
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    f.store.settleAccess.mockRejectedValueOnce(new Error('settlement unavailable'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room.controlVersion).toBe(0); expect(f.onChangedLocked).not.toHaveBeenCalled();
+    f.message.edit.mockRejectedValueOnce(new Error('publication unavailable'));
+    await expect(f.controls.rename(actor, 'Old', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.state().room.controlVersion).toBe(1); expect(publishedVersions()).toEqual([0]);
+    const retryPending = f.access.isUncertain(f.state().room.id);
+    await expect(f.controls.rename(actor, 'Old', f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.onChangedLocked).toHaveBeenCalledTimes(2);
+    expect(retryPending).toBe(true); expect(publishedVersions()).toEqual([1]);
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+    expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.state().room.name).toBe('Game');
+    expect(f.store.updateSettings).toHaveBeenCalledOnce();
+  });
+
   it('refreshes the fenced control version after an indeterminate SQL failure without reporting setting success', async () => {
     const f = roomSettingsFixture(); const actor = f.actor();
     f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
