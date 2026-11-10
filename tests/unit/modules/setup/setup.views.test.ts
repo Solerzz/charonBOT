@@ -7,7 +7,7 @@ import { buildSetupDashboard } from '../../../../src/modules/setup/setup.views.j
 const first: VoiceCreatorConfiguration = {
   id: '123e4567-e89b-42d3-a456-426614174000', guildDiscordId: '12345678901234567',
   creatorChannelDiscordId: '22345678901234567', categoryDiscordId: '32345678901234567',
-  roomCommandsEnabled: true, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
+  roomCommandsEnabled: true, defaultUserLimit: 0, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
 };
 const second = { ...first, id: '123e4567-e89b-42d3-a456-426614174001', creatorChannelDiscordId: '42345678901234567', roomCommandsEnabled: false };
 

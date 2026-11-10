@@ -17,6 +17,7 @@ const firstCreator: VoiceCreator = {
   creatorChannelDiscordId: '22345678901234567',
   categoryDiscordId: '32345678901234567',
   roomCommandsEnabled: true,
+  defaultUserLimit: 0,
   deletedAt: null,
   createdAt: new Date('2026-11-05T10:00:00.000Z'),
   updatedAt: new Date('2026-11-05T10:00:00.000Z'),
@@ -36,6 +37,7 @@ function createPrismaDouble() {
     voiceCreator: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -90,6 +92,7 @@ describe('PrismaVoiceCreatorRepository', () => {
         guildDiscordId: firstCreator.guildDiscordId,
         creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
         categoryDiscordId: firstCreator.categoryDiscordId,
+        defaultUserLimit: 0,
       },
     });
     expect(prisma.voiceCreator.create).toHaveBeenNthCalledWith(2, {
@@ -97,8 +100,25 @@ describe('PrismaVoiceCreatorRepository', () => {
         guildDiscordId: secondCreator.guildDiscordId,
         creatorChannelDiscordId: secondCreator.creatorChannelDiscordId,
         categoryDiscordId: secondCreator.categoryDiscordId,
+        defaultUserLimit: 0,
       },
     });
+  });
+
+  it('persists an explicitly supplied default limit on creation', async () => {
+    const prisma = createPrismaDouble();
+    const saved = { ...firstCreator, defaultUserLimit: 4 };
+    prisma.voiceCreator.create.mockResolvedValue(saved);
+    const repository = new PrismaVoiceCreatorRepository(prisma as unknown as PrismaClient);
+    const input = {
+      guildDiscordId: firstCreator.guildDiscordId,
+      creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
+      categoryDiscordId: firstCreator.categoryDiscordId,
+      defaultUserLimit: 4,
+    };
+
+    await expect(repository.create(input)).resolves.toEqual(saved);
+    expect(prisma.voiceCreator.create).toHaveBeenCalledExactlyOnceWith({ data: input });
   });
 
   it('translates duplicate channel failures without exposing Prisma details', async () => {
@@ -165,6 +185,64 @@ describe('PrismaVoiceCreatorRepository', () => {
       creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
       categoryDiscordId: firstCreator.categoryDiscordId,
     })).rejects.toThrow('database offline');
+  });
+
+  it.each([undefined, 0, 4])('restores default %s without replacing identity, history or commands preference', async (limit) => {
+    const prisma = createPrismaDouble();
+    prisma.voiceCreator.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('Duplicate channel', {
+      code: 'P2002', clientVersion: '7.10.1',
+    }));
+    const saved = { ...firstCreator, roomCommandsEnabled: false, defaultUserLimit: limit ?? 9 };
+    prisma.voiceCreator.update.mockResolvedValue(saved);
+    const repository = new PrismaVoiceCreatorRepository(prisma as unknown as PrismaClient);
+
+    await expect(repository.create({
+      guildDiscordId: firstCreator.guildDiscordId,
+      creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
+      categoryDiscordId: firstCreator.categoryDiscordId,
+      ...(limit === undefined ? {} : { defaultUserLimit: limit }),
+    })).resolves.toMatchObject({
+      id: firstCreator.id, createdAt: firstCreator.createdAt,
+      roomCommandsEnabled: false, defaultUserLimit: limit ?? 9,
+    });
+    expect(prisma.voiceCreator.update).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        creatorChannelDiscordId: firstCreator.creatorChannelDiscordId,
+        guildDiscordId: firstCreator.guildDiscordId,
+        deletedAt: { not: null },
+      },
+      data: {
+        deletedAt: null, categoryDiscordId: firstCreator.categoryDiscordId,
+        ...(limit === undefined ? {} : { defaultUserLimit: limit }),
+      },
+    });
+  });
+
+  it.each([null, { ...firstCreator, deletedAt: new Date(), defaultUserLimit: 4 }])(
+    'reads stored configurations including soft-deleted rows: %j', async (stored) => {
+      const prisma = createPrismaDouble();
+      prisma.voiceCreator.findUnique.mockResolvedValue(stored);
+      const repository = new PrismaVoiceCreatorRepository(prisma as unknown as PrismaClient);
+
+      await expect(repository.findStoredByChannel(firstCreator.creatorChannelDiscordId)).resolves.toEqual(stored);
+      expect(prisma.voiceCreator.findUnique).toHaveBeenCalledExactlyOnceWith({
+        where: { creatorChannelDiscordId: firstCreator.creatorChannelDiscordId },
+      });
+    },
+  );
+
+  it('updates only the active ID default without changing category, flag or rooms', async () => {
+    const prisma = createPrismaDouble();
+    const saved = { ...firstCreator, defaultUserLimit: 4 };
+    prisma.voiceCreator.update.mockResolvedValue(saved);
+    const repository = new PrismaVoiceCreatorRepository(prisma as unknown as PrismaClient);
+
+    await expect(repository.setDefaultUserLimit(firstCreator.id, 4)).resolves.toEqual(saved);
+    expect(prisma.voiceCreator.update).toHaveBeenCalledExactlyOnceWith({
+      where: { id: firstCreator.id, deletedAt: null }, data: { defaultUserLimit: 4 },
+    });
+    expect(prisma.temporaryRoom.updateMany).not.toHaveBeenCalled();
+    expect(prisma.pendingOwnershipTransfer.deleteMany).not.toHaveBeenCalled();
   });
 
   it('excludes deleted configurations from ID and channel lookups', async () => {
@@ -252,6 +330,8 @@ describe('PrismaVoiceCreatorRepository', () => {
   });
 
   it.each([
+    ['default limit update', (repository: PrismaVoiceCreatorRepository) =>
+      repository.setDefaultUserLimit(firstCreator.id, 4)],
     ['category update', (repository: PrismaVoiceCreatorRepository) =>
       repository.updateCategory(firstCreator.id, '62345678901234567')],
     ['commands update', (repository: PrismaVoiceCreatorRepository) =>

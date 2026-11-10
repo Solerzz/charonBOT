@@ -14,6 +14,15 @@ export const setupChannelNameSchema: z.ZodString = z
   .min(1, 'Setup channel name is required')
   .max(100, 'Setup channel name must contain at most 100 characters');
 
+export const defaultUserLimitSchema = z.number().int().min(0).max(99);
+
+export const setupDefaultLimitInputSchema = z
+  .string()
+  .trim()
+  .regex(/^(0|[1-9][0-9]?)$/, 'Invalid default room limit')
+  .transform(Number)
+  .pipe(defaultUserLimitSchema);
+
 type VoiceCreatorAction =
   | 'select'
   | 'change-category'

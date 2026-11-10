@@ -10,7 +10,7 @@ const guildId = '12345678901234567';
 const first: VoiceCreatorConfiguration = {
   id: '123e4567-e89b-42d3-a456-426614174000', guildDiscordId: guildId,
   creatorChannelDiscordId: '22345678901234567', categoryDiscordId: '32345678901234567',
-  roomCommandsEnabled: true, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
+  roomCommandsEnabled: true, defaultUserLimit: 0, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
 };
 const second = { ...first, id: '123e4567-e89b-42d3-a456-426614174001', creatorChannelDiscordId: '52345678901234567' };
 type Kind = 'button' | 'channel' | 'string' | 'modal' | 'role';
@@ -35,7 +35,7 @@ function fixture(action = 'toggle-commands', kind: Kind = 'button', values: stri
     return { ...item };
   });
   const remove = vi.fn(async (id: string) => { configurations = configurations.filter((item) => item.id !== id); });
-  const repository: VoiceCreatorRepository = { listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, delete: remove, findByChannel: vi.fn() };
+  const repository: VoiceCreatorRepository = { listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, delete: remove, findByChannel: vi.fn(), findStoredByChannel: vi.fn(), setDefaultUserLimit: vi.fn() };
   const assertCanConfigure = vi.fn().mockResolvedValue(undefined);
   const getVoiceChannel = vi.fn(async (id: string) => ({ id, name: id === second.creatorChannelDiscordId ? 'Segundo' : 'Criar sala', categoryDiscordId: first.categoryDiscordId }));
   const getCategory = vi.fn(async (id: string) => ({ id, name: 'Salas' }));

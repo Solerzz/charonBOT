@@ -80,6 +80,7 @@ export const VoiceCreatorScalarFieldEnum = {
   creatorChannelDiscordId: 'creatorChannelDiscordId',
   categoryDiscordId: 'categoryDiscordId',
   roomCommandsEnabled: 'roomCommandsEnabled',
+  defaultUserLimit: 'defaultUserLimit',
   deletedAt: 'deletedAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

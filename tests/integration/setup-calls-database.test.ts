@@ -46,6 +46,7 @@ describe('setup and calls database round trips', () => {
 
     try {
       const first = await creators.create(firstInput);
+      await creators.setDefaultUserLimit(first.id, 4);
       const second = await creators.create(secondInput);
       expect(first.id).not.toBe(second.id);
       expect(first.roomCommandsEnabled).toBe(true);
@@ -109,6 +110,7 @@ describe('setup and calls database round trips', () => {
         roomCommandsEnabled: false,
         deletedAt: null,
         createdAt: first.createdAt,
+        defaultUserLimit: 4,
       });
       await expect(creators.setRoomCommandsEnabled(first.id, true))
         .resolves.toMatchObject({ roomCommandsEnabled: true });

@@ -1,17 +1,17 @@
 # Graph Report - feature-v0.3.0-posse-controles  (2026-11-09)
 
 ## Corpus Check
-- 127 files · ~117,279 words
+- 131 files · ~124,582 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
 ## Summary
-- 1694 nodes · 3366 edges · 65 communities (51 shown, 14 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 210 edges (avg confidence: 0.89)
+- 1738 nodes · 3436 edges · 69 communities (56 shown, 13 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 223 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a4a6e278`
+- Built from commit: `72282cc2`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -29,7 +29,7 @@
 - compilerOptions
 - compilerOptions
 - TemporaryRoom.ts
-- ownership-database.test.ts
+- createRoomRuntime
 - File Structure
 - Charon v0.1.0 — Infraestrutura
 - pull_request_template.md
@@ -38,7 +38,7 @@
 - DiscordRoomGateway
 - commonInputTypes.ts
 - Charon v0.2.0 — Setup e Join-to-Create
-- RoomCoordinator
+- application.ts
 - TemporaryRoomDelegate
 - VoiceCreatorDelegate
 - createRoomRuntime
@@ -48,26 +48,29 @@
 - Prisma__TemporaryRoomClient
 - Prisma__VoiceCreatorClient
 - RoomAllowedMember.ts
-- Charon v0.3.0 Ownership and Room Controls Implementation Plan
+- Charon — criação guiada de canais de entrada
 - RoomPresence.ts
 - OwnershipService
 - PendingOwnershipTransfer.ts
 - enums.ts
 - Charon v0.3.0 — posse e controles
 - .handleVoiceTransition
-- RoomDiscordGateway
-- application.ts
+- @prisma/client
+- discord.js
 - PendingOwnershipTransferDelegate
 - RoomAllowedMemberDelegate
 - RoomPresenceDelegate
 - setup.interactions.ts
-- dependencies
+- env.ts
 - scripts
+- PrismaVoiceCreatorRepository
 - Retomar o Charon após formatar o computador
-- setup.repository.ts
+- Setup guiado do Charon Implementation Plan
+- dotenv
 - @prisma/client
-- setup.repository.ts
-- call.interactions.ts
+- SetupService
+- DiscordSetupGateway
+- ownership-database.test.ts
 - Prisma__PendingOwnershipTransferClient
 - Prisma__RoomAllowedMemberClient
 - Prisma__RoomPresenceClient
@@ -79,29 +82,30 @@
 - Charon v0.3.0 — posse e controles
 - Charon v0.2.0 — registro de validação
 - Validação local v0.3.0
+- enums.ts
 - RoomActionError
 
 ## God Nodes (most connected - your core abstractions)
 1. `RoomActionError` - 59 edges
 2. `RoomDiscordGateway` - 58 edges
-3. `vitest` - 49 edges
+3. `vitest` - 50 edges
 4. `discord.js` - 41 edges
 5. `DiscordRoomGateway` - 39 edges
 6. `createRoomRuntime()` - 36 edges
 7. `DiscordCallGateway` - 34 edges
-8. `RoomStateRepository` - 33 edges
-9. `RoomActor` - 33 edges
+8. `RoomActor` - 33 edges
+9. `RoomStateRepository` - 33 edges
 10. `TransferService` - 31 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `Contratos compartilhados do novo fluxo` --references--> `VoiceCreatorConfiguration`  [INFERRED]
+  docs/superpowers/plans/2026-11-10-charon-setup-guiado.md → src/modules/setup/setup.repository.ts
 - `Task 7: Idempotent panel synchronization and setup toggle propagation` --references--> `SetupService`  [INFERRED]
   docs/superpowers/plans/2026-11-08-charon-v0.3.0-posse-controles.md → src/modules/setup/setup.service.ts
 - `Global Constraints` --references--> `InteractionRegistry`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-v0.2.0-setup-join-to-create.md → src/core/discord/interactions/interaction-registry.ts
 - `Arquitetura` --references--> `InteractionRegistry`  [INFERRED]
   docs/superpowers/specs/2026-11-05-charon-v0.2.0-setup-join-to-create-design.md → src/core/discord/interactions/interaction-registry.ts
-- `Verificação` --references--> `assertDisposableDatabaseEnvironment()`  [INFERRED]
-  docs/architecture.md → tests/integration/database-test-utils.ts
 - `Task 3: Structured logger` --references--> `createLogger()`  [INFERRED]
   docs/superpowers/plans/2026-11-05-charon-stage-1-infrastructure.md → src/core/logger/logger.ts
 
@@ -111,7 +115,7 @@
 ## Hyperedges (group relationships)
 - **Graphify Maintenance and Usage Workflow** — agents_graphify_command, agents_graphify_query, agents_graphify_update, agents_graph_json, agents_graph_report, agents_wiki_index [INFERRED 0.75]
 
-## Communities (65 total, 14 thin omitted)
+## Communities (69 total, 13 thin omitted)
 
 ### Community 0 - "Graphify Knowledge Graph (graphify-out)"
 Cohesion: 0.33
@@ -130,8 +134,12 @@ Cohesion: 0.12
 Nodes (15): AnyNull, DbNull, Decimal, JsonNull, ModelName, NullsOrder, NullTypes, PendingOwnershipTransferScalarFieldEnum (+7 more)
 
 ### Community 4 - "package.json"
-Cohesion: 0.13
-Nodes (18): devDependencies, prisma@7.10.1, tsx@4.23.15, @types/node@26.6.6, @types/pg@8.23.1, typescript@7.0.2, vitest@5.1.0, engines (+10 more)
+Cohesion: 0.15
+Nodes (16): devDependencies, tsx@4.23.15, @types/node@26.6.6, @types/pg@8.23.1, typescript@7.0.2, vitest@5.1.0, engines, node (+8 more)
+
+### Community 5 - "RoomStateRepository"
+Cohesion: 0.09
+Nodes (3): Shared contracts — define once, reuse in later tasks, TemporaryRoomRecord, RoomStateRepository
 
 ### Community 6 - "local-database"
 Cohesion: 0.06
@@ -155,11 +163,7 @@ Nodes (10): ./tsconfig.json, compilerOptions, declaration, outDir, rootDir, sour
 
 ### Community 12 - "TemporaryRoom.ts"
 Cohesion: 0.02
-Nodes (119): AggregateTemporaryRoom, EnumRoomVisibilityFieldUpdateOperationsInput, EnumTemporaryRoomStatusFieldUpdateOperationsInput, GetTemporaryRoomAggregateType, GetTemporaryRoomGroupByPayload, IntFieldUpdateOperationsInput, NullableStringFieldUpdateOperationsInput, TemporaryRoom$allowedMembersArgs (+111 more)
-
-### Community 13 - "ownership-database.test.ts"
-Cohesion: 0.13
-Nodes (17): Lock and permission contracts, Task 2: Discord room adapter, shared guards and timer lifecycle, Departure, OwnershipAttempt, Overwrite, Dependencies, RoomActionErrorCode, RoomChanged (+9 more)
+Nodes (118): AggregateTemporaryRoom, EnumRoomVisibilityFieldUpdateOperationsInput, EnumTemporaryRoomStatusFieldUpdateOperationsInput, GetTemporaryRoomAggregateType, GetTemporaryRoomGroupByPayload, NullableStringFieldUpdateOperationsInput, TemporaryRoom$allowedMembersArgs, TemporaryRoom$pendingTransferArgs (+110 more)
 
 ### Community 14 - "File Structure"
 Cohesion: 0.20
@@ -178,11 +182,11 @@ Cohesion: 0.67
 Nodes (3): PrismaClientBaseOptions, PrismaClientOptionsWithAccelerateUrl, PrismaClientOptionsWithAdapter
 
 ### Community 18 - "VoiceCreator.ts"
-Cohesion: 0.03
-Nodes (74): AggregateVoiceCreator, BoolFieldUpdateOperationsInput, DateTimeFieldUpdateOperationsInput, GetVoiceCreatorAggregateType, GetVoiceCreatorGroupByPayload, NullableDateTimeFieldUpdateOperationsInput, StringFieldUpdateOperationsInput, VoiceCreator$temporaryRoomsArgs (+66 more)
+Cohesion: 0.02
+Nodes (81): AggregateVoiceCreator, BoolFieldUpdateOperationsInput, DateTimeFieldUpdateOperationsInput, GetVoiceCreatorAggregateType, GetVoiceCreatorGroupByPayload, IntFieldUpdateOperationsInput, NullableDateTimeFieldUpdateOperationsInput, StringFieldUpdateOperationsInput (+73 more)
 
 ### Community 19 - "DiscordRoomGateway"
-Cohesion: 0.10
+Cohesion: 0.09
 Nodes (5): CallDiscordError, DiscordCallGateway, isUnknownChannel(), DiscordRoomGateway, hasCode()
 
 ### Community 20 - "commonInputTypes.ts"
@@ -190,12 +194,16 @@ Cohesion: 0.05
 Nodes (39): BoolFilter, BoolWithAggregatesFilter, DateTimeFilter, DateTimeNullableFilter, DateTimeNullableWithAggregatesFilter, DateTimeWithAggregatesFilter, EnumRoomVisibilityFilter, EnumRoomVisibilityWithAggregatesFilter (+31 more)
 
 ### Community 21 - "Charon v0.2.0 — Setup e Join-to-Create"
-Cohesion: 0.08
-Nodes (25): 1. Painel administrativo persistente no canal, 2. Painel administrativo privado temporário — escolhida, 3. Assistente linear passo a passo, Abordagens consideradas, Antiobjetivos, Arquitetura, Charon v0.2.0 — Setup e Join-to-Create, Compensação de falhas (+17 more)
+Cohesion: 0.06
+Nodes (38): 1. Painel administrativo persistente no canal, 2. Painel administrativo privado temporário — escolhida, 3. Assistente linear passo a passo, Abordagens consideradas, Antiobjetivos, Arquitetura, Charon v0.2.0 — Setup e Join-to-Create, Compensação de falhas (+30 more)
+
+### Community 22 - "application.ts"
+Cohesion: 0.09
+Nodes (22): Task 7: Wire Setup and Voice Events into the Application, Application, ApplicationOverrides, createApplication(), createDefaultDispatcher(), createDefaultVoiceDispatcher(), DiscordClientPort, fetch() (+14 more)
 
 ### Community 25 - "createRoomRuntime"
-Cohesion: 0.08
-Nodes (19): $Enums, PrismaClient, RoomAllowedMember, RoomPresence, CreateTemporaryRoomInput, invalidateControls, trackedStatuses, createRoomRuntime() (+11 more)
+Cohesion: 0.12
+Nodes (9): activeWhere(), available(), ConfiguredRoom, ownerChange(), PrismaRoomStateRepository, trackedStatuses, TransferInput, uniqueError() (+1 more)
 
 ### Community 26 - "Review Focus"
 Cohesion: 0.25
@@ -203,7 +211,7 @@ Nodes (7): Charon Stage 1 Infrastructure Implementation Plan, Global Constraints
 
 ### Community 27 - "DiscordSetupGateway"
 Cohesion: 0.14
-Nodes (9): Task 4: Handle Setup Buttons, Selects, and Modals, discordErrorCode(), DiscordSetupGateway, SetupDiscordError, SetupDiscordGateway, isGuildBased(), SetupInteractions, allPermissions (+1 more)
+Nodes (11): Task 4: Handle Setup Buttons, Selects, and Modals, SetupDiscordError, SetupDiscordGateway, isGuildBased(), SetupDiscordGatewayFactory, SetupInteraction, SetupInteractions, first (+3 more)
 
 ### Community 28 - "Supabase RLS Implementation Plan"
 Cohesion: 0.25
@@ -213,81 +221,93 @@ Nodes (7): Approved scope and approaches, Global Constraints, Progress, Re-run t
 Cohesion: 0.03
 Nodes (74): AggregateRoomAllowedMember, GetRoomAllowedMemberAggregateType, GetRoomAllowedMemberGroupByPayload, RoomAllowedMemberAggregateArgs, RoomAllowedMemberCountAggregateInputType, RoomAllowedMemberCountAggregateOutputType, RoomAllowedMemberCountArgs, RoomAllowedMemberCountOrderByAggregateInput (+66 more)
 
-### Community 32 - "Charon v0.3.0 Ownership and Room Controls Implementation Plan"
+### Community 32 - "Charon — criação guiada de canais de entrada"
 Cohesion: 0.15
-Nodes (12): Baseline, isolation and test environment, Charon v0.3.0 Ownership and Room Controls Implementation Plan, File Structure, Global Constraints, Review Focus, Self-review and handoff, Task 1: Persist room-control state and prove database invariants, Task 4: Five-second transfer with confirmation, undo and automatic completion (+4 more)
+Nodes (12): 10. Operação e aprovação, 11. Referências e liberdade do implementador, 1. Intenção e decisões do usuário, 2. Abordagens consideradas, 3. Escopo e limites, 4. Fluxo administrativo, 5. Rascunhos, autorização e interações antigas, 6. Criação do canal e falhas parciais (+4 more)
 
 ### Community 33 - "RoomPresence.ts"
 Cohesion: 0.03
 Nodes (74): AggregateRoomPresence, GetRoomPresenceAggregateType, GetRoomPresenceGroupByPayload, RoomPresenceAggregateArgs, RoomPresenceCountAggregateInputType, RoomPresenceCountAggregateOutputType, RoomPresenceCountArgs, RoomPresenceCountOrderByAggregateInput (+66 more)
 
 ### Community 34 - "OwnershipService"
-Cohesion: 0.35
-Nodes (4): Task 3: Continuous presence and five-minute claim priority, matchesGeneration(), matchesSnapshot(), OwnershipService
+Cohesion: 0.32
+Nodes (5): Task 3: Continuous presence and five-minute claim priority, RoomSnapshot, matchesGeneration(), matchesSnapshot(), OwnershipService
 
 ### Community 35 - "PendingOwnershipTransfer.ts"
 Cohesion: 0.03
 Nodes (73): AggregatePendingOwnershipTransfer, GetPendingOwnershipTransferAggregateType, GetPendingOwnershipTransferGroupByPayload, PendingOwnershipTransferAggregateArgs, PendingOwnershipTransferAvgAggregateInputType, PendingOwnershipTransferAvgAggregateOutputType, PendingOwnershipTransferAvgOrderByAggregateInput, PendingOwnershipTransferCountAggregateInputType (+65 more)
 
 ### Community 36 - "enums.ts"
-Cohesion: 0.20
-Nodes (9): Task 1: Persist Voice Creator and Temporary Room State, $Enums, PendingOwnershipTransfer, RoomAllowedMember, RoomPresence, TemporaryRoom, VoiceCreator, RoomVisibility (+1 more)
+Cohesion: 0.29
+Nodes (6): $Enums, PendingOwnershipTransfer, RoomAllowedMember, RoomPresence, TemporaryRoom, VoiceCreator
 
 ### Community 37 - "Charon v0.3.0 — posse e controles"
 Cohesion: 0.08
 Nodes (24): 10. Ciclo de vida e falhas — propostas técnicas, 11. Verificação e limites operacionais, 12. Fora do escopo e liberdade de implementação, 1. Objetivo e contexto, 2. Origem das decisões, 3. Abordagens de interação, 4. Painel e controles, 5. Posse e elegibilidade (+16 more)
 
 ### Community 38 - ".handleVoiceTransition"
-Cohesion: 0.08
-Nodes (14): Calls: fluxo de eventos, Interações, Painel B, posse e acesso, Setup, Task 6: Implement Temporary Room Lifecycle and Compensation, CallDiscordGateway, PrismaTemporaryRoomRepository, TemporaryRoomRecord (+6 more)
+Cohesion: 0.06
+Nodes (40): Calls: fluxo de eventos, Interações, Painel B, posse e acesso, Setup, Task 6: Implement Temporary Room Lifecycle and Compensation, Baseline, isolation and test environment, Charon v0.3.0 Ownership and Room Controls Implementation Plan, File Structure (+32 more)
 
-### Community 39 - "RoomDiscordGateway"
-Cohesion: 0.18
-Nodes (4): RoomControlsService, RoomPanelService, RoomDiscordGateway, fixture()
+### Community 39 - "@prisma/client"
+Cohesion: 0.17
+Nodes (11): dependencies, discord.js@14.28.1, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, @prisma/client@7.10.1, zod@4.6.7, pg (+3 more)
 
-### Community 40 - "application.ts"
-Cohesion: 0.08
-Nodes (25): Task 5: Discord client and interaction registry, Task 7: Wire Setup and Voice Events into the Application, discord.js, pino, ApplicationOverrides, createApplication(), createDefaultDispatcher(), createDefaultVoiceDispatcher() (+17 more)
+### Community 40 - "discord.js"
+Cohesion: 0.15
+Nodes (7): Task 5: Discord client and interaction registry, Task 8: Wire interactions, voice lifecycle and one shared room runtime, InteractionHandler, InteractionRegistry, safeFailureResponse, CallInteractions, createSilentLogger()
 
 ### Community 44 - "setup.interactions.ts"
 Cohesion: 0.14
-Nodes (22): SetupCategory, SetupVoiceChannel, voicePermissions, GuildBasedInteraction, VoiceCreatorConfiguration, decodeSetupCustomId(), discordIdSchema, encodeSetupCustomId() (+14 more)
+Nodes (24): Task 3: Build the Private Setup Dashboard, SetupCategory, SetupVoiceChannel, voicePermissions, GuildBasedInteraction, VoiceCreatorConfiguration, VoiceCreatorNotFoundError, decodeSetupCustomId() (+16 more)
 
-### Community 45 - "dependencies"
-Cohesion: 0.20
-Nodes (9): dependencies, discord.js@14.28.1, dotenv@18.0.9, pg@8.23.1, pino@10.4.0, @prisma/adapter-pg@7.10.1, zod@4.6.7, pg (+1 more)
+### Community 45 - "env.ts"
+Cohesion: 0.22
+Nodes (5): Task 2: Validated configuration, environmentSchema, loadConfig(), postgresUrl, validEnvironment
 
 ### Community 46 - "scripts"
 Cohesion: 0.22
 Nodes (9): scripts, build, commands:register, dev, prisma:generate, start, test, test:run (+1 more)
 
+### Community 47 - "PrismaVoiceCreatorRepository"
+Cohesion: 0.07
+Nodes (17): Task 4: Prisma adapter, checkDatabase(), createPrismaClient(), DatabaseClient, disconnectDatabase(), disconnectedClients, PrismaClient, PrismaTemporaryRoomRepository (+9 more)
+
 ### Community 48 - "Retomar o Charon após formatar o computador"
 Cohesion: 0.33
 Nodes (6): Antes de formatar: salvar fora do Git, De onde continuar, O que está salvo no GitHub, Recuperar o projeto, Retomar a validação da v0.3.0, Retomar o Charon após formatar o computador
 
-### Community 50 - "setup.repository.ts"
-Cohesion: 0.10
-Nodes (14): Task 2: Add Voice Creator Repository and Setup Service, VoiceCreator, SetupDiscordGatewayFactory, SetupInteraction, CreateVoiceCreatorInput, isPrismaErrorWithCode(), PrismaVoiceCreatorRepository, VoiceCreatorAlreadyConfiguredError (+6 more)
+### Community 49 - "Setup guiado do Charon Implementation Plan"
+Cohesion: 0.25
+Nodes (7): Gate de verificação — apenas local, Global Constraints, Handoff, Preparação de execução — antes da Tarefa 1, Review Focus, Self-review do plano, Setup guiado do Charon Implementation Plan
+
+### Community 50 - "dotenv"
+Cohesion: 0.40
+Nodes (4): dotenv@18.0.9, prisma@7.10.1, dotenv, prisma
 
 ### Community 51 - "@prisma/client"
-Cohesion: 0.18
-Nodes (6): @prisma/client@7.10.1, @prisma/client, config, decodeBase64AsWasm(), LogOptions, PrismaClientConstructor
+Cohesion: 0.22
+Nodes (4): config, decodeBase64AsWasm(), LogOptions, PrismaClientConstructor
 
-### Community 52 - "setup.repository.ts"
-Cohesion: 0.12
-Nodes (8): Task 3: Build the Private Setup Dashboard, SetupCommand, VoiceCreatorRepository, SetupService, botPermissions, configuration, fixture(), fixture()
-
-### Community 54 - "call.interactions.ts"
+### Community 52 - "SetupService"
 Cohesion: 0.08
-Nodes (40): Task 5: Build the Disabled Minimalist Call Panel, Task 6: Compact panel B, private menu and strict component schemas, TemporaryRoom, buildAccessPrompt(), buildLimitModal(), buildOwnerMenu(), buildRenameModal(), buildTransferPrompt() (+32 more)
+Nodes (16): Task 2: Add Voice Creator Repository and Setup Service, Contratos compartilhados do novo fluxo, Mapa de arquivos e interfaces, Task 1: Persistir e editar o limite padrão sem alterar configurações antigas, Task 2: Rascunhos privados com revisão, TTL e confirmação única, Task 3: Criar entrada com permissões preservadas e compensação conservadora, Task 4: Conectar wizard e edição do padrão ao dashboard privado, CreateVoiceCreatorInput (+8 more)
+
+### Community 53 - "DiscordSetupGateway"
+Cohesion: 0.29
+Nodes (4): discordErrorCode(), DiscordSetupGateway, allPermissions, fixture()
+
+### Community 54 - "ownership-database.test.ts"
+Cohesion: 0.14
+Nodes (16): Lock and permission contracts, Dependencies, requireActiveRoom(), requireOwnedRoom(), Departure, OwnershipAttempt, Dependencies, RoomActionErrorCode (+8 more)
 
 ### Community 59 - "vitest"
-Cohesion: 0.06
-Nodes (50): Task 4: Prisma adapter, vitest, fetch(), checkDatabase(), createPrismaClient(), DatabaseClient, disconnectDatabase(), disconnectedClients (+42 more)
+Cohesion: 0.05
+Nodes (68): Task 5: Build the Disabled Minimalist Call Panel, Task 5: Aplicar o padrão às novas calls e fechar verificação/documentação, discord.js, vitest, createLogger(), redactedPaths, sanitizeLogValue(), sensitiveKeys (+60 more)
 
 ### Community 60 - "setup.command.ts"
-Cohesion: 0.08
-Nodes (21): Task 2: Validated configuration, dotenv, zod, commandDefinitions, CommandRegistrar, registerCommands(), Application, registerShutdownSignals() (+13 more)
+Cohesion: 0.22
+Nodes (7): commandDefinitions, CommandRegistrar, registerCommands(), AppConfig, LoggerOptions, setupCommandData, config
 
 ### Community 62 - "Changelog"
 Cohesion: 0.25
@@ -310,32 +330,36 @@ Cohesion: 0.40
 Nodes (5): Charon v0.2.0 — registro de validação, Discord real: verificações observadas, Limpeza e limites, PostgreSQL real: aprovado, Versão verificada
 
 ### Community 68 - "Validação local v0.3.0"
-Cohesion: 0.20
-Nodes (10): CI, segurança dos artefatos e limites, Fix round 1 — 2026-11-09, validação focada, Follow-up M2 — 2026-11-09, M2 — envelope da consulta inicial — 2026-11-09, Onda final combinada — 2026-11-09, RED → GREEN e caracterizações, Resultados observados, Revalidação pelo controlador — 2026-11-09 (+2 more)
+Cohesion: 0.18
+Nodes (11): Aceite da revisão local — 2026-11-09, CI, segurança dos artefatos e limites, Fix round 1 — 2026-11-09, validação focada, Follow-up M2 — 2026-11-09, M2 — envelope da consulta inicial — 2026-11-09, Onda final combinada — 2026-11-09, RED → GREEN e caracterizações, Resultados observados (+3 more)
+
+### Community 70 - "enums.ts"
+Cohesion: 0.67
+Nodes (3): Task 1: Persist Voice Creator and Temporary Room State, RoomVisibility, TemporaryRoomStatus
 
 ### Community 75 - "RoomActionError"
-Cohesion: 0.21
-Nodes (12): allowedUnion(), assertSnapshot(), RoomAccessService, requireActiveRoom(), requireOwnedRoom(), Dependencies, commitRoomMutation(), currentOwnedRoom() (+4 more)
+Cohesion: 0.15
+Nodes (12): allowedUnion(), assertSnapshot(), RoomAccessService, Dependencies, RoomControlsService, commitRoomMutation(), currentOwnedRoom(), safeRoomAction() (+4 more)
 
 ## Knowledge Gaps
 - **3 isolated node(s):** `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md`
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1037 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **14 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1065 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **13 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `@prisma/client` connect `@prisma/client` to `prismaNamespace.ts`, `RoomPresence.ts`, `prismaNamespaceBrowser.ts`, `package.json`, `PendingOwnershipTransfer.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `commonInputTypes.ts`, `createRoomRuntime`, `RoomAllowedMember.ts`?**
-  _High betweenness centrality (0.173) - this node is a cross-community bridge._
+- **Why does `@prisma/client` connect `@prisma/client` to `prismaNamespace.ts`, `RoomPresence.ts`, `prismaNamespaceBrowser.ts`, `package.json`, `PendingOwnershipTransfer.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `@prisma/client`, `commonInputTypes.ts`, `vitest`, `RoomAllowedMember.ts`?**
+  _High betweenness centrality (0.175) - this node is a cross-community bridge._
 - **What connects `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md` to the rest of the system?**
   _3 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `prismaNamespace.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.01652892561983471 - nodes in this community are weakly interconnected._
-- **Why does `InteractionRegistry` connect `application.ts` to `Charon v0.2.0 — Setup e Join-to-Create`, `.handleVoiceTransition`, `File Structure`?**
-  _High betweenness centrality (0.073) - this node is a cross-community bridge._
+- **Why does `InteractionRegistry` connect `discord.js` to `application.ts`, `Charon v0.2.0 — Setup e Join-to-Create`, `.handleVoiceTransition`, `File Structure`?**
+  _High betweenness centrality (0.074) - this node is a cross-community bridge._
 - **Should `prismaNamespaceBrowser.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.11764705882352941 - nodes in this community are weakly interconnected._
-- **Why does `Arquitetura` connect `Charon v0.2.0 — Setup e Join-to-Create` to `application.ts`?**
-  _High betweenness centrality (0.044) - this node is a cross-community bridge._
+- **Why does `Arquitetura do Charon` connect `Arquitetura do Charon` to `architecture.md`, `.handleVoiceTransition`?**
+  _High betweenness centrality (0.054) - this node is a cross-community bridge._
 - **Should `package.json` be split into smaller, more focused modules?**
-  _Cohesion score 0.12631578947368421 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.14705882352941177 - nodes in this community are weakly interconnected._

@@ -1,16 +1,38 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  defaultUserLimitSchema,
   discordIdSchema,
   encodeSetupCustomId,
   setupChannelNameSchema,
   setupCustomIdSchema,
+  setupDefaultLimitInputSchema,
   voiceCreatorIdSchema,
 } from '../../../../src/modules/setup/setup.schemas.js';
 
 const voiceCreatorId = '123e4567-e89b-42d3-a456-426614174000';
 
 describe('setup schemas', () => {
+  it.each([0, 1, 4, 99])('accepts default room limit %s', (limit) => {
+    expect(defaultUserLimitSchema.parse(limit)).toBe(limit);
+  });
+
+  it.each([-1, 100, 1.5, NaN, Infinity, '4', null])('rejects invalid default room limit %s', (limit) => {
+    expect(defaultUserLimitSchema.safeParse(limit).success).toBe(false);
+  });
+
+  it.each([['0', 0], ['1', 1], ['99', 99], [' 4 ', 4]] as const)(
+    'parses canonical default limit input %s', (input, limit) => {
+      expect(setupDefaultLimitInputSchema.parse(input)).toBe(limit);
+    },
+  );
+
+  it.each(['', '   ', '01', '1e1', '1.5', '-1', '100', '+1', '1 0', 'NaN', 'Infinity'])(
+    'rejects noncanonical default limit input %s', (input) => {
+      expect(setupDefaultLimitInputSchema.safeParse(input).success).toBe(false);
+    },
+  );
+
   it('accepts Discord snowflakes and rejects malformed IDs', () => {
     expect(discordIdSchema.parse('12345678901234567')).toBe(
       '12345678901234567',

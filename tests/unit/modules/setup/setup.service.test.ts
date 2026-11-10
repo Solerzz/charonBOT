@@ -16,6 +16,7 @@ const configuration: VoiceCreatorConfiguration = {
   creatorChannelDiscordId: '22345678901234567',
   categoryDiscordId: '32345678901234567',
   roomCommandsEnabled: true,
+  defaultUserLimit: 0,
   deletedAt: null,
   createdAt: new Date('2026-11-05T10:00:00.000Z'),
   updatedAt: new Date('2026-11-05T10:00:00.000Z'),
@@ -28,8 +29,10 @@ function createRepositoryDouble(
     listByGuild: vi.fn().mockResolvedValue([configuration]),
     findById: vi.fn().mockResolvedValue(configuration),
     findByChannel: vi.fn().mockResolvedValue(configuration),
+    findStoredByChannel: vi.fn().mockResolvedValue(configuration),
     create: vi.fn().mockResolvedValue(configuration),
     updateCategory: vi.fn().mockResolvedValue(configuration),
+    setDefaultUserLimit: vi.fn().mockResolvedValue({ ...configuration, defaultUserLimit: 4 }),
     setRoomCommandsEnabled: vi
       .fn()
       .mockResolvedValue({ ...configuration, roomCommandsEnabled: false }),
@@ -66,6 +69,56 @@ describe('SetupService', () => {
       service.add({ ...input, categoryDiscordId: 'invalid' }),
     ).rejects.toThrow('Invalid Discord ID');
     expect(repository.create).toHaveBeenCalledOnce();
+  });
+
+  it.each([undefined, 0, 4, 99])('passes creation default %s without normalizing an omitted restore default', async (limit) => {
+    const repository = createRepositoryDouble();
+    const service = new SetupService(repository);
+    const input = {
+      guildDiscordId: configuration.guildDiscordId,
+      creatorChannelDiscordId: configuration.creatorChannelDiscordId,
+      categoryDiscordId: configuration.categoryDiscordId,
+      ...(limit === undefined ? {} : { defaultUserLimit: limit }),
+    };
+    await service.add(input);
+    expect(repository.create).toHaveBeenCalledExactlyOnceWith(input);
+  });
+
+  it.each([-1, 100, 1.5])('rejects invalid creation default %s before persistence', async (limit) => {
+    const repository = createRepositoryDouble();
+    const service = new SetupService(repository);
+    await expect(service.add({
+      guildDiscordId: configuration.guildDiscordId,
+      creatorChannelDiscordId: configuration.creatorChannelDiscordId,
+      categoryDiscordId: configuration.categoryDiscordId,
+      defaultUserLimit: limit,
+    })).rejects.toThrow();
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 4, 99])('validates and saves default limit %s without synchronizing rooms', async (limit) => {
+    const saved = { ...configuration, defaultUserLimit: limit };
+    const repository = createRepositoryDouble({ setDefaultUserLimit: vi.fn().mockResolvedValue(saved) });
+    const synchronize = vi.fn();
+    const service = new SetupService(repository, synchronize);
+
+    await expect(service.setDefaultUserLimit(configuration.id, limit)).resolves.toEqual(saved);
+    expect(repository.setDefaultUserLimit).toHaveBeenCalledExactlyOnceWith(configuration.id, limit);
+    expect(synchronize).not.toHaveBeenCalled();
+  });
+
+  it.each([-1, 100, 1.5])('rejects invalid default update %s before persistence', async (limit) => {
+    const repository = createRepositoryDouble();
+    const service = new SetupService(repository);
+    await expect(service.setDefaultUserLimit(configuration.id, limit)).rejects.toThrow();
+    expect(repository.setDefaultUserLimit).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid creator ID before updating the default', async () => {
+    const repository = createRepositoryDouble();
+    const service = new SetupService(repository);
+    await expect(service.setDefaultUserLimit('invalid', 4)).rejects.toThrow('Invalid Voice Creator ID');
+    expect(repository.setDefaultUserLimit).not.toHaveBeenCalled();
   });
 
   it('changes a category after validating configuration and category IDs', async () => {

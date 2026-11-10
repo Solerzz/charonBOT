@@ -11,7 +11,7 @@ import type { VoiceCreatorRepository } from '../../../../src/modules/setup/setup
 export const creator: VoiceCreator = {
   id: '123e4567-e89b-42d3-a456-426614174000',
   guildDiscordId: '12345678901234567', creatorChannelDiscordId: '22345678901234567',
-  categoryDiscordId: '32345678901234567', roomCommandsEnabled: true,
+  categoryDiscordId: '32345678901234567', roomCommandsEnabled: true, defaultUserLimit: 0,
   deletedAt: null, createdAt: new Date(0), updatedAt: new Date(0),
 };
 export const room: TemporaryRoom = {
@@ -41,6 +41,7 @@ export function lifecycleFixture() {
   const creators = {
     listByGuild: vi.fn(), findById: vi.fn(), create: vi.fn(), updateCategory: vi.fn(),
     setRoomCommandsEnabled: vi.fn(), delete: vi.fn(),
+    findStoredByChannel: vi.fn(), setDefaultUserLimit: vi.fn(),
     findByChannel: vi.fn(async (id: string) => id === creator.creatorChannelDiscordId ? configuration : null),
   } satisfies VoiceCreatorRepository;
   const change = (id: string, data: Partial<TemporaryRoom>) => {

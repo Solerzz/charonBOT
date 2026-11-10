@@ -20,8 +20,18 @@ export type VoiceCreatorModel = runtime.Types.Result.DefaultSelection<Prisma.$Vo
 
 export type AggregateVoiceCreator = {
   _count: VoiceCreatorCountAggregateOutputType | null
+  _avg: VoiceCreatorAvgAggregateOutputType | null
+  _sum: VoiceCreatorSumAggregateOutputType | null
   _min: VoiceCreatorMinAggregateOutputType | null
   _max: VoiceCreatorMaxAggregateOutputType | null
+}
+
+export type VoiceCreatorAvgAggregateOutputType = {
+  defaultUserLimit: number | null
+}
+
+export type VoiceCreatorSumAggregateOutputType = {
+  defaultUserLimit: number | null
 }
 
 export type VoiceCreatorMinAggregateOutputType = {
@@ -30,6 +40,7 @@ export type VoiceCreatorMinAggregateOutputType = {
   creatorChannelDiscordId: string | null
   categoryDiscordId: string | null
   roomCommandsEnabled: boolean | null
+  defaultUserLimit: number | null
   deletedAt: Date | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -41,6 +52,7 @@ export type VoiceCreatorMaxAggregateOutputType = {
   creatorChannelDiscordId: string | null
   categoryDiscordId: string | null
   roomCommandsEnabled: boolean | null
+  defaultUserLimit: number | null
   deletedAt: Date | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -52,6 +64,7 @@ export type VoiceCreatorCountAggregateOutputType = {
   creatorChannelDiscordId: number
   categoryDiscordId: number
   roomCommandsEnabled: number
+  defaultUserLimit: number
   deletedAt: number
   createdAt: number
   updatedAt: number
@@ -59,12 +72,21 @@ export type VoiceCreatorCountAggregateOutputType = {
 }
 
 
+export type VoiceCreatorAvgAggregateInputType = {
+  defaultUserLimit?: true
+}
+
+export type VoiceCreatorSumAggregateInputType = {
+  defaultUserLimit?: true
+}
+
 export type VoiceCreatorMinAggregateInputType = {
   id?: true
   guildDiscordId?: true
   creatorChannelDiscordId?: true
   categoryDiscordId?: true
   roomCommandsEnabled?: true
+  defaultUserLimit?: true
   deletedAt?: true
   createdAt?: true
   updatedAt?: true
@@ -76,6 +98,7 @@ export type VoiceCreatorMaxAggregateInputType = {
   creatorChannelDiscordId?: true
   categoryDiscordId?: true
   roomCommandsEnabled?: true
+  defaultUserLimit?: true
   deletedAt?: true
   createdAt?: true
   updatedAt?: true
@@ -87,6 +110,7 @@ export type VoiceCreatorCountAggregateInputType = {
   creatorChannelDiscordId?: true
   categoryDiscordId?: true
   roomCommandsEnabled?: true
+  defaultUserLimit?: true
   deletedAt?: true
   createdAt?: true
   updatedAt?: true
@@ -130,6 +154,18 @@ export type VoiceCreatorAggregateArgs<ExtArgs extends runtime.Types.Extensions.I
   _count?: true | VoiceCreatorCountAggregateInputType
   /**
    * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   *
+   * Select which fields to average
+  **/
+  _avg?: VoiceCreatorAvgAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   *
+   * Select which fields to sum
+  **/
+  _sum?: VoiceCreatorSumAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
    * 
    * Select which fields to find the minimum value
   **/
@@ -161,6 +197,8 @@ export type VoiceCreatorGroupByArgs<ExtArgs extends runtime.Types.Extensions.Int
   take?: number
   skip?: number
   _count?: VoiceCreatorCountAggregateInputType | true
+  _avg?: VoiceCreatorAvgAggregateInputType
+  _sum?: VoiceCreatorSumAggregateInputType
   _min?: VoiceCreatorMinAggregateInputType
   _max?: VoiceCreatorMaxAggregateInputType
 }
@@ -171,10 +209,13 @@ export type VoiceCreatorGroupByOutputType = {
   creatorChannelDiscordId: string
   categoryDiscordId: string
   roomCommandsEnabled: boolean
+  defaultUserLimit: number
   deletedAt: Date | null
   createdAt: Date
   updatedAt: Date
   _count: VoiceCreatorCountAggregateOutputType | null
+  _avg: VoiceCreatorAvgAggregateOutputType | null
+  _sum: VoiceCreatorSumAggregateOutputType | null
   _min: VoiceCreatorMinAggregateOutputType | null
   _max: VoiceCreatorMaxAggregateOutputType | null
 }
@@ -203,6 +244,7 @@ export type VoiceCreatorWhereInput = {
   creatorChannelDiscordId?: Prisma.StringFilter<"VoiceCreator"> | string
   categoryDiscordId?: Prisma.StringFilter<"VoiceCreator"> | string
   roomCommandsEnabled?: Prisma.BoolFilter<"VoiceCreator"> | boolean
+  defaultUserLimit?: Prisma.IntFilter<"VoiceCreator"> | number
   deletedAt?: Prisma.DateTimeNullableFilter<"VoiceCreator"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"VoiceCreator"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"VoiceCreator"> | Date | string
@@ -215,6 +257,7 @@ export type VoiceCreatorOrderByWithRelationInput = {
   creatorChannelDiscordId?: Prisma.SortOrder
   categoryDiscordId?: Prisma.SortOrder
   roomCommandsEnabled?: Prisma.SortOrder
+  defaultUserLimit?: Prisma.SortOrder
   deletedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -230,6 +273,7 @@ export type VoiceCreatorWhereUniqueInput = Prisma.AtLeast<{
   guildDiscordId?: Prisma.StringFilter<"VoiceCreator"> | string
   categoryDiscordId?: Prisma.StringFilter<"VoiceCreator"> | string
   roomCommandsEnabled?: Prisma.BoolFilter<"VoiceCreator"> | boolean
+  defaultUserLimit?: Prisma.IntFilter<"VoiceCreator"> | number
   deletedAt?: Prisma.DateTimeNullableFilter<"VoiceCreator"> | Date | string | null
   createdAt?: Prisma.DateTimeFilter<"VoiceCreator"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"VoiceCreator"> | Date | string
@@ -242,12 +286,15 @@ export type VoiceCreatorOrderByWithAggregationInput = {
   creatorChannelDiscordId?: Prisma.SortOrder
   categoryDiscordId?: Prisma.SortOrder
   roomCommandsEnabled?: Prisma.SortOrder
+  defaultUserLimit?: Prisma.SortOrder
   deletedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.VoiceCreatorCountOrderByAggregateInput
+  _avg?: Prisma.VoiceCreatorAvgOrderByAggregateInput
   _max?: Prisma.VoiceCreatorMaxOrderByAggregateInput
   _min?: Prisma.VoiceCreatorMinOrderByAggregateInput
+  _sum?: Prisma.VoiceCreatorSumOrderByAggregateInput
 }
 
 export type VoiceCreatorScalarWhereWithAggregatesInput = {
@@ -259,6 +306,7 @@ export type VoiceCreatorScalarWhereWithAggregatesInput = {
   creatorChannelDiscordId?: Prisma.StringWithAggregatesFilter<"VoiceCreator"> | string
   categoryDiscordId?: Prisma.StringWithAggregatesFilter<"VoiceCreator"> | string
   roomCommandsEnabled?: Prisma.BoolWithAggregatesFilter<"VoiceCreator"> | boolean
+  defaultUserLimit?: Prisma.IntWithAggregatesFilter<"VoiceCreator"> | number
   deletedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"VoiceCreator"> | Date | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"VoiceCreator"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"VoiceCreator"> | Date | string
@@ -270,6 +318,7 @@ export type VoiceCreatorCreateInput = {
   creatorChannelDiscordId: string
   categoryDiscordId: string
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: number
   deletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -282,6 +331,7 @@ export type VoiceCreatorUncheckedCreateInput = {
   creatorChannelDiscordId: string
   categoryDiscordId: string
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: number
   deletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -294,6 +344,7 @@ export type VoiceCreatorUpdateInput = {
   creatorChannelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   categoryDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   roomCommandsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultUserLimit?: Prisma.IntFieldUpdateOperationsInput | number
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -306,6 +357,7 @@ export type VoiceCreatorUncheckedUpdateInput = {
   creatorChannelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   categoryDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   roomCommandsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultUserLimit?: Prisma.IntFieldUpdateOperationsInput | number
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -318,6 +370,7 @@ export type VoiceCreatorCreateManyInput = {
   creatorChannelDiscordId: string
   categoryDiscordId: string
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: number
   deletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -329,6 +382,7 @@ export type VoiceCreatorUpdateManyMutationInput = {
   creatorChannelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   categoryDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   roomCommandsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultUserLimit?: Prisma.IntFieldUpdateOperationsInput | number
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -340,6 +394,7 @@ export type VoiceCreatorUncheckedUpdateManyInput = {
   creatorChannelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   categoryDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   roomCommandsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultUserLimit?: Prisma.IntFieldUpdateOperationsInput | number
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -351,9 +406,14 @@ export type VoiceCreatorCountOrderByAggregateInput = {
   creatorChannelDiscordId?: Prisma.SortOrder
   categoryDiscordId?: Prisma.SortOrder
   roomCommandsEnabled?: Prisma.SortOrder
+  defaultUserLimit?: Prisma.SortOrder
   deletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+}
+
+export type VoiceCreatorAvgOrderByAggregateInput = {
+  defaultUserLimit?: Prisma.SortOrder
 }
 
 export type VoiceCreatorMaxOrderByAggregateInput = {
@@ -362,6 +422,7 @@ export type VoiceCreatorMaxOrderByAggregateInput = {
   creatorChannelDiscordId?: Prisma.SortOrder
   categoryDiscordId?: Prisma.SortOrder
   roomCommandsEnabled?: Prisma.SortOrder
+  defaultUserLimit?: Prisma.SortOrder
   deletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -373,9 +434,14 @@ export type VoiceCreatorMinOrderByAggregateInput = {
   creatorChannelDiscordId?: Prisma.SortOrder
   categoryDiscordId?: Prisma.SortOrder
   roomCommandsEnabled?: Prisma.SortOrder
+  defaultUserLimit?: Prisma.SortOrder
   deletedAt?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+}
+
+export type VoiceCreatorSumOrderByAggregateInput = {
+  defaultUserLimit?: Prisma.SortOrder
 }
 
 export type VoiceCreatorScalarRelationFilter = {
@@ -389,6 +455,14 @@ export type StringFieldUpdateOperationsInput = {
 
 export type BoolFieldUpdateOperationsInput = {
   set?: boolean
+}
+
+export type IntFieldUpdateOperationsInput = {
+  set?: number
+  increment?: number
+  decrement?: number
+  multiply?: number
+  divide?: number
 }
 
 export type NullableDateTimeFieldUpdateOperationsInput = {
@@ -419,6 +493,7 @@ export type VoiceCreatorCreateWithoutTemporaryRoomsInput = {
   creatorChannelDiscordId: string
   categoryDiscordId: string
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: number
   deletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -430,6 +505,7 @@ export type VoiceCreatorUncheckedCreateWithoutTemporaryRoomsInput = {
   creatorChannelDiscordId: string
   categoryDiscordId: string
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: number
   deletedAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -457,6 +533,7 @@ export type VoiceCreatorUpdateWithoutTemporaryRoomsInput = {
   creatorChannelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   categoryDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   roomCommandsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultUserLimit?: Prisma.IntFieldUpdateOperationsInput | number
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -468,6 +545,7 @@ export type VoiceCreatorUncheckedUpdateWithoutTemporaryRoomsInput = {
   creatorChannelDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   categoryDiscordId?: Prisma.StringFieldUpdateOperationsInput | string
   roomCommandsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  defaultUserLimit?: Prisma.IntFieldUpdateOperationsInput | number
   deletedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -510,6 +588,7 @@ export type VoiceCreatorSelect<ExtArgs extends runtime.Types.Extensions.Internal
   creatorChannelDiscordId?: boolean
   categoryDiscordId?: boolean
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: boolean
   deletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -523,6 +602,7 @@ export type VoiceCreatorSelectCreateManyAndReturn<ExtArgs extends runtime.Types.
   creatorChannelDiscordId?: boolean
   categoryDiscordId?: boolean
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: boolean
   deletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -534,6 +614,7 @@ export type VoiceCreatorSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.
   creatorChannelDiscordId?: boolean
   categoryDiscordId?: boolean
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: boolean
   deletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -545,12 +626,13 @@ export type VoiceCreatorSelectScalar = {
   creatorChannelDiscordId?: boolean
   categoryDiscordId?: boolean
   roomCommandsEnabled?: boolean
+  defaultUserLimit?: boolean
   deletedAt?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type VoiceCreatorOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "guildDiscordId" | "creatorChannelDiscordId" | "categoryDiscordId" | "roomCommandsEnabled" | "deletedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["voiceCreator"]>
+export type VoiceCreatorOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "guildDiscordId" | "creatorChannelDiscordId" | "categoryDiscordId" | "roomCommandsEnabled" | "defaultUserLimit" | "deletedAt" | "createdAt" | "updatedAt", ExtArgs["result"]["voiceCreator"]>
 export type VoiceCreatorInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   temporaryRooms?: boolean | Prisma.VoiceCreator$temporaryRoomsArgs<ExtArgs>
   _count?: boolean | Prisma.VoiceCreatorCountOutputTypeDefaultArgs<ExtArgs>
@@ -569,6 +651,7 @@ export type $VoiceCreatorPayload<ExtArgs extends runtime.Types.Extensions.Intern
     creatorChannelDiscordId: string
     categoryDiscordId: string
     roomCommandsEnabled: boolean
+    defaultUserLimit: number
     deletedAt: Date | null
     createdAt: Date
     updatedAt: Date
@@ -1001,6 +1084,7 @@ export interface VoiceCreatorFieldRefs {
   readonly creatorChannelDiscordId: Prisma.FieldRef<"VoiceCreator", 'String'>
   readonly categoryDiscordId: Prisma.FieldRef<"VoiceCreator", 'String'>
   readonly roomCommandsEnabled: Prisma.FieldRef<"VoiceCreator", 'Boolean'>
+  readonly defaultUserLimit: Prisma.FieldRef<"VoiceCreator", 'Int'>
   readonly deletedAt: Prisma.FieldRef<"VoiceCreator", 'DateTime'>
   readonly createdAt: Prisma.FieldRef<"VoiceCreator", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"VoiceCreator", 'DateTime'>
