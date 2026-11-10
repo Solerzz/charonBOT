@@ -1,10 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { currentOwnedRoom } from '../../../../src/modules/calls/room-mutation.js';
 import { OWNER, OTHER } from '../ownership/ownership.fixtures.js';
 import { deferred } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 
 describe('RoomControlsService', () => {
+  it.each([false, true])('rejects lock-only drift from %s without an ownership version change', async (isLocked) => {
+    const f = roomSettingsFixture();
+    f.state().room.isLocked = isLocked;
+    const expected = structuredClone((await currentOwnedRoom(f.store, f.actor(), f.gateway)).state);
+    f.state().room.isLocked = !isLocked;
+    await expect(currentOwnedRoom(f.store, f.actor(), f.gateway, expected)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.state().room).toMatchObject({ visibility: 'PUBLIC', controlVersion: expected.room.controlVersion, isLocked: !isLocked });
+  });
+
   it('trims and commits eleven complex graphemes; callback observes committed state under the room lock', async () => {
     const f = roomSettingsFixture(); const name = '👨‍👩‍👧‍👦'.repeat(11);
     const entered = deferred(); const release = deferred();

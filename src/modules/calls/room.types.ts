@@ -9,7 +9,7 @@ export type RoomActor = { roomId: string; guildDiscordId: string; memberDiscordI
 export type RoomMember = { memberDiscordId: string; isBot: boolean };
 export type RoomSnapshot = { guildDiscordId: string; channelDiscordId: string; members: RoomMember[]; name: string; userLimit: number };
 export type RoomState = { room: TemporaryRoomRecord; controlsEnabled: boolean; presences: RoomPresence[]; allowedMemberIds: string[]; transfer: PendingOwnershipTransfer | null };
-export type RoomSettingsPatch = Partial<Pick<TemporaryRoomRecord, 'name' | 'userLimit' | 'visibility'>>;
+export type RoomSettingsPatch = Partial<Pick<TemporaryRoomRecord, 'name' | 'userLimit' | 'visibility' | 'isLocked'>>;
 export type RoomChanged = (roomId: string, gateway: RoomDiscordGateway) => Promise<void>;
 export type RoomGuildResolver = (guildId: string) => Promise<Guild | null>;
 

@@ -158,6 +158,8 @@ describe('PrismaRoomStateRepository', () => {
     expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({ where: { id: room.id, controlVersion: 0, status: 'ACTIVE', ownerDiscordId: null }, data: { priorityMemberDiscordId: 'next', priorityExpiresAt: new Date(300000) } });
     await expect(f.store.updateSettings(room.id, 0, { name: 'New' })).resolves.toBe(true);
     expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({ where: { id: room.id, controlVersion: 0, status: 'ACTIVE', voiceCreator: { roomCommandsEnabled: true } }, data: { name: 'New' } });
+    await expect(f.store.updateSettings(room.id, 0, { isLocked: true })).resolves.toBe(true);
+    expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({ where: { id: room.id, controlVersion: 0, status: 'ACTIVE', voiceCreator: { roomCommandsEnabled: true } }, data: { isLocked: true } });
     await expect(f.store.setPanelId(room.id, 0, null, 'message')).resolves.toBe(true);
     expect(f.temporaryRoom.updateMany).toHaveBeenCalledWith({ where: { id: room.id, controlVersion: 0, status: 'ACTIVE', voiceCreator: { roomCommandsEnabled: true }, controlMessageDiscordId: null }, data: { controlMessageDiscordId: 'message' } });
   });
