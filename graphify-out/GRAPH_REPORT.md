@@ -1,7 +1,7 @@
 # Graph Report - feature-v0.3.0-posse-controles  (2026-11-10)
 
 ## Corpus Check
-- 139 files · ~134,492 words
+- 139 files · ~134,864 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .prisma 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `39dd8a0b`
+- Built from commit: `6689106a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -103,8 +103,8 @@
 5. `DiscordRoomGateway` - 39 edges
 6. `createRoomRuntime()` - 36 edges
 7. `DiscordCallGateway` - 34 edges
-8. `RoomActor` - 33 edges
-9. `RoomStateRepository` - 33 edges
+8. `RoomStateRepository` - 33 edges
+9. `RoomActor` - 33 edges
 10. `TransferService` - 31 edges
 
 ## Surprising Connections (you probably didn't know these)
@@ -396,16 +396,16 @@ Nodes (8): SetupDiscordGatewayFactory, context, fixture(), event(), review(), st
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `@prisma/client` connect `@prisma/client` to `prismaNamespace.ts`, `RoomPresence.ts`, `prismaNamespaceBrowser.ts`, `package.json`, `prisma/client.ts`, `PendingOwnershipTransfer.ts`, `TemporaryRoom.ts`, `VoiceCreator.ts`, `commonInputTypes.ts`, `RoomAllowedMember.ts`?**
-  _High betweenness centrality (0.166) - this node is a cross-community bridge._
+  _High betweenness centrality (0.170) - this node is a cross-community bridge._
 - **What connects `./tsconfig.json`, `/graphify User Command`, `graphify-out/GRAPH_REPORT.md` to the rest of the system?**
   _3 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `prismaNamespace.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.01652892561983471 - nodes in this community are weakly interconnected._
 - **Why does `vitest` connect `ownership.fixtures.ts` to `package.json`, `createRoomRuntime`, `application.ts`, `DiscordSetupGateway`, `createApplication`, `call.schemas.ts`, `setup.interactions.ts`, `setup.interactions.ts`, `room.types.ts`, `setup-drafts.ts`, `prisma.ts`, `SetupService`, `DiscordSetupGateway`, `vitest`, `discord.js`, `call.discord.ts`, `prisma/client.ts`, `call-controls.view.test.ts`, `application.rooms.test.ts`, `createLogger`, `call-panel.view.ts`, `PrismaTemporaryRoomRepository`, `setup-creation.interactions.test.ts`?**
-  _High betweenness centrality (0.057) - this node is a cross-community bridge._
+  _High betweenness centrality (0.066) - this node is a cross-community bridge._
 - **Should `prismaNamespaceBrowser.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.11764705882352941 - nodes in this community are weakly interconnected._
-- **Why does `InteractionRegistry` connect `Review Focus` to `.handleVoiceTransition`, `createLogger`, `File Structure`, `Charon v0.2.0 — Setup e Join-to-Create`, `application.ts`, `discord.js`?**
-  _High betweenness centrality (0.051) - this node is a cross-community bridge._
+- **Why does `discord.js` connect `discord.js` to `package.json`, `call-controls.view.test.ts`, `ownership.fixtures.ts`, `setup.interactions.ts`, `createLogger`, `application.rooms.test.ts`, `call-panel.view.ts`, `setup.interactions.ts`, `room.types.ts`, `setup-creation.interactions.test.ts`, `SetupService`, `DiscordSetupGateway`, `application.ts`, `vitest`, `call.discord.ts`?**
+  _High betweenness centrality (0.043) - this node is a cross-community bridge._
 - **Should `package.json` be split into smaller, more focused modules?**
   _Cohesion score 0.05853658536585366 - nodes in this community are weakly interconnected._

@@ -98,7 +98,9 @@ describe('private guided setup', () => {
     const e = f.event(`setup:v2:create:category:${ref.id}:0`, 'category');
     const pending = f.handler.execute(e.interaction);
     expect(e.showModal).toHaveBeenCalledOnce(); await pending;
-    expect(f.events).toEqual(['modal']); expect(f.factory).not.toHaveBeenCalled();
+    expect(f.events).toEqual(['modal', 'render']); expect(f.factory).not.toHaveBeenCalled();
+    expect(e.deferUpdate).not.toHaveBeenCalled();
+    expect(json(e.editReply.mock.calls[0]![0])).toMatchObject({ allowedMentions: { parse: [] } });
     const modal = json(e.showModal.mock.calls[0]![0]);
     expect(modal).toMatchObject({ title: 'Criar canal de entrada', custom_id: `setup:v2:create:form:${ref.id}:1` });
     expect(modal.components.map((row: { components: unknown[] }) => row.components[0])).toEqual([
@@ -118,6 +120,62 @@ describe('private guided setup', () => {
     expect(f.drafts.get({ ...ref, revision: 2 }, context)).toMatchObject({ status: 'review', input: { name: 'Entrada @everyone', defaultUserLimit: Number(limit), categoryDiscordId: categoryId } });
     expect(json(e.editReply.mock.calls[0]![0]).allowedMentions).toEqual({ parse: [] });
     expect(f.createVoiceCreator).not.toHaveBeenCalled(); expect(f.configurations).toEqual([]);
+  });
+
+  it.each(['cancel', 'reselect'] as const)('keeps rendered controls usable after modal dismissal: %s', async (action) => {
+    const f = fixture(); const start = f.event('setup:v2:create:start');
+    await f.handler.execute(start.interaction);
+    const initial = json(start.editReply.mock.calls[0]![0]);
+    const select = f.event(initial.components[0].components[0].custom_id, 'category');
+    await f.handler.execute(select.interaction);
+    // Dismissal sends no event. Use only controls actually sent to the message.
+    const visible = select.editReply.mock.calls.length ? json(select.editReply.mock.calls.at(-1)![0]) : initial;
+    const formId: string = json(select.showModal.mock.calls[0]![0]).custom_id;
+    const id = formId.split(':')[4]!;
+    const next = f.event(visible.components[action === 'cancel' ? 1 : 0].components[0].custom_id, action === 'cancel' ? 'button' : 'category');
+    await f.handler.execute(next.interaction);
+    if (action === 'cancel') {
+      expect(next.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('cancelada'), components: [] }));
+      expect(() => f.drafts.get({ id, revision: 1 }, context)).toThrow();
+    } else {
+      expect(next.showModal).toHaveBeenCalledOnce();
+      expect(json(next.showModal.mock.calls[0]![0]).custom_id).toBe(`setup:v2:create:form:${id}:2`);
+      const old = f.event(formId, 'form'); await f.handler.execute(old.interaction);
+      expect(old.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('expirou') }));
+      expect(f.drafts.get({ id, revision: 2 }, context).status).toBe('editing');
+    }
+    expect(f.createVoiceCreator).not.toHaveBeenCalled(); expect(f.configurations).toEqual([]);
+  });
+
+  it.each(['retry', 'cancel'] as const)('recovers from invalid submission through rendered editing controls: %s', async (action) => {
+    const f = fixture(); const start = f.event('setup:v2:create:start'); await f.handler.execute(start.interaction);
+    const initial = json(start.editReply.mock.calls[0]![0]);
+    const select = f.event(initial.components[0].components[0].custom_id, 'category'); await f.handler.execute(select.interaction);
+    const visible = select.editReply.mock.calls.length ? json(select.editReply.mock.calls.at(-1)![0]) : initial;
+    const formId: string = json(select.showModal.mock.calls[0]![0]).custom_id;
+    const invalid = f.event(formId, 'form', { name: 'Entrada', 'default-limit': '100' });
+    await f.handler.execute(invalid.interaction);
+    expect(invalid.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }));
+    const next = f.event(visible.components[action === 'cancel' ? 1 : 0].components[0].custom_id, action === 'cancel' ? 'button' : 'category');
+    await f.handler.execute(next.interaction);
+    if (action === 'cancel') {
+      expect(next.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('cancelada'), components: [] }));
+      expect(() => f.drafts.get({ id: formId.split(':')[4]!, revision: 1 }, context)).toThrow();
+    } else {
+      expect(next.showModal).toHaveBeenCalledOnce();
+      const retryId: string = json(next.showModal.mock.calls[0]![0]).custom_id;
+      expect(retryId).not.toBe(formId);
+      const stale = f.event(formId, 'form'); await f.handler.execute(stale.interaction);
+      expect(stale.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('expirou') }));
+      const corrected = f.event(retryId, 'form', { name: '  Corrigido  ', 'default-limit': '9' });
+      await f.handler.execute(corrected.interaction);
+      const review = json(corrected.editReply.mock.calls[0]![0]);
+      expect(review.components[0].components[0].label).toBe('Confirmar criação');
+      expect(f.drafts.get({ id: retryId.split(':')[4]!, revision: 3 }, context)).toMatchObject({ status: 'review', input: { name: 'Corrigido', defaultUserLimit: 9 } });
+      const cancel = f.event(review.components[0].components[2].custom_id); await f.handler.execute(cancel.interaction);
+      expect(cancel.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('cancelada'), components: [] }));
+    }
+    expect(f.createVoiceCreator).not.toHaveBeenCalled(); expect(f.create).not.toHaveBeenCalled();
   });
 
   it.each([{ name: '', 'default-limit': '4' }, { name: 'x'.repeat(101), 'default-limit': '4' }, ...['', '-1', '100', '1.5', '01'].map((limit) => ({ name: 'Entrada', 'default-limit': limit }))])('rejects invalid form without external work: %j', async (fields) => {

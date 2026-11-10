@@ -104,6 +104,13 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
               .setCustomId('default-limit').setLabel('Limite inicial das calls (0 = sem limite)')
               .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2)
               .setValue(String(updated.input.defaultUserLimit ?? 0)))));
+        acknowledged = true;
+        // Dismissing a modal emits no submit. Refresh the original private
+        // message after the modal ACK so its category/Cancel controls remain
+        // usable at the new revision, without accepting stale forms.
+        requirePrivateAdministrator(interaction);
+        const editing = this.drafts.get(updated, contextOf(interaction));
+        await interaction.editReply({ content: null, ...buildSetupCreationCategory(editing) });
         return;
       }
 
