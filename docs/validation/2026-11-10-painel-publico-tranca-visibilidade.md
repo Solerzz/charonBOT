@@ -1,11 +1,17 @@
-# Validação local — painel público, tranca e visibilidade
+# Validação e rollout — painel público, tranca e visibilidade
 
 ## Escopo e limites
 
-Task 5; baseline da operação da Task 4 com instrumentação, antes de remover o fetch.
-Somente fixtures e PostgreSQL local descartável. Nenhum Discord/Supabase real,
-restart, registro de comandos, alteração de cargos, push, merge ou hospedagem.
-Aceitação real e rollout: **PENDENTES de autorização separada**.
+**Estado após as autorizações posteriores:** PR #5 mesclado em `main`, rollout
+no `charon-dev` verificado e bot iniciado localmente no servidor de testes.
+Usuário aprovou visual e todos os botões, sem erros ou mensagens repetidas.
+Hospedagem permanente não realizada; reputação adiada pelo usuário.
+
+As seções de benchmark e gates abaixo preservam a evidência da implementação
+local: Task 5, baseline da Task 4 com instrumentação, somente fixtures e PostgreSQL
+descartável. Naquela etapa não houve operação real/publicação. O rollout posterior,
+separadamente autorizado, está registrado ao final; não constitui nova medição
+de latência nem uma nova execução dos gates nesta atualização documental.
 
 ## Benchmark reproduzível de fronteiras (não é latência do Discord)
 
@@ -159,8 +165,9 @@ Gates completos desta onda, uma execução de cada gate antes do commit:
 
 Autorrevisão: recuperação permanece sob o coordenador existente, antes das últimas
 validações de presença/autoridade e CAS; não há lock novo nem transação SQL em REST.
-As integrações de fence/row-lock existentes permanecem verdes. Aceitação, latência,
-webhooks reais e rollout continuam **PENDENTES** no checklist seguinte.
+As integrações de fence/row-lock existentes passaram nessa rodada. Ao término
+dela, aceitação e rollout ainda aguardavam autorização; o estado posterior está
+registrado ao final. Latência e expiração real dos webhooks não foram medidas.
 
 ## Revisão independente e gates finais do controlador
 
@@ -185,7 +192,7 @@ Os traces JSON de teste são esperados; os três erros de compensação estão
 capturados e afirmados. Nenhum teste iniciou bot ou acessou Discord/Supabase real.
 O PostgreSQL descartável próprio é desligado limpo ao encerrar a validação; seus
 dados privados ficam preservados para eventual reprodução. O worktree, histórico
-e relatórios locais são preservados enquanto a integração da branch é decidida.
+e relatórios locais foram preservados; a integração posterior está registrada abaixo.
 
 ### Decisões registradas durante a execução
 
@@ -210,20 +217,55 @@ Artefatos de auditoria desta execução permanecem no workspace ignorado
 ledger, relatórios, pacotes de diff e revisão final. Nenhuma limpeza de diretório
 de usuário ou worktree foi realizada.
 
-## Aceitação real e rollout — PENDENTES de autorização separada
+## Integração Git e rollout autorizados — concluídos em 2026-11-10
 
-1. Confirmar destino/processo, backup privado e autorização para a quinta migration
-   no Supabase; conferir histórico/checksums e aplicar somente a nova migration.
-   Verificar backfill/default/NOT NULL/RLS/dados/TLS independentemente. Nunca usar
-   prepare/grants/testes de escrita remotos.
-2. Autorizar restart local; parar pelo stopFile existente e confirmar PID/comando
-   e encerramento antes de iniciar outra instância. Nunca executar `isLocked`
-   contra banco não migrado. Comandos somente no servidor de teste; globais zero.
-3. Conferir painel real desktop/celular, linhas, nome único, labels e ausência de
-   “pensando”/sucessos repetidos; modais, erro privado, reuso/expiração da área
-   privada e limitação nativa de modal sem origem.
-4. Testar as quatro combinações com membro comum, participante e autorizado;
-   saída/próximo dono/sala vazia/setup on-off e manutenção dos estados. Incluir
-   membro comum sem bypass Administrator; não modificar cargos automaticamente.
-5. Coletar amostras/durações reais e rate limits, distinguindo reconhecimento,
-   conclusão e painel. Hospedagem permanece fora do escopo, reservada ao fim.
+O usuário autorizou publicar o PR e fazer o merge, depois autorizou expressamente
+novo backup, única migration pendente e reinício local. Essa autorização não
+incluiu hosting/cobrança, comandos globais ou mudança de cargos.
+
+| Marco | Evidência registrada |
+| --- | --- |
+| Integração | [PR #5](https://github.com/Solerzz/charonBOT/pull/5), merge `b67f47538b5f516cea36b9d9b48bbeed2bbca3e4`; árvore do produto igual ao checkpoint testado |
+| CI | `verify` e `local-database` aprovados [antes](https://github.com/Solerzz/charonBOT/actions/runs/42908451380) e [depois do merge](https://github.com/Solerzz/charonBOT/actions/runs/42908656214) nos SHAs correspondentes |
+| Backup novo | Arquivo privado de 23.956 bytes, owner/SYSTEM somente; schema/dados/histórico public, TOC e parse completo offline; SHA256 `43b364e9855c098df9acfc49bd11f9f73f3b9010d75d42fdadc8cfafe999f084`. Não é backup integral dos schemas geridos/roles do Supabase |
+| Migration | Somente `20261110020000_room_lock_state` aplicada no `charon-dev`; cinco migrations concluídas/checksums corretos, Prisma status atualizado; TLS verificado, boolean NOT NULL default false e backfill confirmados |
+| Preservação | Hashes/counts das cinco tabelas de negócio iguais antes/depois, excluindo somente `isLocked`; baseline de duas configurações/duas salas, uma privada convertida para trancada. RLS nas seis tabelas/zero policies preservados; anon/authenticated sem exposição nos probes read-only |
+
+Health pós-DDL sem achados; INFOs preexistentes de RLS sem policies e índices
+continuam fora deste escopo. Dados comparados **antes** de iniciar o gateway,
+pois a reconciliação normal pode atualizar versões/presenças/painéis e encerrar
+salas vazias. Nenhum fixture, grant de teste ou suite mutante rodou remotamente.
+
+Preflight Discord confirmou **Charon** somente em **Teste de bot**, permissões
+necessárias presentes, `/setup` e `/status` guild-only, zero comandos globais.
+O PID antigo estava ausente; não foi necessário matar/parar processo. Um único
+processo local novo ficou ready, com identidade conferida e log `Charon started`
+sem entradas error. Isso é evidência de startup, não sondagem contínua de uptime.
+Não houve alteração de cargos, registro de comandos ou hospedagem permanente.
+
+Recibos operacionais privados permanecem no workspace ignorado
+`.superpowers/validation/painel-publico/`: backup, tentativa da migration,
+verificação independente, preflight, estado/log de startup e ledger. Credenciais,
+URLs de conexão completas, dados de negócio e caminhos privados de backup não
+são necessários neste documento. Não repetir migration/start ao retomar.
+
+## Aceitação humana — aprovada no escopo relatado
+
+O usuário confirmou “ficou bom”, depois “sim, funcionou” para trancar sem ocultar.
+Informou “eu testei todos botões” e respondeu “sim” à confirmação de que todos
+funcionaram como esperado, sem erros nem mensagens repetidas. Registra-se aceite
+do visual e dos botões no servidor real de testes, **declarado pelo usuário**.
+
+Não extrapolar essa confirmação para testes que não foram relatados:
+
+1. Renderização separada em desktop/celular e expiração real dos handles privados.
+2. Matriz completa de acesso com não administrador, autorizado e participante,
+   saídas/reentrada, sucessão de dono e setup on/off. Administrator continua
+   ignorando denies nativos; não alterar cargos automaticamente para testar.
+3. Todos os limites extremos, inputs inválidos, falhas parciais e concorrência
+   no Discord real; as regressões automatizadas são evidência distinta.
+4. Durações reais por etapa/amostra e rate limits; o benchmark acima é simulado.
+
+**Decisão posterior do usuário:** reputação fica para outro dia. Hospedagem
+permanece para o final do projeto. Este fechamento é documental; não altera bot,
+banco, permissões ou processos e não cria tag/GitHub Release.
