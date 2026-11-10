@@ -6,6 +6,27 @@ import { deferred } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 
 describe('RoomControlsService', () => {
+  it.each(['PUBLIC', 'PRIVATE'] as const)('keeps visibility %s when toggling the lock and the lock when toggling visibility', async (visibility) => {
+    const f = roomSettingsFixture(); f.state().room.visibility = visibility;
+    await f.controls.toggleLock(f.actor(), f.gateway);
+    expect(f.state().room).toMatchObject({ isLocked: true, visibility });
+    await f.controls.toggleVisibility(f.actor(), f.gateway);
+    expect(f.state().room).toMatchObject({ isLocked: true, visibility: visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC' });
+    await f.controls.toggleLock(f.actor(), f.gateway);
+    expect(f.state().room.isLocked).toBe(false);
+  });
+
+  it.each(['lock', 'visibility'] as const)('serializes two concurrent toggles with %s without lost updates', async (second) => {
+    const f = roomSettingsFixture(); const entered = deferred(); const release = deferred();
+    const write = f.channel.permissionOverwrites.set.getMockImplementation()!;
+    f.channel.permissionOverwrites.set.mockImplementationOnce(async (input) => { await write(input); entered.resolve(); await release.promise; });
+    const first = f.controls.toggleLock(f.actor(), f.gateway); await entered.promise;
+    const next = second === 'lock' ? f.controls.toggleLock(f.actor(), f.gateway) : f.controls.toggleVisibility(f.actor(), f.gateway);
+    release.resolve(); await Promise.all([first, next]);
+    expect(f.state().room).toMatchObject(second === 'lock' ? { isLocked: false, visibility: 'PUBLIC' } : { isLocked: true, visibility: 'PRIVATE' });
+    expect(f.refreshes).toHaveLength(2);
+  });
+
   it.each([false, true])('rejects lock-only drift from %s without an ownership version change', async (isLocked) => {
     const f = roomSettingsFixture();
     f.state().room.isLocked = isLocked;
@@ -52,7 +73,7 @@ describe('RoomControlsService', () => {
   });
 
   it.each(['guild', 'owner', 'absent', 'bot', 'version', 'disabled', 'closed'] as const)('rejects unauthorized %s for every setting', async (cause) => {
-    for (const action of ['rename', 'limit', 'visibility', 'allow'] as const) {
+    for (const action of ['rename', 'limit', 'visibility', 'allow', 'toggleLock', 'toggleVisibility'] as const) {
       const f = roomSettingsFixture(); const actor = f.actor();
       const errors = { guild: 'ROOM_UNAVAILABLE', owner: 'NOT_OWNER', absent: 'NOT_PRESENT', bot: 'NOT_PRESENT', version: 'STALE_CONTROLS', disabled: 'CONTROLS_DISABLED', closed: 'ROOM_UNAVAILABLE' };
       if (cause === 'guild') actor.guildDiscordId = '82345678901234567';
@@ -65,6 +86,8 @@ describe('RoomControlsService', () => {
       const operation = action === 'rename' ? f.controls.rename(actor, 'New', f.gateway)
         : action === 'limit' ? f.controls.setLimit(actor, 1, f.gateway)
           : action === 'visibility' ? f.controls.setVisibility(actor, 'PRIVATE', f.gateway)
+            : action === 'toggleLock' ? f.controls.toggleLock(actor, f.gateway)
+            : action === 'toggleVisibility' ? f.controls.toggleVisibility(actor, f.gateway)
             : f.controls.setAllowed(actor, OTHER, true, f.gateway);
       await expect(operation).rejects.toMatchObject({ code: errors[cause] });
       expect(f.channel.name).toBe('Game'); expect(f.channel.userLimit).toBe(0); expect(f.projected()).toEqual([]);

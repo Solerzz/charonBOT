@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Client } from 'pg';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
 import type { RoomStateRepository } from '../../src/modules/calls/room-state.repository.js';
@@ -360,7 +360,7 @@ describe('room ownership database', () => {
           members: [OWNER, 'second-owner', 'target'].map((memberDiscordId) => ({ memberDiscordId, isBot: false })) } : null;
       },
       resolveMember: async (memberDiscordId) => ({ memberDiscordId, isBot: false }),
-      rename: unused, restoreName: unused, setLimit: unused, readAccess: unused, setPrivateAccess: unused, setPublicAccess: unused,
+      rename: unused, restoreName: unused, setLimit: unused, readAccess: unused, setRoomAccess: unused,
       restoreAccess: unused, sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,
     };
     const timers = new OwnershipTimers({ error: () => { throw new Error('Unexpected timer error'); } });
@@ -447,7 +447,7 @@ describe('room ownership database', () => {
     await f.client.temporaryRoom.update({ where: { id: f.first }, data: {
       guildDiscordId: boundaries.guild.id, channelDiscordId: boundaries.channel.id, ownerDiscordId: owner,
     } });
-    const access = new RoomAccessService(store);
+    const access = new RoomAccessService(store, boundaries.coordinator);
     const changed: RoomState[] = [];
     const controls = new RoomControlsService({ store, coordinator: boundaries.coordinator, access,
       onChangedLocked: async (id) => { changed.push((await f.store.read(id))!); } });
@@ -511,7 +511,7 @@ describe('room ownership database', () => {
     } finally { await f.cleanup(); }
   });
 
-  integrationTest('a guarded local CAS loss after permission writes restores private overwrites and commits no allowlist', async () => {
+  integrationTest('a changed SQL authority after permission writes requires reconciliation rather than restoring obsolete grants', async () => {
     const f = await fixture();
     const racingStore: RoomStateRepository = Object.create(f.store);
     racingStore.setAllowed = async (id, version, member, allowed) => {
@@ -522,13 +522,16 @@ describe('room ownership database', () => {
     try {
       await r.controls.setVisibility(r.actor(), 'PRIVATE', r.gateway);
       const previous = await r.gateway.readAccess(r.channel.id);
+      const restore = vi.spyOn(r.gateway, 'restoreAccess');
       await expect(r.controls.setAllowed(r.actor(), '72345678901234567', true, r.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
-      expect(await r.gateway.readAccess(r.channel.id)).toEqual(previous);
+      expect(restore).not.toHaveBeenCalled(); expect(r.access.isUncertain(f.first)).toBe(true);
       expect(await f.store.read(f.first)).toMatchObject({ room: { visibility: 'PRIVATE', controlVersion: 1 }, allowedMemberIds: [] });
       expect(r.changed).toHaveLength(1);
       await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
       const state = (await f.store.read(f.first))!;
       await r.access.synchronizeLocked(state, (await r.gateway.snapshot(r.channel.id))!, r.gateway);
+      expect(await r.gateway.readAccess(r.channel.id)).toEqual(previous);
+      expect(r.access.isUncertain(f.first)).toBe(false);
       expect((await f.store.read(f.first))?.room.visibility).toBe('PRIVATE');
     } finally { await f.cleanup(); }
   });

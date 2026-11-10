@@ -1,16 +1,52 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
+import { PermissionFlagsBits as P } from 'discord.js';
 import { Client } from 'pg';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
 import { PrismaRoomStateRepository } from '../../src/modules/calls/room-state.repository.js';
+import { RoomAccessService } from '../../src/modules/calls/room-access.service.js';
+import { RoomControlsService } from '../../src/modules/calls/room-controls.service.js';
+import { roomSettingsFixture } from '../unit/modules/calls/room-settings.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
 
 describe('independent room lock persistence', () => {
+  integrationTest('serializes independent toggles and confirms lost SQL replies with the real CAS and native projection', async () => {
+    assertDisposableDatabaseEnvironment();
+    const client = createPrismaClient({ url: process.env.DATABASE_URL!, directUrl: process.env.DIRECT_URL! });
+    const store = new PrismaRoomStateRepository(client); const f = roomSettingsFixture();
+    const creatorId = randomUUID(); const roomId = randomUUID();
+    const access = new RoomAccessService(store, f.coordinator);
+    const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: async () => {} });
+    const actor = { ...f.actor(), roomId };
+    try {
+      await client.voiceCreator.create({ data: { id: creatorId, guildDiscordId: f.guild.id, creatorChannelDiscordId: randomUUID(), categoryDiscordId: randomUUID() } });
+      await client.temporaryRoom.create({ data: { id: roomId, voiceCreatorId: creatorId, guildDiscordId: f.guild.id,
+        channelDiscordId: f.channel.id, ownerDiscordId: actor.memberDiscordId, name: 'Game', status: 'ACTIVE' } });
+      await Promise.all([controls.toggleLock(actor, f.gateway), controls.toggleVisibility(actor, f.gateway)]);
+      expect(await store.read(roomId)).toMatchObject({ room: { isLocked: true, visibility: 'PRIVATE' } });
+      await Promise.all([controls.toggleLock(actor, f.gateway), controls.toggleLock(actor, f.gateway)]);
+      expect(await store.read(roomId)).toMatchObject({ room: { isLocked: true, visibility: 'PRIVATE' } });
+      const commit = store.updateSettings.bind(store); const restore = vi.spyOn(f.gateway, 'restoreAccess');
+      vi.spyOn(store, 'updateSettings').mockImplementationOnce(async (...args) => { await commit(...args); throw new Error('lost SQL acknowledgement'); });
+      await controls.toggleVisibility(actor, f.gateway);
+      expect(await store.read(roomId)).toMatchObject({ room: { isLocked: true, visibility: 'PUBLIC' } });
+      const everyone = f.projected().find((p) => p.id === f.guild.id)!;
+      expect(everyone.allow.has([P.ViewChannel, P.SendMessages], false)).toBe(true);
+      expect(everyone.deny.has(P.Connect, false)).toBe(true); expect(restore).not.toHaveBeenCalled();
+      expect(access.isUncertain(roomId)).toBe(false);
+    } finally {
+      try {
+        await client.temporaryRoom.deleteMany({ where: { id: roomId } });
+        await client.voiceCreator.deleteMany({ where: { id: creatorId } });
+      } finally { await disconnectDatabase(client); }
+    }
+  }, 30_000);
+
   integrationTest('backfills only private rooms without changing existing values, RLS or public policies', async () => {
     assertDisposableDatabaseEnvironment();
     const migration = await readFile(new URL('../../prisma/migrations/20261110020000_room_lock_state/migration.sql', import.meta.url), 'utf8');

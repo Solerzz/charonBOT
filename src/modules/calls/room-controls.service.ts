@@ -33,6 +33,14 @@ export class RoomControlsService {
     await this.withOwned(actor, gateway, (state) => this.dependencies.access.setVisibilityLocked(actor, state, visibility, gateway));
   }
 
+  async toggleLock(actor: RoomActor, gateway: RoomDiscordGateway): Promise<void> {
+    await this.withOwned(actor, gateway, (state) => this.dependencies.access.applySettingsLocked(actor, state, { isLocked: !state.room.isLocked }, gateway));
+  }
+
+  async toggleVisibility(actor: RoomActor, gateway: RoomDiscordGateway): Promise<void> {
+    await this.withOwned(actor, gateway, (state) => this.dependencies.access.applySettingsLocked(actor, state, { visibility: state.room.visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC' }, gateway));
+  }
+
   async setAllowed(actor: RoomActor, memberId: string, allowed: boolean, gateway: RoomDiscordGateway): Promise<void> {
     await this.withOwned(actor, gateway, (state) => this.dependencies.access.setAllowedLocked(actor, state, memberId, allowed, gateway));
   }
@@ -46,11 +54,16 @@ export class RoomControlsService {
   }
 
   private async withOwned(actor: RoomActor, gateway: RoomDiscordGateway, work: (state: RoomState) => Promise<void>): Promise<void> {
-    const { store, coordinator, onChangedLocked } = this.dependencies;
+    const { store, coordinator, access, onChangedLocked } = this.dependencies;
     await safeRoomAction(() => coordinator.member(actor.guildDiscordId, actor.memberDiscordId, async () => {
       const initial = await store.read(actor.roomId);
       if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
       await coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
+        if (access.isUncertain(actor.roomId)) {
+          const snapshot = await safeRoomAction(() => gateway.snapshot(initial.room.channelDiscordId), 'DISCORD_FAILURE');
+          if (!snapshot) throw new RoomActionError('ROOM_UNAVAILABLE');
+          await access.synchronizeLocked(initial, snapshot, gateway);
+        }
         const { state } = await currentOwnedRoom(store, actor, gateway);
         if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);

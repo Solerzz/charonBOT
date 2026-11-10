@@ -31,7 +31,9 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
       return;
     }
     const { guildDiscordId, channelDiscordId } = state.room;
-    for (const departure of coordinator.pendingDepartures(guildDiscordId, channelDiscordId)) {
+    const departures = coordinator.pendingDepartures(guildDiscordId, channelDiscordId);
+    if (departures.length) access.markUncertain(roomId);
+    for (const departure of departures) {
       // Break only this member's continuity, retaining a verified online return
       // instant when known. The final live observation still owns the roster.
       await store.syncPresence(roomId, state.presences.filter((p) => p.memberDiscordId !== departure.memberId), new Date(), false);
@@ -81,6 +83,7 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
     transfers.synchronizePrompt(roomId, null);
   };
   const onChangedLocked: RoomChanged = async (roomId, gateway) => {
+    access.markUncertain(roomId);
     const state = await store.read(roomId);
     if (!state || state.room.status === 'CLOSED') {
       if (state) coordinator.retireRoom(state.room.guildDiscordId, state.room.channelDiscordId);
@@ -154,6 +157,9 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
           if (stopped) return;
           await coordinator.room(room.guildDiscordId, room.channelDiscordId, async () => {
             if (stopped) return;
+            // Startup has no confirmed native projection yet. A failed fetch
+            // must not let even non-access controls bypass reconciliation.
+            access.markUncertain(room.id);
             // Invalidate before uncertain Discord I/O: old menus never regain authority.
             if (!await store.invalidateControls(room.id, room.controlVersion)) throw new RoomActionError('STALE_CONTROLS');
             // Drop unverifiable offline continuity even if the upcoming fetch fails.

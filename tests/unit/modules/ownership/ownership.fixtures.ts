@@ -94,7 +94,7 @@ export function ownershipFixture() {
     snapshot: vi.fn(async (_id: string) => { await hooks.beforeSnapshot(); return structuredClone(live.snapshot); }),
     resolveMember: vi.fn(async (id: string) => structuredClone(live.snapshot?.members.find((m) => m.memberDiscordId === id) ?? null)),
     rename: unused, restoreName: unused, setLimit: unused, readAccess: unused,
-    setPrivateAccess: unused, setPublicAccess: unused, restoreAccess: unused,
+    setRoomAccess: unused, restoreAccess: unused,
     sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,
   } satisfies RoomDiscordGateway;
   const mutex = new KeyedMutex();

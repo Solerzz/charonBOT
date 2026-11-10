@@ -1,4 +1,4 @@
-import { type Guild } from 'discord.js';
+import { PermissionFlagsBits as P, type Guild } from 'discord.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaClient } from '../../../../src/core/database/prisma.js';
 import { createLogger } from '../../../../src/core/logger/logger.js';
@@ -62,23 +62,91 @@ function runtimeFixture() {
     editReply: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
   });
   const execute = (input: ReturnType<typeof interaction>) => handler.execute(input as unknown as CallInteraction);
-  const voiceService = new CallService({ findByChannel: async () => null } as never,
-    { findActiveByChannel: async () => structuredClone(f.state().room) } as unknown as TemporaryRoomRepository,
-    runtime, createLogger({ level: 'silent' }));
-  const voice = (member: string, leaving: boolean) => {
-    const gateway = Object.assign(Object.create(f.gateway) as object, {
-      getChannelMemberCount: () => f.states.size,
-      getMemberChannelDiscordId: () => f.states.get(member)?.channelId ?? null,
-    }) as unknown as CallDiscordGateway;
-    return voiceService.handleVoiceTransition({ ...entry, memberDiscordId: member,
-      oldChannelDiscordId: leaving ? f.channel.id : null, newChannelDiscordId: leaving ? null : f.channel.id }, gateway);
+  const roomRepository = {
+    findActiveByChannel: async (id: string) => id === f.channel.id && f.state().room.status !== 'CLOSED' ? structuredClone(f.state().room) : null,
+    findActiveByOwner: async (_guild: string, id: string) => f.state().room.ownerDiscordId === id ? structuredClone(f.state().room) : null,
+    beginClosing: async () => { Object.assign(f.state().room, { status: 'CLOSING', controlVersion: f.state().room.controlVersion + 1 }); return structuredClone(f.state().room); },
+    markClosed: async () => { Object.assign(f.state().room, { status: 'CLOSED', controlVersion: f.state().room.controlVersion + 1, closedAt: new Date() }); return structuredClone(f.state().room); },
   };
-  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice, timerFailures };
+  const voiceService = new CallService({ findByChannel: async (id: string) => id === creator.creatorChannelDiscordId ? creator : null } as never,
+    roomRepository as unknown as TemporaryRoomRepository,
+    runtime, createLogger({ level: 'silent' }));
+  const lifecycleGateway = (member: string) => Object.assign(Object.create(f.gateway) as object, {
+    getChannelMemberCount: (channelId: string) => [...f.states.values()].filter((s) => s.channelId === channelId).length,
+    getMemberChannelDiscordId: () => f.states.get(member)?.channelId ?? null,
+    moveMember: async () => { f.join(member); },
+    deleteChannel: (_id: string) => f.channel.delete(),
+  }) as unknown as CallDiscordGateway;
+  const voice = (member: string, leaving: boolean) => {
+    return voiceService.handleVoiceTransition({ ...entry, memberDiscordId: member,
+      oldChannelDiscordId: leaving ? f.channel.id : null, newChannelDiscordId: leaving ? null : f.channel.id }, lifecycleGateway(member));
+  };
+  const reuse = async () => {
+    f.states.set(OWNER, { channelId: creator.creatorChannelDiscordId });
+    await voiceService.handleVoiceTransition({ ...entry, memberDiscordId: OWNER, oldChannelDiscordId: null,
+      newChannelDiscordId: creator.creatorChannelDiscordId }, lifecycleGateway(OWNER));
+  };
+  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice, reuse, timerFailures };
 }
 
 afterEach(() => { vi.useRealTimers(); });
 
 describe('application-owned room runtime', () => {
+  it('blocks settings when an ownership change cannot confirm the native access projection', async () => {
+    const f = runtimeFixture(); f.join(OTHER); f.state().room.visibility = 'PRIVATE'; await f.observe();
+    const pending = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
+    const finish = f.store.finishTransfer.getMockImplementation()!;
+    vi.mocked(f.runtime.store.finishTransfer).mockImplementationOnce(async (...args) => {
+      const result = await finish(...args); f.guild.channels.fetch.mockRejectedValueOnce(new Error('ownership projection unavailable')); return result;
+    });
+    await expect(f.runtime.transfers.confirm(f.actor(), pending.id, f.gateway)).rejects.toThrow();
+    expect(f.state().room.ownerDiscordId).toBe(OTHER);
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(true);
+    f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('projection unavailable'));
+    await expect(f.runtime.controls.rename(f.actorFor(OTHER), 'Blocked', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.channel.setName).not.toHaveBeenCalled();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('requires successful access reconciliation after an uncertain startup before admitting controls', async () => {
+    const f = runtimeFixture(); f.state().room.isLocked = true;
+    f.guild.channels.fetch.mockRejectedValueOnce(new Error('startup unavailable'));
+    await f.runtime.start(f.resolveGuild);
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(true);
+    f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('access unavailable'));
+    await expect(f.runtime.controls.rename(f.actor(), 'Blocked', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.channel.setName).not.toHaveBeenCalled();
+    await f.runtime.controls.rename(f.actor(), 'Verified', f.gateway);
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(false);
+    expect(f.projected().find((p) => p.id === f.guild.id)!.deny.has(P.Connect, false)).toBe(true);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([
+    { isLocked: true, visibility: 'PUBLIC' }, { isLocked: false, visibility: 'PRIVATE' }, { isLocked: true, visibility: 'PRIVATE' },
+  ] as const)('keeps $visibility / $isLocked through restart, reuse, setup and ownership lifecycle', async (policy) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); Object.assign(f.state().room, policy); f.join(OTHER); f.join(OLDEST);
+    await f.runtime.start(f.resolveGuild); await f.reuse();
+    expect(f.states.get(OWNER)?.channelId).toBe(f.channel.id);
+    expect(f.state().room).toMatchObject(policy);
+    const pending = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
+    await f.runtime.transfers.confirm(f.actor(), pending.id, f.gateway);
+    expect(f.state().room.ownerDiscordId).toBe(OTHER);
+    f.leave(OWNER); f.leave(OTHER); await f.voice(OTHER, true);
+    expect(f.state().room).toMatchObject({ ...policy, ownerDiscordId: null, priorityMemberDiscordId: OLDEST, priorityExpiresAt: new Date(300_000) });
+    expect(f.projected().some((p) => p.id === OWNER || p.id === OTHER)).toBe(false);
+    await f.toggle(false); await f.toggle(true);
+    expect(f.state().room).toMatchObject(policy);
+    await f.runtime.ownership.claim(f.actorFor(OLDEST), f.gateway);
+    expect(f.state().room).toMatchObject({ ...policy, ownerDiscordId: OLDEST });
+    f.leave(OLDEST); await f.voice(OLDEST, true);
+    expect(f.channel.delete).toHaveBeenCalledOnce(); expect(f.state().room.status).toBe('CLOSED');
+    expect(f.state().room).toMatchObject(policy);
+    expect(f.member.voice.setChannel).not.toHaveBeenCalled();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
   it('propagates a direct manual refresh discovery error without scheduling recovery', async () => {
     const f = runtimeFixture(); const failure = new Error('private-manual-query');
     vi.mocked(f.runtime.store.read).mockRejectedValueOnce(failure);
@@ -318,7 +386,7 @@ describe('application-owned room runtime', () => {
     await f.runtime.stop(); await f.database.$disconnect();
   });
 
-  it.each(['name', 'visibility', 'allowed'] as const)('does not commit %s when the owner leaves/returns during its native write', async (setting) => {
+  it.each(['name', 'visibility', 'allowed', 'lock'] as const)('does not commit %s when the owner leaves/returns during its native write', async (setting) => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.join(OTHER); await f.observe();
     const entered = deferred(); const release = deferred();
@@ -329,13 +397,14 @@ describe('application-owned room runtime', () => {
     }
     const changing = setting === 'name' ? f.runtime.controls.rename(f.actor(), 'New', f.gateway)
       : setting === 'visibility' ? f.runtime.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway)
+      : setting === 'lock' ? f.runtime.controls.toggleLock(f.actor(), f.gateway)
       : f.runtime.controls.setAllowed(f.actor(), OTHER, true, f.gateway);
     const rejected = expect(changing).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
     await entered.promise;
     f.leave(OWNER); const leaving = f.voice(OWNER, true);
     f.join(OWNER); const returning = f.voice(OWNER, false);
     release.resolve(); await rejected; await Promise.all([leaving, returning]);
-    expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 1, name: 'Game', visibility: setting === 'allowed' ? 'PRIVATE' : 'PUBLIC' });
+    expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 1, name: 'Game', isLocked: false, visibility: setting === 'allowed' ? 'PRIVATE' : 'PUBLIC' });
     expect(f.state().allowedMemberIds).toEqual([]); expect(f.channel.name).toBe('Game');
     await f.runtime.stop(); await f.database.$disconnect();
   });

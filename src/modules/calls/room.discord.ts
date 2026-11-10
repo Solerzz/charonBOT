@@ -6,7 +6,7 @@ import {
 import { discordIdSchema } from '../setup/setup.schemas.js';
 import type { CallPanelPayload } from './call-panel.view.js';
 import { temporaryRoomNameSchema } from './call.schemas.js';
-import { RoomActionError, type RoomDiscordGateway, type RoomMember, type RoomSnapshot } from './room.types.js';
+import { RoomActionError, type RoomAccessPolicy, type RoomDiscordGateway, type RoomMember, type RoomSnapshot } from './room.types.js';
 
 export type { RoomDiscordGateway } from './room.types.js';
 
@@ -72,16 +72,18 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
     return this.checked(async () => this.overwrites(await this.requireChannel(channelId)));
   }
 
-  setPrivateAccess(channelId: string, allowedIds: string[]): Promise<void> {
+  setRoomAccess(channelId: string, policy: RoomAccessPolicy, allowedIds: string[]): Promise<void> {
     return this.checked(async () => {
+      if (typeof policy.isLocked !== 'boolean' || !['PUBLIC', 'PRIVATE'].includes(policy.visibility)) throw new RangeError('Invalid room access policy');
       const { channel, bot } = await this.authorized(channelId, [P.ViewChannel, P.ManageRoles]);
       const allowed = new Set(allowedIds.map((id) => discordIdSchema.parse(id)));
       if (allowed.has(this.guild.roles.everyone.id)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'INCOMPATIBLE_OVERWRITES');
       allowed.add(bot.id);
+      const restricted = policy.visibility === 'PRIVATE' ? accessBits : policy.isLocked ? P.Connect : 0n;
       const previous = this.overwrites(channel);
       const projected = new Map(previous.map((overwrite) => [overwrite.id, overwrite]));
       for (const overwrite of previous) {
-        if (overwrite.id === this.guild.id || (overwrite.type === OverwriteType.Member && allowed.has(overwrite.id)) || !(overwrite.allow & accessBits)) continue;
+        if (overwrite.id === this.guild.id || (overwrite.type === OverwriteType.Member && allowed.has(overwrite.id))) continue;
         // A complete member access projection is compatible with our managed
         // allow set, including after restart. Revoke only its access bits when
         // the member leaves that set; retain any unrelated grants/denies.
@@ -93,24 +95,14 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
         }
         // Role allows override @everyone denies. An unlisted member allow does
         // too. Never report privacy while leaving such an external grant open.
+        if (!(overwrite.allow & restricted)) continue;
         const administrator = overwrite.type === OverwriteType.Role
           ? (await this.guild.roles.fetch(overwrite.id, { force: true }))?.permissions.has(P.Administrator)
           : (await this.fetchMember(overwrite.id))?.permissions.has(P.Administrator);
         if (!administrator) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'INCOMPATIBLE_OVERWRITES');
       }
-      this.project(projected, this.guild.roles.everyone.id, OverwriteType.Role, 0n, accessBits);
+      this.project(projected, this.guild.roles.everyone.id, OverwriteType.Role, accessBits & ~restricted, restricted);
       for (const id of allowed) this.project(projected, id, OverwriteType.Member, id === bot.id ? botBits : accessBits, 0n);
-      if (projected.size > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'OVERWRITE_CAPACITY');
-      await channel.permissionOverwrites.set([...projected.values()]);
-    });
-  }
-
-  setPublicAccess(channelId: string): Promise<void> {
-    return this.checked(async () => {
-      const { channel, bot } = await this.authorized(channelId, [P.ViewChannel, P.ManageRoles]);
-      const projected = new Map(this.overwrites(channel).map((overwrite) => [overwrite.id, overwrite]));
-      this.project(projected, this.guild.roles.everyone.id, OverwriteType.Role, accessBits, 0n);
-      this.project(projected, bot.id, OverwriteType.Member, botBits, 0n);
       if (projected.size > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'OVERWRITE_CAPACITY');
       await channel.permissionOverwrites.set([...projected.values()]);
     });
