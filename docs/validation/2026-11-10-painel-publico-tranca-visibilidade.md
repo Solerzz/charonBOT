@@ -162,6 +162,54 @@ validações de presença/autoridade e CAS; não há lock novo nem transação S
 As integrações de fence/row-lock existentes permanecem verdes. Aceitação, latência,
 webhooks reais e rollout continuam **PENDENTES** no checklist seguinte.
 
+## Revisão independente e gates finais do controlador
+
+Produto final verificado no commit `5d4af1afce775e772d52940bde1a2eff2cc29f9f`,
+na branch `feature/painel-publico-tranca-visibilidade`. Cinco gates independentes
+por tarefa, correções com regressões e revisão whole-branch foram realizados.
+Revisão final: I1, M1 e M2 **ADDRESSED**, nenhuma quebra nova ou observação fora do
+escopo; **Ready to merge: Yes** no escopo do código local, não de produção.
+
+O controlador executou novamente estes comandos em 2026-11-10, 18:38 local,
+**após** a scoped re-review; não são apenas resultados herdados dos implementadores:
+
+| Gate independente | Resultado observado |
+| --- | --- |
+| Opt-ins de banco false; `npm run test:run -- --silent=false` | **1.259 testes aprovados**, 45 integrações puladas intencionalmente; 46 arquivos aprovados, 6 pulados, zero falhos; exit 0 |
+| Launcher local guardado → Vitest `tests/integration --maxWorkers=1` | **45/45 aprovados**, 6 arquivos, zero falhos/pulados; exit 0 |
+| `npm run typecheck` / `npm run build` | exit 0 / exit 0 |
+| Launcher local guardado → Prisma migrate status / deploy | Cinco migrations locais atualizadas; nenhuma pendente; novo deploy sem alteração, exit 0 |
+| `git diff --check` | exit 0; somente avisos preexistentes de normalização dos arquivos do grafo |
+
+Os traces JSON de teste são esperados; os três erros de compensação estão
+capturados e afirmados. Nenhum teste iniciou bot ou acessou Discord/Supabase real.
+O PostgreSQL descartável próprio é desligado limpo ao encerrar a validação; seus
+dados privados ficam preservados para eventual reprodução. O worktree, histórico
+e relatórios locais são preservados enquanto a integração da branch é decidida.
+
+### Decisões registradas durante a execução
+
+1. Reutilizar o worktree já isolado e criar a branch a partir do main mesclado,
+   preservando o grafo dirty. Custo se inadequado: isolamento por diretório não é
+   adicional; nenhum trabalho existente foi descartado.
+2. Usar o modelo padrão disponível para os papéis, sem trocar de provedor/chave
+   ou contratar recursos extras. Custo: limite de uso pode interromper um dispatch;
+   a única tentativa bloqueada não alterou arquivos antes da retomada.
+3. Revisores somente leem o produto e escrevem o próprio relatório local.
+   Custo: correções precisam voltar ao implementador e passar por nova revisão.
+4. Fazer commit local após testes/autorrevisão e revisar o diff commitado antes
+   da tarefa seguinte. Custo: correções ficam em commits adicionais, sem publicação.
+5. Ampliar cirurgicamente o contrato de persistência para cercar SQL indeterminado
+   pela geração existente. Custo: após falha indeterminada, controles/transferência
+   antigos podem ser invalidados e exigir novo clique; nunca abrir a sala por fallback.
+6. Corrigir os dois Minor confirmados na única onda final, junto do I1.
+   Custo: testes/revisão adicionais; sem novas funcionalidades ou infraestrutura.
+
+Artefatos de auditoria desta execução permanecem no workspace ignorado
+`.superpowers/sdd/2026-11-10-charon-painel-publico-tranca-visibilidade/`, incluindo
+ledger, relatórios, pacotes de diff e revisão final. Nenhuma limpeza de diretório
+de usuário ou worktree foi realizada.
+
 ## Aceitação real e rollout — PENDENTES de autorização separada
 
 1. Confirmar destino/processo, backup privado e autorização para a quinta migration

@@ -1,6 +1,6 @@
 # Charon — painel público, tranca e visibilidade independentes
 
-**Estado:** visual v2 e desenho funcional/técnico aprovados pelo usuário em 2026-11-10, após revisão independente sem questões bloqueantes. Plano de implementação em preparação; nenhuma alteração de produto ou migration foi executada nesta etapa.
+**Estado:** visual v2, desenho e plano aprovados pelo usuário em 2026-11-10. Implementação local concluída na branch `feature/painel-publico-tranca-visibilidade`, com revisão independente por tarefa e revisão final aprovada após correções. Gates finais do controlador: 1.259 testes comuns, 45 integrações locais, typecheck e build aprovados. Migration aplicada somente ao banco descartável local; Supabase, bot real, aceitação Discord e publicação permanecem pendentes de autorização. Evidência em `docs/validation/2026-11-10-painel-publico-tranca-visibilidade.md`.
 
 ## 1. Objetivo e origem
 

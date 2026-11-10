@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-10-charon-painel-publico-tranca-visibilidade-design.md`, aprovado pelo usuário. Ler também as regras preservadas em `2026-11-08-charon-v0.3.0-posse-controles-design.md`.
 
+**Execução local (2026-11-10): concluída.** As cinco tarefas foram implementadas e revisadas; a revisão final foi aprovada após uma onda consolidada de correções. Os checklists de passos abaixo preservam o plano entregue aos agentes; o ledger local registra a execução e a validação versionada contém a evidência final. Integração Git e aceitação/rollout reais aguardam decisão/autorização separada.
+
 ## Global Constraints
 
 - “Controles públicos; somente o dono pode alterar a sala.” Autorizado de entrada não ganha gestão. **Assumir sala** mantém a exceção e elegibilidade atuais.
@@ -231,6 +233,6 @@ O documento de validação deve deixar estes itens **pendentes**, não executá-
 
 ## Handoff
 
-Execução preservada: **subagente implementador por tarefa + revisão independente antes da próxima + revisão final**. Após autorrevisão, enviar este plano ao usuário e aguardar confirmação de que contempla o desejado. Só então carregar `subagent-driven-development` e `using-git-worktrees` e começar a Task 1.
+Execução realizada: **subagente implementador por tarefa + revisão independente antes da próxima + revisão final**, após confirmação explícita do plano pelo usuário. Checkpoint de produto final `5d4af1a`; evidência e limitações em `docs/validation/2026-11-10-painel-publico-tranca-visibilidade.md`. Próximo handoff: escolher integração da branch; não inferir autorização para push/merge ou operações reais.
 
 Referências de API: [Discord — reconhecimento em três segundos e tokens de quinze minutos](https://docs.discord.com/developers/interactions/receiving-and-responding). O índice devolveu páginas SDK 14.26.2; os contratos foram conferidos na instalação **14.28.1**, em `node_modules/discord.js/typings/index.d.ts:3045-3077` (`followUp`, `deferUpdate`, `isFromMessage`) e `5298-5311` (`MessageManager.edit`). Essa conferência de assinatura não substitui testes/aceitação real; não alterar dependências para coincidir com a documentação indexada.
