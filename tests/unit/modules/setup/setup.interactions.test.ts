@@ -40,7 +40,7 @@ function fixture(action = 'toggle-commands', kind: Kind = 'button', values: stri
   const getVoiceChannel = vi.fn(async (id: string) => ({ id, name: id === second.creatorChannelDiscordId ? 'Segundo' : 'Criar sala', categoryDiscordId: first.categoryDiscordId }));
   const getCategory = vi.fn(async (id: string) => ({ id, name: 'Salas' }));
   const renameVoiceChannel = vi.fn().mockResolvedValue(undefined);
-  const gateway: SetupDiscordGateway = { assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel };
+  const gateway: SetupDiscordGateway = { assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel, createVoiceCreator: vi.fn(), deleteCreatedVoiceCreatorIfEmpty: vi.fn() };
   const factory = vi.fn<SetupDiscordGatewayFactory>().mockReturnValue(gateway);
   const reply = vi.fn().mockResolvedValue(undefined);
   const deferUpdate = vi.fn().mockResolvedValue(undefined);

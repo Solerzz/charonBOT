@@ -48,9 +48,9 @@
     "semantic_hash": ""
   },
   "src/core/discord/client.ts": {
-    "mtime": 1794191252.9441042,
-    "seen": 1794192269.0415382,
-    "ast_hash": "56e5d673404473f117b5901e77bb2b3c",
+    "mtime": 1794280770.5195298,
+    "seen": 1794280977.5303893,
+    "ast_hash": "ca26730ebc7d68cf9a62396cdb7487b2",
     "semantic_hash": ""
   },
   "src/core/discord/interactions/interaction-handler.ts": {
@@ -324,9 +324,9 @@
     "semantic_hash": ""
   },
   "src/modules/setup/setup.discord.ts": {
-    "mtime": 1794191252.9566283,
-    "seen": 1794192269.0415382,
-    "ast_hash": "c67f5b45e15ea5649550a1140517ac5b",
+    "mtime": 1794280770.5195298,
+    "seen": 1794280977.5406337,
+    "ast_hash": "ca5db36b870a893c27a49b49d20cf98b",
     "semantic_hash": ""
   },
   "src/modules/setup/setup.views.ts": {
@@ -342,9 +342,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.discord.test.ts": {
-    "mtime": 1794191252.9712892,
-    "seen": 1794192269.0415382,
-    "ast_hash": "3cef8e535b1c7fcf28a65f74775fb475",
+    "mtime": 1794280852.537481,
+    "seen": 1794280977.550823,
+    "ast_hash": "851d287ea4f8ebf7a67ef18edfc59048",
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.views.test.ts": {
@@ -360,9 +360,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.interactions.test.ts": {
-    "mtime": 1794279230.7375062,
-    "seen": 1794279285.4121654,
-    "ast_hash": "ed69fd3cbcca054eb09766466e4e8a47",
+    "mtime": 1794280770.5216446,
+    "seen": 1794280977.550823,
+    "ast_hash": "bccaf94fd6fbc3caad8572aad790355a",
     "semantic_hash": ""
   },
   "src/modules/calls/call-panel.view.ts": {
@@ -777,6 +777,24 @@
     "mtime": 1794280001.6505752,
     "seen": 1794280099.1174471,
     "ast_hash": "5ae1102ae837293ebf5e3b3fc7058d46",
+    "semantic_hash": ""
+  },
+  "src/modules/setup/setup-creation.service.ts": {
+    "mtime": 1794280876.0246081,
+    "seen": 1794280977.5396128,
+    "ast_hash": "a1b494426bbdd5e44a40018d615c8fec",
+    "semantic_hash": ""
+  },
+  "tests/unit/core/discord/client.test.ts": {
+    "mtime": 1794280804.181983,
+    "seen": 1794280977.5446796,
+    "ast_hash": "f266185012d6dfc6fef08fc8377ead7f",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/setup/setup-creation.service.test.ts": {
+    "mtime": 1794280852.5364769,
+    "seen": 1794280977.550823,
+    "ast_hash": "b2370810da335eafaf3e59281e3831d1",
     "semantic_hash": ""
   },
   "package-lock.json": {
