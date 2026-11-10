@@ -1,5 +1,6 @@
 import { KeyedMutex } from '../../shared/keyed-mutex.js';
 import { RoomActionError, type RoomState } from './room.types.js';
+import { recordCallStage } from './call-action.metrics.js';
 
 type OwnershipAttempt = { version: number; nextOwner: string | null };
 type Departure = { memberId: string; isBot: boolean; generation: number; leftAt: Date; returnedAt?: Date; attempt: OwnershipAttempt | undefined };
@@ -97,10 +98,18 @@ export class RoomCoordinator {
   }
 
   member<T>(guildId: string, memberId: string, work: () => Promise<T>): Promise<T> {
-    return this.accept(guildId, () => this.mutex.runExclusive(`${guildId}:${memberId}`, work));
+    const queued = performance.now();
+    return this.accept(guildId, () => this.mutex.runExclusive(`${guildId}:${memberId}`, () => {
+      recordCallStage('queue', performance.now() - queued);
+      return work();
+    }));
   }
 
   room<T>(guildId: string, channelId: string, work: () => Promise<T>): Promise<T> {
-    return this.accept(guildId, () => this.mutex.runExclusive(`room:${guildId}:${channelId}`, work));
+    const queued = performance.now();
+    return this.accept(guildId, () => this.mutex.runExclusive(`room:${guildId}:${channelId}`, () => {
+      recordCallStage('queue', performance.now() - queued);
+      return work();
+    }));
   }
 }

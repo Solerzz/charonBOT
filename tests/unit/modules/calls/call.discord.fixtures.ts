@@ -11,7 +11,7 @@ export function discordFixture() {
     id: room.channelDiscordId, guildId: creator.guildDiscordId, type: ChannelType.GuildVoice, parentId: creator.categoryDiscordId, name: 'Game', userLimit: 0,
     isThread: () => false,
     permissionsFor: vi.fn(() => rights), delete: vi.fn(async () => {}),
-    send: vi.fn(async () => message), messages: { fetch: vi.fn(async () => message) },
+    send: vi.fn(async () => message), messages: { fetch: vi.fn(async () => message), edit: vi.fn(async (_id: string, _payload: unknown) => message) },
     setName: vi.fn(async (_name: string) => {}), setUserLimit: vi.fn(async (_limit: number) => {}),
     permissionOverwrites: { cache: new Collection<string, { id: string; type: number; allow: PermissionsBitField; deny: PermissionsBitField }>(), set: vi.fn(async (_overwrites: unknown) => {}) },
   };

@@ -1,5 +1,5 @@
 import { MessageFlags, MessageFlagsBitField, OverwriteType, PermissionFlagsBits as P, PermissionsBitField, type Interaction } from 'discord.js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { CallInteractions, type CallInteraction } from '../../../../src/modules/calls/call.interactions.js';
 import { encodeCallComponent, type CallComponent } from '../../../../src/modules/calls/call.schemas.js';
@@ -9,6 +9,10 @@ import { OWNER, OTHER } from '../ownership/ownership.fixtures.js';
 import { deferred } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 import { CallPrivateWorkspace } from '../../../../src/modules/calls/call-workspace.js';
+import { createLogger } from '../../../../src/core/logger/logger.js';
+import { PrismaRoomStateRepository } from '../../../../src/modules/calls/room-state.repository.js';
+import type { Prisma, PrismaClient } from '../../../../src/generated/prisma/client.js';
+import { creator } from './call.fixtures.js';
 
 function fixture() {
   const f = roomSettingsFixture();
@@ -16,7 +20,9 @@ function fixture() {
   const transfers = new TransferService({ ...f, onChangedLocked: f.onChangedLocked });
   const panels = new RoomPanelService(f);
   const workspaces = new CallPrivateWorkspace();
-  const handler = new CallInteractions({ ...f, ownership: f.service, transfers, panels, workspaces }, () => f.gateway);
+  const metricLines: string[] = [];
+  const logger = createLogger({ level: 'info', destination: { write: line => { metricLines.push(line); } } });
+  const handler = new CallInteractions({ ...f, ownership: f.service, transfers, panels, workspaces, logger }, () => f.gateway);
   const interaction = (action: CallComponent['action'], kind = 'button', member = OWNER) => {
     const component = { version: 'v3', action, roomId: f.state().room.id,
       ...(['confirm', 'undo'].includes(action) ? { operationId: f.state().transfer!.id } : { controlVersion: f.state().room.controlVersion }) } as CallComponent;
@@ -45,12 +51,97 @@ function fixture() {
     return i;
   };
   const execute = (i: ReturnType<typeof interaction>) => handler.execute(i as unknown as CallInteraction);
-  return { ...f, handler, transfers, workspaces, interaction, execute };
+  return { ...f, handler, transfers, panels, workspaces, interaction, execute, metricLines };
 }
 
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('CallInteractions real controllers', () => {
+  it.each(['lock', 'visibility', 'rename-save', 'limit-save'] as const)('benchmarks %s with identical virtual boundary delays and real controllers', async action => {
+    const samples: unknown[] = [];
+    for (let sample = 0; sample < 3; sample++) {
+      const f = fixture(); let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      // Real repository mapping/CAS, only its DB transport is simulated.
+      const findUnique = vi.fn(async () => {
+        now += 2; const s = f.state();
+        return { ...structuredClone(s.room), voiceCreator: { ...creator, roomCommandsEnabled: s.controlsEnabled },
+          presences: s.presences, allowedMembers: s.allowedMemberIds.map(memberDiscordId => ({ memberDiscordId })), pendingTransfer: s.transfer };
+      });
+      const updateMany = vi.fn(async ({ where, data }: Prisma.TemporaryRoomUpdateManyArgs) => {
+        now += 2; const s = f.state();
+        if (where?.id !== s.room.id || where.controlVersion !== s.room.controlVersion || !s.controlsEnabled || s.room.status !== 'ACTIVE') return { count: 0 };
+        Object.assign(s.room, data); return { count: 1 };
+      });
+      const repository = new PrismaRoomStateRepository({ temporaryRoom: { findUnique, updateMany } } as unknown as PrismaClient);
+      f.store.read.mockImplementation(id => repository.read(id));
+      f.store.updateSettings.mockImplementation((...args) => repository.updateSettings(...args));
+      f.onChangedLocked.mockImplementation(id => f.panels.synchronizeLocked(id, f.gateway));
+      const rest: Record<string, Mock> = {
+        channel: f.guild.channels.fetch, member: f.guild.members.fetch, bot: f.guild.members.fetchMe, role: f.guild.roles.fetch,
+        rename: f.channel.setName, limit: f.channel.setUserLimit, access: f.channel.permissionOverwrites.set,
+        messageFetch: f.channel.messages.fetch, messageEdit: f.message.edit, messageManagerEdit: f.channel.messages.edit,
+      };
+      for (const spy of Object.values(rest)) {
+        const original = spy.getMockImplementation()!;
+        spy.mockImplementation(async (...args) => { now += 5; return original(...args); });
+      }
+      const i = f.interaction(action, action.endsWith('-save') ? 'modal' : 'button');
+      if (action === 'limit-save') i.fields.getTextInputValue = () => '4';
+      i.deferUpdate.mockImplementation(async () => { now += 3; });
+      const held = deferred(); const release = deferred(); const queued = deferred();
+      const holder = f.coordinator.room(i.guildId, i.channelId, async () => { held.resolve(); await release.promise; });
+      await held.promise;
+      const originalRoom = f.coordinator.room.bind(f.coordinator);
+      const roomSpy = vi.spyOn(f.coordinator, 'room').mockImplementation((guild, channel, work) => {
+        queued.resolve(); return originalRoom(guild, channel, work);
+      });
+      const running = f.execute(i); await queued.promise; now += 7; release.resolve();
+      await Promise.all([holder, running]);
+      const trace = JSON.parse(f.metricLines[0]!);
+      expect(trace.result).toBe('success');
+      expect(trace.stages).toMatchObject({ ack: { count: 1, durationMs: 3 }, queue: { count: 2, durationMs: 7 }, persist: { count: 1, durationMs: 2 }, panel: { count: 1 } });
+      const accessAction = action === 'lock' || action === 'visibility';
+      expect(trace.durationMs).toBe(accessAction ? 157 : 133);
+      expect(findUnique).toHaveBeenCalledTimes(accessAction ? 10 : 8);
+      expect(updateMany).toHaveBeenCalledOnce();
+      expect(f.channel.messages.fetch).not.toHaveBeenCalled();
+      expect(f.channel.messages.edit).toHaveBeenCalledOnce();
+      expect(Object.values(rest).reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(accessAction ? 25 : 21);
+      expect(f.state().room).toMatchObject(action === 'lock' ? { isLocked: true } : action === 'visibility' ? { visibility: 'PRIVATE' } : action === 'rename-save' ? { name: 'New' } : { userLimit: 4 });
+      samples.push({ sample, action, durationMs: trace.durationMs, stages: trace.stages,
+        rest: Object.fromEntries(Object.entries(rest).map(([name, spy]) => [name, spy.mock.calls.length])),
+        db: { reads: findUnique.mock.calls.length, writes: updateMany.mock.calls.length } });
+      roomSpy.mockRestore(); await f.workspaces.stop(); await f.timers.stop();
+    }
+    if (process.env.CALL_ACTION_BENCHMARK === 'true') console.info(JSON.stringify({ benchmark: 'virtual-boundary-ms', samples }));
+  });
+  it('traces source ack and modal launch, and labels handled failures as error', async () => {
+    const f = fixture();
+    await f.execute(f.interaction('lock'));
+    await f.execute(f.interaction('rename'));
+    const failed = f.interaction('lock');
+    f.store.read.mockRejectedValueOnce(new Error('room-secret token-secret https://private.invalid'));
+    await f.execute(failed);
+    const invalid = f.interaction('lock'); invalid.customId = 'call:private-forged-token'; await f.execute(invalid);
+    const logs = f.metricLines.map(line => JSON.parse(line));
+    expect(logs).toHaveLength(4);
+    expect(logs[0]).toMatchObject({ action: 'lock', result: 'success', stages: { ack: { count: 1 }, queue: { count: 2 } } });
+    expect(logs[1]).toMatchObject({ action: 'rename', result: 'success', stages: { ack: { count: 1 } } });
+    expect(logs[2]).toMatchObject({ action: 'lock', result: 'error' });
+    expect(logs[3]).toMatchObject({ action: 'invalid', result: 'error', stages: { ack: { count: 1 } } });
+    for (const secret of ['room-secret', 'token-secret', 'private.invalid', 'private-forged-token', OWNER]) expect(f.metricLines.join('')).not.toContain(secret);
+    await f.workspaces.stop(); await f.timers.stop();
+  });
+  it('measures private workspace publication and direct webhook edits', async () => {
+    const f = fixture(); await f.execute(f.interaction('access'));
+    const select = f.interaction('allow-add', 'user'); select.values = [OTHER]; await f.execute(select);
+    const logs = f.metricLines.map(line => JSON.parse(line));
+    expect(logs).toHaveLength(2);
+    expect(logs[0]).toMatchObject({ action: 'access', result: 'success', stages: { panel: { count: 1 } } });
+    expect(logs[1]).toMatchObject({ action: 'allow-add', result: 'success', stages: { panel: { count: 1 } } });
+    await f.workspaces.stop(); await f.timers.stop();
+  });
   it('toggles lock publicly with source ack and no generic success', async () => {
     const f = fixture(); const publicLock = f.interaction('lock');
     await f.execute(publicLock);

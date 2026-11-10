@@ -17,6 +17,14 @@ function fixture() {
 function bits(value: OverwriteData['allow']) { return new PermissionsBitField(value).bitfield; }
 
 describe('DiscordRoomGateway', () => {
+  it('edits a panel by ID without fetching the message, retaining forced authority reads', async () => {
+    const f = fixture();
+    await f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel);
+    expect(f.channel.messages.fetch).not.toHaveBeenCalled();
+    expect(f.channel.messages.edit).toHaveBeenCalledExactlyOnceWith(room.controlMessageDiscordId!, panel);
+    expect(f.guild.channels.fetch).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, { force: true });
+    expect(f.guild.members.fetchMe).toHaveBeenCalledExactlyOnceWith({ force: true });
+  });
   it('accepts exactly 100 projected overwrites without dropping an authorized member', async () => {
     const f = fixture(); const allowed = Array.from({ length: 98 }, (_, i) => String(70000000000000000n + BigInt(i)));
     await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PUBLIC', isLocked: true }, allowed);
@@ -36,11 +44,9 @@ describe('DiscordRoomGateway', () => {
   });
   it('exposes only genuine unknown-message edits as replaceable, not forbidden or missing channels', async () => {
     const f = fixture();
-    f.channel.messages.fetch.mockRejectedValueOnce({ code: 10008 });
+    f.channel.messages.edit.mockRejectedValueOnce({ code: 10008 });
     await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'PANEL_MISSING' });
-    f.message.edit.mockRejectedValueOnce({ code: 10008 });
-    await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'PANEL_MISSING' });
-    f.channel.messages.fetch.mockRejectedValueOnce({ code: 50013 });
+    f.channel.messages.edit.mockRejectedValueOnce({ code: 50013 });
     await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
     f.guild.channels.fetch.mockRejectedValueOnce({ code: 10003 });
     await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'ROOM_UNAVAILABLE' });
@@ -189,6 +195,7 @@ describe('DiscordRoomGateway', () => {
     await expect(f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel)).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     await expect(f.gateway.deleteControlPanel(room.channelDiscordId, room.controlMessageDiscordId!)).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     expect(f.channel.send).not.toHaveBeenCalled(); expect(f.channel.messages.fetch).not.toHaveBeenCalled();
+    expect(f.channel.messages.edit).not.toHaveBeenCalled();
   });
   it('requires Manage Roles (not merely Manage Channels) and rejects capacity instead of truncating allowed users', async () => {
     const f = fixture(); f.channel.permissionsFor.mockReturnValue(new PermissionsBitField([P.ManageChannels, P.ViewChannel]));
@@ -224,7 +231,7 @@ describe('DiscordRoomGateway', () => {
     const f = fixture(); expect(await f.gateway.sendControlPanel(room.channelDiscordId, panel)).toBe(room.controlMessageDiscordId);
     await f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel);
     await f.gateway.deleteControlPanel(room.channelDiscordId, room.controlMessageDiscordId!);
-    expect(f.message.edit).toHaveBeenCalledExactlyOnceWith(panel); expect(f.message.delete).toHaveBeenCalledOnce();
+    expect(f.channel.messages.edit).toHaveBeenCalledExactlyOnceWith(room.controlMessageDiscordId!, panel); expect(f.message.delete).toHaveBeenCalledOnce();
     f.channel.messages.fetch.mockRejectedValueOnce({ code: 10008 });
     await expect(f.gateway.deleteControlPanel(room.channelDiscordId, room.controlMessageDiscordId!)).resolves.toBeUndefined();
     f.message.delete.mockRejectedValueOnce({ code: 10008 });

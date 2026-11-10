@@ -1,5 +1,8 @@
 import { MessageFlags, type ButtonInteraction, type Guild, type Interaction, type ModalSubmitInteraction, type StringSelectMenuInteraction, type UserSelectMenuInteraction } from 'discord.js';
 import { ZodError } from 'zod';
+import type { Logger } from 'pino';
+import { createLogger } from '../../core/logger/logger.js';
+import { markCallActionFailed, measureCallStage, runCallActionTrace } from './call-action.metrics.js';
 import type { InteractionHandler } from '../../core/discord/interactions/interaction-handler.js';
 import type { OwnershipService } from '../ownership/ownership.service.js';
 import type { TransferService } from '../ownership/transfer.service.js';
@@ -17,7 +20,7 @@ import { buildAccessPrompt, buildLimitModal, buildRenameModal, buildTransferProm
 import { acknowledgeCallAction, completeCallAction, replyCallFailure, type CallAckMode } from './call-interaction-response.js';
 
 export type CallInteraction = ButtonInteraction | StringSelectMenuInteraction | UserSelectMenuInteraction | ModalSubmitInteraction;
-type Dependencies = { store: RoomStateRepository; ownership: OwnershipService; transfers: TransferService; controls: RoomControlsService; panels: RoomPanelService; timers: OwnershipTimers; coordinator: RoomCoordinator; workspaces: CallPrivateWorkspace };
+type Dependencies = { store: RoomStateRepository; ownership: OwnershipService; transfers: TransferService; controls: RoomControlsService; panels: RoomPanelService; timers: OwnershipTimers; coordinator: RoomCoordinator; workspaces: CallPrivateWorkspace; logger?: Logger };
 
 const unavailable = 'Esta ação não está disponível para você ou expirou. Use os controles atuais da sua sala.';
 function failureMessage(error: unknown, invalidInput: string): string {
@@ -41,20 +44,27 @@ function failureMessage(error: unknown, invalidInput: string): string {
 }
 
 export class CallInteractions implements InteractionHandler<CallInteraction> {
-  constructor(private readonly dependencies: Dependencies, private readonly gatewayFactory: (guild: Guild) => RoomDiscordGateway) {}
+  private readonly logger: Logger;
+  constructor(private readonly dependencies: Dependencies, private readonly gatewayFactory: (guild: Guild) => RoomDiscordGateway) {
+    this.logger = dependencies.logger ?? createLogger({ level: 'info' });
+  }
   canHandle(interaction: Interaction): interaction is CallInteraction {
     return (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isUserSelectMenu() || interaction.isModalSubmit())
       && interaction.customId.startsWith('call:');
   }
 
   async execute(interaction: CallInteraction): Promise<void> {
+    const parsed = callComponentSchema.safeParse(interaction.customId);
+    return runCallActionTrace(this.logger, parsed.success ? parsed.data.action : 'invalid', () => this.executeTraced(interaction, parsed));
+  }
+
+  private async executeTraced(interaction: CallInteraction, parsed: ReturnType<typeof callComponentSchema.safeParse>): Promise<void> {
     let mode: CallAckMode = 'none';
     let invalidInput = 'Seleção inválida. Use os controles atuais da sala.';
     let actor: RoomActor | undefined;
     let privateOrigin = false;
     const { store, controls, ownership, transfers, workspaces } = this.dependencies;
     try {
-      const parsed = callComponentSchema.safeParse(interaction.customId);
       if (!parsed.success || !interaction.inGuild() || !interaction.guild || interaction.guild.id !== interaction.guildId) {
         throw new RoomActionError('STALE_CONTROLS');
       }
@@ -63,7 +73,7 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
       // Modal launch must be the initial response, never a deferred reply followed by showModal.
       const modal = action === 'rename' || action === 'limit';
       if (!modal) {
-        mode = await acknowledgeCallAction(interaction);
+        mode = await measureCallStage('ack', () => acknowledgeCallAction(interaction));
       }
       const state = await store.read(component.roomId);
       if (!state || state.room.guildDiscordId !== interaction.guildId || state.room.channelDiscordId !== interaction.channelId) throw new RoomActionError('ROOM_UNAVAILABLE');
@@ -89,7 +99,7 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
         switch (action) {
           case 'rename': case 'limit':
             if (!interaction.isButton()) throw new RoomActionError('STALE_CONTROLS');
-            await interaction.showModal(action === 'rename' ? buildRenameModal(actor, context.state.room.name) : buildLimitModal(actor, context.state.room.userLimit)); return;
+            await measureCallStage('ack', () => interaction.showModal(action === 'rename' ? buildRenameModal(actor!, context.state.room.name) : buildLimitModal(actor!, context.state.room.userLimit))); return;
           case 'rename-save':
             if (!interaction.isModalSubmit()) throw new RoomActionError('STALE_CONTROLS');
             invalidInput = 'Informe um nome não vazio com no máximo 11 grafemas.';
@@ -134,6 +144,7 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
       }
       await completeCallAction(interaction, mode);
     } catch (error) {
+      markCallActionFailed();
       // Never echo SQL, Discord payloads or forged IDs. All failures stay private.
       const payload = { content: failureMessage(error, invalidInput), embeds: [], components: [], allowedMentions: { parse: [] as never[] } };
       let delivery: Promise<boolean> | undefined;
@@ -151,7 +162,7 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
           }
         }, location?.room.channelDiscordId ?? interaction.channelId!).catch(() => undefined);
       }
-      await replyCallFailure(interaction, mode, payload, delivery ? () => delivery! : undefined).catch(() => undefined);
+      await measureCallStage(mode === 'none' ? 'ack' : 'panel', () => replyCallFailure(interaction, mode, payload, delivery ? () => delivery! : undefined)).catch(() => undefined);
     }
   }
 
@@ -173,7 +184,7 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
   }
 
   private delivery(interaction: CallInteraction, messageId: string): CallWorkspaceDelivery {
-    const edit = (payload: CallPanelPayload) => interaction.webhook.editMessage(messageId, { content: '', ...payload });
+    const edit = (payload: CallPanelPayload) => measureCallStage('panel', () => interaction.webhook.editMessage(messageId, { content: '', ...payload }));
     return { messageId, expiresAt: interaction.createdTimestamp + 900_000, edit,
       deactivate: async () => { await edit({ content: 'Área encerrada. Use os controles atuais da sala.', embeds: [], components: [], allowedMentions: { parse: [] } }); } };
   }
@@ -206,7 +217,7 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
         // Only public opens create a response. Private selections proved their
         // origin and adopted it before entering this path.
         if (interaction.message?.flags.has(MessageFlags.Ephemeral)) throw new RoomActionError('STALE_CONTROLS');
-        const message = await interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral });
+        const message = await measureCallStage('panel', () => interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral }));
         if (!message?.id || message.id === state.room.controlMessageDiscordId) throw new RoomActionError('DISCORD_FAILURE');
         return this.delivery(interaction, message.id);
       });

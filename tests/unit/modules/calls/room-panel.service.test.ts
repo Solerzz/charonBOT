@@ -26,8 +26,12 @@ function fixture() {
   d.channel.messages.fetch.mockImplementation(async (...args: unknown[]) => {
     const id = args[0] as string;
     if (!messages.has(id)) throw { code: 10008 };
-    d.message.edit.mockImplementation(async (...values: unknown[]) => { messages.set(id, values[0] as CallPanelPayload); });
     d.message.delete.mockImplementation(async () => { await hooks.beforeDelete(); messages.delete(id); });
+    return { ...d.message, id };
+  });
+  d.channel.messages.edit.mockImplementation(async (id, payload) => {
+    if (!messages.has(id)) throw { code: 10008 };
+    messages.set(id, payload as CallPanelPayload);
     return { ...d.message, id };
   });
   const store = {
@@ -90,12 +94,13 @@ describe('RoomPanelService', () => {
     expect(f.messages.size).toBe(1); expect(f.state().room.controlMessageDiscordId).not.toBe(f.initialId);
   });
 
-  it.each(['permissions', 'network'] as const)('never recreates a tracked panel after %s uncertainty', async (cause) => {
+  it.each(['permissions', 'network', 'forbidden'] as const)('never recreates a tracked panel after %s uncertainty', async (cause) => {
     const f = fixture();
     if (cause === 'permissions') f.d.channel.permissionsFor.mockReturnValue(new PermissionsBitField());
-    else f.d.channel.messages.fetch.mockRejectedValueOnce(new Error('private-response-secret'));
+    else f.d.channel.messages.edit.mockRejectedValueOnce(cause === 'forbidden' ? { code: 50013 } : new Error('private-response-secret'));
     expect(await f.bulk()).toEqual({ synced: 0, failed: 1 });
     expect([...f.messages.keys()]).toEqual([f.initialId]);
+    expect(f.d.channel.send).not.toHaveBeenCalled();
     expect(f.logs.join('')).not.toContain('private-response-secret');
   });
 
@@ -156,7 +161,7 @@ describe('RoomPanelService', () => {
 
   it('does not report stale tracked-message edits as current synchronization', async () => {
     const f = fixture();
-    f.d.channel.messages.fetch.mockImplementation(async () => {
+    f.d.channel.messages.edit.mockImplementation(async () => {
       f.state().controlsEnabled = false; f.state().room.controlVersion++;
       return f.d.message;
     });

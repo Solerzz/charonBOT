@@ -12,7 +12,7 @@ describe('RoomControlsService', () => {
     const f = roomSettingsFixture(); const actor = f.actor();
     const panels = new RoomPanelService({ store: f.store, coordinator: f.coordinator, logger: createLogger({ level: 'silent' }) });
     let published: unknown;
-    f.message.edit.mockImplementation(async (...args: unknown[]) => { published = args[0]; });
+    f.channel.messages.edit.mockImplementation(async (id, payload) => { published = payload; return { ...f.message, id }; });
     const publishedVersions = () => [...new Set([...JSON.stringify(published).matchAll(/"custom_id":"call:v3:[^"]+:(\d+)"/g)].map((match) => Number(match[1])))];
     await f.coordinator.room(f.guild.id, f.channel.id, () => panels.synchronizeLocked(f.state().room.id, f.gateway));
     expect(publishedVersions()).toEqual([0]);
@@ -28,7 +28,7 @@ describe('RoomControlsService', () => {
     f.store.settleAccess.mockRejectedValueOnce(new Error('settlement unavailable'));
     await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
     expect(f.state().room.controlVersion).toBe(0); expect(f.onChangedLocked).not.toHaveBeenCalled();
-    f.message.edit.mockRejectedValueOnce(new Error('publication unavailable'));
+    f.channel.messages.edit.mockRejectedValueOnce(new Error('publication unavailable'));
     await expect(f.controls.rename(actor, 'Old', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
     expect(f.state().room.controlVersion).toBe(1); expect(publishedVersions()).toEqual([0]);
     const retryPending = f.access.isUncertain(f.state().room.id);

@@ -6,6 +6,7 @@ import { DiscordRoomGateway } from './room.discord.js';
 import type { RoomCoordinator } from './room.coordinator.js';
 import type { RoomStateRepository } from './room-state.repository.js';
 import { RoomActionError, type RoomDiscordGateway, type RoomGuildResolver } from './room.types.js';
+import { measureCallStage } from './call-action.metrics.js';
 
 type Dependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; logger?: Logger };
 
@@ -18,6 +19,10 @@ export class RoomPanelService {
 
   // Caller already holds this room's lock. Never acquire member/room locks here.
   async synchronizeLocked(roomId: string, gateway: RoomDiscordGateway): Promise<void> {
+    return measureCallStage('panel', () => this.synchronizePanelLocked(roomId, gateway));
+  }
+
+  private async synchronizePanelLocked(roomId: string, gateway: RoomDiscordGateway): Promise<void> {
     const { store } = this.dependencies;
     let channelDiscordId: string | undefined;
     let messageDiscordId: string | null = null;

@@ -18,7 +18,7 @@ function sqlSpy<T extends object, K extends keyof T>(delegate: T, method: K) {
   return vi.spyOn(delegate, method as never) as unknown as Mock<(...args: Parameters<Method>) => Promise<Awaited<ReturnType<Method>>>>;
 }
 
-function fixture(tracked = true) {
+function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
   const native = discordFixture(); native.states.set(OWNER, { channelId: room.channelDiscordId }); native.states.set(OTHER, { channelId: room.channelDiscordId });
   const record = structuredClone(room); const configuration = structuredClone(creator);
   const presences: RoomPresence[] = []; let pending: PendingOwnershipTransfer | null = null;
@@ -76,7 +76,7 @@ function fixture(tracked = true) {
     off: vi.fn((event: string) => { listeners.delete(event); }), isReady: () => ready,
     guilds: { fetch: vi.fn(async () => native.guild as unknown as Guild) }, login: vi.fn(async () => {}), destroy: vi.fn(),
   };
-  const app = createApplication(config, { database, discord: client as unknown as DiscordClientPort, logger: createLogger({ level: 'silent' }) });
+  const app = createApplication(config, { database, discord: client as unknown as DiscordClientPort, logger });
   const emit = (event: string, ...args: unknown[]) => listeners.get(event)?.(...args as never[]);
   const markReady = () => { ready = true; emit(Events.ClientReady); };
   const interaction = (customId: string, kind = 'button') => ({
@@ -105,6 +105,18 @@ const flush = async () => { await new Promise<void>((resolve) => setImmediate(re
 afterEach(() => vi.useRealTimers());
 
 describe('default room lifecycle at SQL/REST/client boundaries', () => {
+  it('routes call metrics through the application logger rather than a separate default logger', async () => {
+    const lines: string[] = [];
+    const logger = createLogger({ level: 'info', destination: { write: line => { lines.push(line); } } });
+    const f = fixture(false, logger);
+    const starting = f.app.start(); await flush(); f.markReady(); await starting;
+    try {
+      f.emit(Events.InteractionCreate, f.interaction('call:forged-private-sentinel')); await flush();
+      const traces = lines.map(line => JSON.parse(line)).filter(log => log.msg === 'Call action completed');
+      expect(traces).toHaveLength(1); expect(traces[0]).toMatchObject({ action: 'invalid', result: 'error' });
+      expect(lines.join('')).not.toContain('forged-private-sentinel');
+    } finally { await f.app.stop('test'); }
+  });
   it('drains the application-owned private workspace before destroying Discord or disconnecting SQL', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
     const reconcile = vi.spyOn(CallPrivateWorkspace.prototype, 'reconcile');

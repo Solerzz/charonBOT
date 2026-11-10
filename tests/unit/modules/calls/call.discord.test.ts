@@ -134,8 +134,8 @@ describe('DiscordCallGateway', () => {
     await expect(f.gateway.sendControlPanel(room.channelDiscordId, panel)).resolves.toBe(room.controlMessageDiscordId);
     await f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel);
     expect(f.channel.send).toHaveBeenCalledExactlyOnceWith(panel);
-    expect(f.channel.messages.fetch).toHaveBeenCalledExactlyOnceWith(room.controlMessageDiscordId);
-    expect(f.message.edit).toHaveBeenCalledExactlyOnceWith(panel);
+    expect(f.channel.messages.fetch).not.toHaveBeenCalled();
+    expect(f.channel.messages.edit).toHaveBeenCalledExactlyOnceWith(room.controlMessageDiscordId!, panel);
   });
 
   it.each(['moveMember', 'sendControlPanel', 'updateControlPanel', 'deleteChannel'] as const)('rejects cross-guild target channels for %s', async (method) => {

@@ -7,6 +7,7 @@ import { discordIdSchema } from '../setup/setup.schemas.js';
 import type { CallPanelPayload } from './call-panel.view.js';
 import { temporaryRoomNameSchema } from './call.schemas.js';
 import { RoomActionError, type RoomAccessPolicy, type RoomDiscordGateway, type RoomMember, type RoomSnapshot } from './room.types.js';
+import { measureCallStage } from './call-action.metrics.js';
 
 export type { RoomDiscordGateway } from './room.types.js';
 
@@ -136,7 +137,7 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
     return this.checked(async () => {
       const { channel } = await this.authorized(channelId, [P.ViewChannel, P.SendMessages, P.EmbedLinks, P.ReadMessageHistory]);
       try {
-        await (await channel.messages.fetch(discordIdSchema.parse(messageId))).edit(payload);
+        await channel.messages.edit(discordIdSchema.parse(messageId), payload);
       } catch (error) {
         if (hasCode(error, 10008)) throw new RoomActionError('PANEL_MISSING');
         throw error;
@@ -221,7 +222,7 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
   }
 
   private async checked<T>(work: () => Promise<T>): Promise<T> {
-    try { return await work(); } catch (error) {
+    try { return await measureCallStage('discord', work); } catch (error) {
       if (error instanceof RoomActionError) throw error;
       throw new RoomActionError('DISCORD_FAILURE');
     }

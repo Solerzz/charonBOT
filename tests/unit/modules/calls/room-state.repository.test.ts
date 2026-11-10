@@ -4,6 +4,8 @@ import { Prisma, type PrismaClient } from '../../../../src/generated/prisma/clie
 import { PrismaRoomStateRepository } from '../../../../src/modules/calls/room-state.repository.js';
 import { RoomActionError } from '../../../../src/modules/calls/room.types.js';
 import { creator, room } from './call.fixtures.js';
+import { createLogger } from '../../../../src/core/logger/logger.js';
+import { runCallActionTrace } from '../../../../src/modules/calls/call-action.metrics.js';
 
 const pending = {
   id: '323e4567-e89b-42d3-a456-426614174000', roomId: room.id,
@@ -27,6 +29,19 @@ function fixture() {
 }
 
 describe('PrismaRoomStateRepository', () => {
+  it('measures repository reads and persistence operations without logging SQL or IDs', async () => {
+    const f = fixture(); const lines: string[] = [];
+    const logger = createLogger({ level: 'info', destination: { write: line => { lines.push(line); } } });
+    await runCallActionTrace(logger, 'rename-save', async () => {
+      await f.store.readTransfer(pending.id);
+      await f.store.findOwnedRoom('guild', 'owner');
+      await f.store.updateSettings(room.id, 0, { name: 'private-name' });
+      f.temporaryRoom.updateMany.mockRejectedValueOnce(new Error('private-sql'));
+      await expect(f.store.setPanelId(room.id, 0, null, 'message')).rejects.toThrow('private-sql');
+    });
+    expect(JSON.parse(lines[0]!)).toMatchObject({ stages: { state: { count: 2 }, persist: { count: 2 } } });
+    expect(lines.join('')).not.toContain('private-'); expect(lines.join('')).not.toContain(room.id);
+  });
   it('reads state with logically deleted creator configuration and related members', async () => {
     const f = fixture();
     f.temporaryRoom.findUnique.mockResolvedValue({ ...room, voiceCreator: { ...creator, deletedAt: new Date() }, presences: [], allowedMembers: [{ memberDiscordId: 'guest' }], pendingTransfer: pending });
