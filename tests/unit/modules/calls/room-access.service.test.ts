@@ -10,6 +10,27 @@ const accessBits = P.ViewChannel | P.Connect | P.SendMessages;
 const granted = (f: ReturnType<typeof roomSettingsFixture>) => f.projected().filter((p) => p.type === OverwriteType.Member && p.allow.has(accessBits, false)).map(({ id }) => id).sort();
 
 describe('RoomAccessService', () => {
+  it('retires confirmed CLOSED and absent SQL rows across room churn without retaining quarantine IDs', async () => {
+    const f = roomSettingsFixture(); const snapshot = (await f.gateway.snapshot(f.channel.id))!;
+    for (let index = 0; index < 24; index++) {
+      const state = structuredClone(f.state()); state.room.id = `retired-${index}`;
+      state.room.status = 'CLOSED';
+      if (index % 2 === 0) f.roomStates.set(state.room.id, state);
+      f.access.markUncertain(state.room.id);
+      await f.access.synchronizeLocked(state, snapshot, f.gateway);
+      expect(f.access.isUncertain(state.room.id)).toBe(false);
+    }
+    expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
+  });
+
+  it.each(['ACTIVE', 'CREATING', 'CLOSING'] as const)('retains recoverable %s quarantine when projection is not confirmed', async status => {
+    const f = roomSettingsFixture(); f.state().room.status = status;
+    f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('unavailable projection'));
+    if (status === 'ACTIVE') await expect(f.synchronize()).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    else await f.synchronize();
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+  });
+
   it('does not compensate an indeterminate writer until settlement fences its late completion', async () => {
     const f = roomSettingsFixture(); const update = f.store.updateSettings.getMockImplementation()!;
     const releaseWriter = deferred(); const barrierEntered = deferred(); const releaseBarrier = deferred();
@@ -71,24 +92,28 @@ describe('RoomAccessService', () => {
   });
 
   it('keeps compensation uncertain when departure is recorded during its final SQL read', async () => {
-    const f = roomSettingsFixture(); f.state().room.isLocked = true; f.join(OTHER); await f.synchronize();
-    const entered = deferred(); const release = deferred();
-    const restore = f.gateway.restoreAccess.bind(f.gateway); const snapshot = f.gateway.snapshot.bind(f.gateway);
-    const read = f.store.read.getMockImplementation()!;
-    vi.spyOn(f.gateway, 'restoreAccess').mockImplementationOnce(async (id, previous) => {
-      await restore(id, previous);
-      vi.spyOn(f.gateway, 'snapshot').mockImplementationOnce(async (channelId) => {
-        const live = await snapshot(channelId);
-        f.store.read.mockImplementationOnce(async (roomId) => { const state = await read(roomId); entered.resolve(); await release.promise; return state; });
-        return live;
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const f = roomSettingsFixture(); f.state().room.isLocked = true; f.join(OTHER); await f.synchronize();
+      const entered = deferred(); const release = deferred();
+      const restore = f.gateway.restoreAccess.bind(f.gateway); const snapshot = f.gateway.snapshot.bind(f.gateway);
+      const read = f.store.read.getMockImplementation()!;
+      vi.spyOn(f.gateway, 'restoreAccess').mockImplementationOnce(async (id, previous) => {
+        await restore(id, previous);
+        vi.spyOn(f.gateway, 'snapshot').mockImplementationOnce(async (channelId) => {
+          const live = await snapshot(channelId);
+          f.store.read.mockImplementationOnce(async (roomId) => { const state = await read(roomId); entered.resolve(); await release.promise; return state; });
+          return live;
+        });
       });
-    });
-    f.store.updateSettings.mockResolvedValueOnce(false);
-    const changing = f.controls.toggleVisibility(f.actor(), f.gateway); const result = changing.catch((error: unknown) => error);
-    await entered.promise; f.leave(OTHER); f.coordinator.recordDeparture(f.guild.id, f.channel.id, OTHER, false); release.resolve();
-    expect(await result).toMatchObject({ code: 'PERSISTENCE_FAILURE' });
-    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
-    await f.synchronize(); expect(granted(f)).not.toContain(OTHER);
+      f.store.updateSettings.mockResolvedValueOnce(false);
+      const changing = f.controls.toggleVisibility(f.actor(), f.gateway); const result = changing.catch((error: unknown) => error);
+      await entered.promise; f.leave(OTHER); f.coordinator.recordDeparture(f.guild.id, f.channel.id, OTHER, false); release.resolve();
+      expect(await result).toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+      expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+      await f.synchronize(); expect(granted(f)).not.toContain(OTHER);
+      expect(logged).toHaveBeenCalledExactlyOnceWith('Room mutation compensation failed', { roomId: f.state().room.id, guildDiscordId: f.guild.id, channelDiscordId: f.channel.id });
+    } finally { logged.mockRestore(); }
   });
 
   it.each([
@@ -199,14 +224,18 @@ describe('RoomAccessService', () => {
   });
 
   it('retains uncertainty if a participant leaves during the compensating REST write', async () => {
-    const f = roomSettingsFixture(); f.join(OTHER); await f.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway);
-    const restore = f.gateway.restoreAccess.bind(f.gateway);
-    vi.spyOn(f.gateway, 'restoreAccess').mockImplementationOnce(async (id, previous) => { await restore(id, previous); f.leave(OTHER); });
-    f.store.updateSettings.mockResolvedValueOnce(false);
-    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
-    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
-    await f.controls.toggleLock(f.actor(), f.gateway);
-    expect(granted(f)).not.toContain(OTHER); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const f = roomSettingsFixture(); f.join(OTHER); await f.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway);
+      const restore = f.gateway.restoreAccess.bind(f.gateway);
+      vi.spyOn(f.gateway, 'restoreAccess').mockImplementationOnce(async (id, previous) => { await restore(id, previous); f.leave(OTHER); });
+      f.store.updateSettings.mockResolvedValueOnce(false);
+      await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+      expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+      await f.controls.toggleLock(f.actor(), f.gateway);
+      expect(granted(f)).not.toContain(OTHER); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+      expect(logged).toHaveBeenCalledExactlyOnceWith('Room mutation compensation failed', { roomId: f.state().room.id, guildDiscordId: f.guild.id, channelDiscordId: f.channel.id });
+    } finally { logged.mockRestore(); }
   });
 
   it.each(['write', 'read-back'] as const)('never restores owner A grants after authority becomes B during %s', async (boundary) => {
@@ -232,19 +261,24 @@ describe('RoomAccessService', () => {
   });
 
   it.each(['read', 'restore'] as const)('blocks every new mutation until reconciliation confirms after uncertain %s', async (boundary) => {
-    const f = roomSettingsFixture(); await f.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway);
-    if (boundary === 'read') f.store.updateSettings.mockImplementationOnce(async () => {
-      f.store.read.mockRejectedValueOnce(new Error('read-back unavailable')); throw new Error('SQL unavailable');
-    });
-    else f.store.updateSettings.mockResolvedValueOnce(false);
-    if (boundary === 'restore') vi.spyOn(f.gateway, 'restoreAccess').mockRejectedValueOnce(new Error('restore unavailable'));
-    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
-    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
-    f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('reconciliation unavailable'));
-    await expect(f.controls.rename(f.actor(), 'Blocked', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
-    expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
-    await f.controls.rename(f.actor(), 'Confirmed', f.gateway);
-    expect(f.state().room.name).toBe('Confirmed'); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const f = roomSettingsFixture(); await f.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway);
+      if (boundary === 'read') f.store.updateSettings.mockImplementationOnce(async () => {
+        f.store.read.mockRejectedValueOnce(new Error('read-back unavailable')); throw new Error('SQL unavailable');
+      });
+      else f.store.updateSettings.mockResolvedValueOnce(false);
+      if (boundary === 'restore') vi.spyOn(f.gateway, 'restoreAccess').mockRejectedValueOnce(new Error('restore unavailable'));
+      await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+      expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+      f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('reconciliation unavailable'));
+      await expect(f.controls.rename(f.actor(), 'Blocked', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+      expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+      await f.controls.rename(f.actor(), 'Confirmed', f.gateway);
+      expect(f.state().room.name).toBe('Confirmed'); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+      if (boundary === 'restore') expect(logged).toHaveBeenCalledExactlyOnceWith('Room mutation compensation failed', { roomId: f.state().room.id, guildDiscordId: f.guild.id, channelDiscordId: f.channel.id });
+      else expect(logged).not.toHaveBeenCalled();
+    } finally { logged.mockRestore(); }
   });
 
   it('projects owner, current participants, room allowlist and bot; callback reads committed privacy', async () => {

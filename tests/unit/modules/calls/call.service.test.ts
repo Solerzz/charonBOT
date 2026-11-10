@@ -23,6 +23,26 @@ function fields(payload: CallPanelPayload) {
 const departure = { ...entry, oldChannelDiscordId: room.channelDiscordId, newChannelDiscordId: null, oldChannelMemberCount: 0 };
 
 describe('CallService', () => {
+  it('closes an empty quarantined room despite an unavailable access fence, retiring memory only after SQL closure', async () => {
+    const f = fixture(); await f.handle();
+    const record = f.records.get(room.id)!;
+    vi.spyOn(f.runtime.store, 'updateSettings').mockRejectedValueOnce(new Error('indeterminate access SQL'));
+    const fence = vi.spyOn(f.runtime.store, 'settleAccess').mockRejectedValue(new Error('unavailable fence'));
+    await expect(f.runtime.controls.toggleLock({ roomId: room.id, guildDiscordId: room.guildDiscordId,
+      memberDiscordId: room.ownerDiscordId!, controlVersion: record.controlVersion }, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.runtime.access.isUncertain(room.id)).toBe(true);
+    const attempts = fence.mock.calls.length;
+    const closing = f.rooms.markClosed.getMockImplementation()!;
+    f.rooms.markClosed.mockImplementationOnce(async id => {
+      expect(f.runtime.access.isUncertain(id)).toBe(true);
+      return closing(id);
+    });
+    f.counts.set(room.channelDiscordId, 0); f.setMemberChannel(null);
+    await f.handle(departure);
+    expect(f.records.get(room.id)?.status).toBe('CLOSED'); expect(f.gateway.deleteChannel).toHaveBeenCalledOnce();
+    expect(fence).toHaveBeenCalledTimes(attempts); expect(f.runtime.access.isUncertain(room.id)).toBe(false);
+  });
+
   it.each([[0, '1 / Ilimitado'], [1, '1 / 1'], [4, '1 / 4'], [99, '1 / 99']] as const)('copies default %i to Discord, initial persistence and the retained panel', async (userLimit, capacity) => {
     const f = fixture(); f.configuration.defaultUserLimit = userLimit;
     await f.handle();

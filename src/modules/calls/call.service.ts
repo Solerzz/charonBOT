@@ -166,6 +166,7 @@ export class CallService {
     this.runtime.timers.cancel(`priority:${room.id}`);
     this.runtime.transfers.synchronizePrompt(room.id, null);
     if (closing.status === 'CLOSED') {
+      this.runtime.access.retireConfirmedLocked(room.id, closing.status);
       this.runtime.coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
       return true;
     }
@@ -173,7 +174,8 @@ export class CallService {
     if (gateway.getChannelMemberCount(room.channelDiscordId) === 0) {
       try {
         await gateway.deleteChannel(room.channelDiscordId);
-        await this.rooms.markClosed(room.id);
+        const closed = await this.rooms.markClosed(room.id);
+        this.runtime.access.retireConfirmedLocked(room.id, closed.status);
         this.runtime.coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
         return true;
       } catch (error: unknown) {

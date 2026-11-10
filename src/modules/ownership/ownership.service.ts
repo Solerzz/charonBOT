@@ -4,7 +4,7 @@ import type { RoomStateRepository } from '../calls/room-state.repository.js';
 import { RoomActionError, type RoomActor, type RoomChanged, type RoomDiscordGateway, type RoomSnapshot, type RoomState } from '../calls/room.types.js';
 import type { OwnershipTimers } from './ownership.timers.js';
 
-type OwnershipDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged; reconcileDeparturesLocked?: (roomId: string) => Promise<void>; invalidateWorkspace?: (roomId: string) => void };
+type OwnershipDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged; reconcileDeparturesLocked?: (roomId: string) => Promise<void>; invalidateWorkspace?: (roomId: string) => void; recoverAccessLocked?: RoomChanged };
 type PriorityGeneration = Pick<RoomState['room'], 'guildDiscordId' | 'channelDiscordId' | 'controlVersion' | 'priorityMemberDiscordId' | 'priorityExpiresAt'>;
 
 const matchesSnapshot = (state: RoomState | null, snapshot: RoomSnapshot): state is RoomState =>
@@ -82,6 +82,7 @@ export class OwnershipService {
       if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
       await coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
         await this.dependencies.reconcileDeparturesLocked?.(actor.roomId);
+        await this.dependencies.recoverAccessLocked?.(actor.roomId, gateway);
         const context = await requireActiveRoom(store, actor, gateway);
         if (context.state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         if (await store.findOwnedRoom(actor.guildDiscordId, actor.memberDiscordId)) throw new RoomActionError('ALREADY_OWNS_ROOM');

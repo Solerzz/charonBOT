@@ -5,7 +5,7 @@ import { discordIdSchema } from '../setup/setup.schemas.js';
 import { currentOwnedRoom, safeRoomAction } from './room-mutation.js';
 import type { RoomStateRepository } from './room-state.repository.js';
 import type { RoomCoordinator } from './room.coordinator.js';
-import { RoomActionError, type RoomAccessPolicy, type RoomActor, type RoomDiscordGateway, type RoomSnapshot, type RoomState } from './room.types.js';
+import { RoomActionError, type RoomAccessPolicy, type RoomActor, type RoomChanged, type RoomDiscordGateway, type RoomSnapshot, type RoomState } from './room.types.js';
 
 const allowedUnion = (state: RoomState, snapshot: RoomSnapshot, allowed = state.allowedMemberIds): string[] =>
   [...new Set([...(state.room.ownerDiscordId ? [state.room.ownerDiscordId] : []), ...snapshot.members.map(({ memberDiscordId }) => memberDiscordId), ...allowed])];
@@ -48,6 +48,31 @@ export class RoomAccessService {
 
   isUncertain(roomId: string): boolean { return this.uncertain.has(roomId); }
   markUncertain(roomId: string): void { this.uncertain.add(roomId); }
+
+  // Only a confirmed SQL read/lifecycle result may retire these obligations.
+  // CREATING/CLOSING can still recover: neither is a terminal state.
+  retireConfirmedLocked(roomId: string, status: RoomState['room']['status'] | null): boolean {
+    if (status !== null && status !== 'CLOSED') return false;
+    this.uncertain.delete(roomId); this.unsettled.delete(roomId);
+    return true;
+  }
+
+  // Caller holds the existing room coordinator; never acquire another lock.
+  // Recovery must publish the fenced generation before final actor/CAS checks.
+  async recoverLocked(roomId: string, gateway: RoomDiscordGateway, publish: RoomChanged): Promise<void> {
+    if (!this.isUncertain(roomId)) return;
+    const state = await safeRoomAction(() => this.store.read(roomId));
+    if (this.retireConfirmedLocked(roomId, state?.room.status ?? null)) return;
+    const snapshot = await safeRoomAction(() => gateway.snapshot(state!.room.channelDiscordId), 'DISCORD_FAILURE');
+    assertSnapshot(state!, snapshot);
+    await this.synchronizeLocked(state!, snapshot, gateway);
+    try { await safeRoomAction(() => publish(roomId, gateway), 'DISCORD_FAILURE'); }
+    catch (error) {
+      // Native confirmation alone does not confirm publication of the fence.
+      this.markUncertain(roomId);
+      throw error;
+    }
+  }
 
   setVisibilityLocked(actor: RoomActor, state: RoomState, visibility: RoomVisibility, gateway: RoomDiscordGateway): Promise<void> {
     return this.applySettingsLocked(actor, state, { visibility }, gateway);
@@ -198,12 +223,14 @@ export class RoomAccessService {
       // Private delivery generations must be retired even if the fence or the
       // subsequent native projection fails and no success callback is reached.
       this.onInvalidated?.(state.room.id);
-      await safeRoomAction(() => this.store.settleAccess(state.room.id, attemptedVersion));
+      const settled = await safeRoomAction(() => this.store.settleAccess(state.room.id, attemptedVersion));
       this.unsettled.delete(state.room.id);
+      if (this.retireConfirmedLocked(state.room.id, settled?.room.status ?? null)) return;
     }
     let projected: { state: RoomState; allowed: string[] } | null = null;
     for (let attempt = 0; attempt < 4; attempt++) {
       const current = await safeRoomAction(() => this.store.read(state.room.id));
+      if (this.retireConfirmedLocked(state.room.id, current?.room.status ?? null)) return;
       if (!current || current.room.status !== 'ACTIVE') return;
       assertSnapshot(current, snapshot);
       const receipts = this.departures(current);

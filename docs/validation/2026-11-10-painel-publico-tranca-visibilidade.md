@@ -82,7 +82,7 @@ resultado `success|error`. O catch que entrega erro privado marca explicitamente
 o trace como erro. Nenhum payload/ID de membro/nome/token/URL de exceção é logado
 pelo trace; trabalho de timer após seu encerramento não altera o log final único.
 
-## Gates locais
+## Gates locais — evidência histórica da Task 5
 
 Executados em 2026-11-10. Ambiente comum com `RUN_DATABASE_TESTS=false` e
 `RUN_DATABASE_SECURITY_TESTS=false`; nenhuma conexão remota.
@@ -108,19 +108,59 @@ Filhos, nesta ordem: `node_modules/prisma/build/index.js generate`,
 `node_modules/prisma/build/index.js migrate status` e
 `node_modules/prisma/build/index.js migrate deploy`.
 
-A saída **não é pristine**: além dos traces JSON esperados, três testes de
+Na Task 5 a saída **não era pristine**: além dos traces JSON esperados, três testes de
 `room-access.service.test.ts` emitem intencionalmente `Room mutation compensation failed`:
 `keeps compensation uncertain when departure is recorded during its final SQL read`,
 `retains uncertainty if a participant leaves during the compensating REST write` e
 `blocks every new mutation until reconciliation confirms after uncertain restore`.
-São cenários de compensação fail-closed existentes, não falhas do gate.
+Eram cenários de compensação fail-closed existentes, não falhas do gate.
+O ruído e a lacuna de assertions foram corrigidos na onda final abaixo (M2).
 
 O grafo já estava dirty antes da Task 5 e foi atualizado sem descartar esse
 trabalho. Avisos existentes: parser `tree_sitter_sql` ausente para 5 migrations;
 dois testes sem símbolos AST; nomenclatura de comunidades requer atualização
 semântica opcional. Nenhuma dependência/configuração foi instalada/alterada.
-Minor anterior adiado: Set de incerteza de salas CLOSED retém IDs; não alterado
-pela Task 5. A simulação e estes gates não substituem a aceitação real abaixo.
+O Minor de retenção de IDs CLOSED, adiado na Task 5, foi corrigido na onda final
+abaixo (M1). A simulação e estes gates não substituem a aceitação real abaixo.
+
+## Onda final consolidada — I1, M1 e M2 resolvidos localmente
+
+Executada em 2026-11-10, sobre `bb5c7ec`. Nenhuma mudança de schema/SQL, prazos,
+ordem de locks, RLS ou operação remota.
+
+| Achado | Correção e regressão |
+| --- | --- |
+| I1: quarentena restrita a settings | Recuperação compartilhada de acesso, com hook no runtime, antes de criar/armar/efetivar transferência e claim; fence, projeção e publicação confirmados antes das validações finais/CAS. Atores/operações antigos são rejeitados após fence; falha na publicação mantém quarentena. |
+| I1: caminhos seguros e prazo | Undo, descarte, revogação por saída e fechamento de sala vazia continuam disponíveis com fence indisponível. Confirmação suspensa na recuperação cruza o prazo original e falha; timeout usa o mesmo deadline de cinco segundos, sem rearmar/extender. |
+| M1: memória terminal | CLOSED/ausência SQL confirmados aposentam Set e obrigação de settlement. Churn de 24 IDs, ausência e obrigações reais do runtime cobertos; ACTIVE/CREATING/CLOSING não são descartados por falha de recuperação. Fechamento só aposenta após resultado SQL terminal. |
+| M2: console.error esperado | Spies locais com `finally` nos três testes; assertions exatas da mensagem e somente room/guild/channel, incluindo ausência de emissão no ramo read. Nenhum silenciamento global. |
+
+`room-quarantine.test.ts` compõe runtime, handler, coordenador, timers, workspace,
+acesso e serviços reais. Somente fronteiras SQL/REST são substituídas por registros
+stateful de sala/operação/overwrites; a quarentena nasce de `toggleLock` real com
+SQL indeterminado e fence indisponível, não de mock que presume essa proteção.
+Os novos testes não se apresentam como falhas reais de transporte PostgreSQL/Discord.
+
+TDD antes das fontes: foco inicial em `room-quarantine.test.ts` e
+`room-access.service.test.ts` apresentou **13 falhos / 50 aprovados**: transferência
+criada/armada na quarentena, CAS em confirm/timeout/claim, gerações antigas aceitas,
+retenção CLOSED/ausente. Segundo RED de terminal/lifecycle: **3 falhos / 2 aprovados /
+62 pulados**. GREEN focado dos três arquivos: **117/117**, sem stderr de compensação.
+
+Gates completos desta onda, uma execução de cada gate antes do commit:
+
+| Gate | Resultado novo observado |
+| --- | --- |
+| `RUN_DATABASE_TESTS=false`, `RUN_DATABASE_SECURITY_TESTS=false`; `npm run test:run -- --silent=false` | 46 arquivos aprovados, 6 pulados; **1.259 aprovados**, 45 pulados, 0 falhos (+22 sobre baseline). Só traces JSON esperados, sem os três console.error não capturados. |
+| Launcher local guardado → `node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=1` | 6 arquivos, **45/45**, 0 falhos/pulados; PostgreSQL local descartável exclusivamente. Não houve start/stop nem leitura/impressão de credenciais. |
+| `npm run typecheck` / `npm run build` | exit 0 / exit 0 |
+| `git diff --check` | exit 0; avisos CRLF preexistentes do grafo, sem erro de whitespace |
+| `graphify update .` | exit 0; **1.947 nós, 4.245 arestas, 75 comunidades**. Quatro arquivos do grafo já dirty preservados e atualizados; não incluídos no commit cirúrgico. Parser SQL continua ausente, sem instalação/configuração. |
+
+Autorrevisão: recuperação permanece sob o coordenador existente, antes das últimas
+validações de presença/autoridade e CAS; não há lock novo nem transação SQL em REST.
+As integrações de fence/row-lock existentes permanecem verdes. Aceitação, latência,
+webhooks reais e rollout continuam **PENDENTES** no checklist seguinte.
 
 ## Aceitação real e rollout — PENDENTES de autorização separada
 

@@ -31,6 +31,7 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
   const lifecycle = new PrismaTemporaryRoomRepository(database);
   const readState = async (roomId: string) => {
     const state = await store.read(roomId);
+    access.retireConfirmedLocked(roomId, state?.room.status ?? null);
     await workspaces.reconcile(roomId, state);
     return state;
   };
@@ -114,8 +115,9 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
     await access.synchronizeLocked(state, snapshot, gateway);
     await panels.synchronizeLocked(roomId, gateway);
   };
-  const ownership = new OwnershipService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked, invalidateWorkspace });
-  const transfers = new TransferService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked, invalidateWorkspace });
+  const recoverAccessLocked: RoomChanged = (roomId, gateway) => access.recoverLocked(roomId, gateway, onChangedLocked);
+  const ownership = new OwnershipService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked, invalidateWorkspace, recoverAccessLocked });
+  const transfers = new TransferService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked, invalidateWorkspace, recoverAccessLocked });
   const controls = new RoomControlsService({ store, coordinator, access, onChangedLocked });
   const observeLocked: RoomChanged = async (roomId, gateway) => {
     await reconcileDeparturesLocked(roomId);
@@ -191,7 +193,8 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
               if (!snapshot) {
                 cancelRoomTimers(room.id);
                 await lifecycle.beginClosing(room.id);
-                await lifecycle.markClosed(room.id);
+                const closed = await lifecycle.markClosed(room.id);
+                access.retireConfirmedLocked(room.id, closed.status);
                 coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
                 return;
               }

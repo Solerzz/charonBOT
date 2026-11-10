@@ -59,17 +59,7 @@ export class RoomControlsService {
       const initial = await store.read(actor.roomId);
       if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
       await coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
-        if (access.isUncertain(actor.roomId)) {
-          const snapshot = await safeRoomAction(() => gateway.snapshot(initial.room.channelDiscordId), 'DISCORD_FAILURE');
-          if (!snapshot) throw new RoomActionError('ROOM_UNAVAILABLE');
-          await access.synchronizeLocked(initial, snapshot, gateway);
-          try { await safeRoomAction(() => onChangedLocked(actor.roomId, gateway), 'DISCORD_FAILURE'); }
-          catch (error) {
-            // Access confirmation does not confirm publication of this fence.
-            access.markUncertain(actor.roomId);
-            throw error;
-          }
-        }
+        await access.recoverLocked(actor.roomId, gateway, onChangedLocked);
         const { state } = await currentOwnedRoom(store, actor, gateway);
         if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);
