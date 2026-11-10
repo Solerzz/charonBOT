@@ -1,7 +1,7 @@
 import { ActionRowBuilder, MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle, type Interaction } from 'discord.js';
 import type { InteractionHandler } from '../../core/discord/interactions/interaction-handler.js';
 import type { SetupCreationService } from './setup-creation.service.js';
-import type { SetupCreationResult, SetupDraft, SetupDraftContext } from './setup-creation.types.js';
+import type { SetupCreationResult, SetupDraft, SetupDraftContext, SetupDraftRef } from './setup-creation.types.js';
 import { SetupDraftError, type SetupDraftStore } from './setup-drafts.js';
 import { SetupDiscordError } from './setup.discord.js';
 import type { GuildBasedInteraction, SetupDiscordGatewayFactory, SetupInteraction } from './setup.interactions.js';
@@ -44,6 +44,8 @@ function resultMessage(result: SetupCreationResult): string {
 }
 
 export class SetupCreationInteractions implements InteractionHandler<SetupInteraction> {
+  private readonly presentations = new Map<string, Promise<void>>();
+
   constructor(
     private readonly drafts: SetupDraftStore,
     private readonly creation: SetupCreationService,
@@ -57,6 +59,7 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
 
   async execute(interaction: SetupInteraction): Promise<void> {
     let acknowledged = false;
+    let releasePresentation: (() => void) | undefined;
     try {
       requirePrivateAdministrator(interaction);
       const decoded = setupCreationCustomIdSchema.safeParse(interaction.customId);
@@ -64,6 +67,18 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
       const customId = decoded.data;
       const context = contextOf(interaction);
       const contextChannelId = interaction.channelId;
+      const waitForPresentation = async (ref?: SetupDraftRef): Promise<boolean> => {
+        releasePresentation = await this.acquirePresentation(context);
+        // A queued event may already have been superseded. In particular, a
+        // late modal ACK must not erase the newer review/result with an error.
+        try {
+          if (ref && this.drafts.get(ref, context).result && customId.action !== 'confirm') return false;
+          return true;
+        } catch (error) {
+          if (error instanceof SetupDraftError) return false;
+          throw error;
+        }
+      };
       // Re-read the authoritative interaction and the store after any awaited
       // ACK/preflight, not only the snapshot captured before external work.
       const current = () => {
@@ -79,6 +94,7 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
       if (customId.action === 'start') {
         if (!interaction.isButton()) throw new SetupDiscordError(invalidMessage);
         await interaction.deferUpdate(); acknowledged = true;
+        await waitForPresentation();
         current();
         const gateway = this.gatewayFactory(interaction);
         await gateway.assertCanConfigure(contextChannelId);
@@ -105,6 +121,7 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
               .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2)
               .setValue(String(updated.input.defaultUserLimit ?? 0)))));
         acknowledged = true;
+        if (!await waitForPresentation(updated)) return;
         // Dismissing a modal emits no submit. Refresh the original private
         // message after the modal ACK so its category/Cancel controls remain
         // usable at the new revision, without accepting stale forms.
@@ -123,6 +140,7 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
         } catch { throw new SetupDiscordError(invalidMessage); }
         if (!name.success || !limit.success) throw new SetupDiscordError('Informe nome de 1 a 100 caracteres e limite inteiro de 0 a 99 (0 = sem limite).');
         await interaction.deferUpdate(); acknowledged = true;
+        if (!await waitForPresentation(customId)) return;
         current();
         const gateway = this.gatewayFactory(interaction);
         await gateway.assertCanConfigure(contextChannelId);
@@ -136,6 +154,7 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
 
       if (!interaction.isButton()) throw new SetupDiscordError(invalidMessage);
       await interaction.deferUpdate(); acknowledged = true;
+      if (!await waitForPresentation(customId)) return;
       const latest = current();
       switch (customId.action) {
         case 'back':
@@ -171,7 +190,24 @@ export class SetupCreationInteractions implements InteractionHandler<SetupIntera
       if (content === null) throw error;
       if (acknowledged) await interaction.editReply({ content, embeds: [], components: [], allowedMentions: { parse: [] } });
       else await interaction.reply({ content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+    } finally {
+      releasePresentation?.();
     }
+  }
+
+  private async acquirePresentation(context: SetupDraftContext): Promise<() => void> {
+    const key = `${context.guildDiscordId}:${context.messageDiscordId}`;
+    const previous = this.presentations.get(key);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    this.presentations.set(key, pending);
+    // Only post-ACK handling waits. Keep its errors and result fallbacks in the
+    // same slot too, so no original-message PATCH can overtake another event.
+    await previous;
+    return () => {
+      if (this.presentations.get(key) === pending) this.presentations.delete(key);
+      release();
+    };
   }
 
   private async renderResult(interaction: SetupInteraction, draft: SetupDraft, result: SetupCreationResult): Promise<void> {

@@ -99,6 +99,40 @@ const flush = async () => { await new Promise<void>((resolve) => setImmediate(re
 afterEach(() => vi.useRealTimers());
 
 describe('default room lifecycle at SQL/REST/client boundaries', () => {
+  it('drains held setup recovery and the acknowledged form before disposing drafts or disconnecting', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
+    const f = fixture(false); const held = deferred();
+    const starting = f.app.start(); await flush(); f.markReady(); await starting;
+    const event = (id: string, kind = 'button') => ({
+      ...f.interaction(id), isButton: () => kind === 'button', isAnySelectMenu: () => kind === 'category',
+      isChannelSelectMenu: () => kind === 'category', isModalSubmit: () => kind === 'form', isFromMessage: () => true,
+      message: { id: '72345678901234567', guildId: creator.guildDiscordId, flags: { has: (flag: number) => flag === MessageFlags.Ephemeral } },
+      values: [creator.categoryDiscordId], fields: { getTextInputValue: (field: string) => field === 'name' ? 'Entrada nativa' : '7' },
+      showModal: vi.fn(async (_payload: unknown) => {}),
+    });
+    const start = event('setup:v2:create:start'); f.emit(Events.InteractionCreate, start); await flush();
+    const initial = JSON.parse(JSON.stringify(start.editReply.mock.calls[0]![0]));
+    let visible: typeof initial;
+    const category = event(initial.components[0].components[0].custom_id, 'category');
+    category.editReply.mockImplementation(async (payload) => { await held.promise; visible = JSON.parse(JSON.stringify(payload)); return { id: '82345678901234567' }; });
+    f.emit(Events.InteractionCreate, category); await flush();
+    const form = event(JSON.parse(JSON.stringify(category.showModal.mock.calls[0]![0])).custom_id, 'form');
+    form.editReply.mockImplementation(async (payload) => {
+      expect(f.disconnect).not.toHaveBeenCalled(); expect(f.client.destroy).not.toHaveBeenCalled();
+      visible = JSON.parse(JSON.stringify(payload)); return { id: '82345678901234567' };
+    });
+    f.emit(Events.InteractionCreate, form); await flush();
+    const stopping = f.app.stop('test');
+    try {
+      await flush(); expect(form.deferUpdate).toHaveBeenCalledOnce();
+      expect(f.disconnect).not.toHaveBeenCalled(); expect(f.client.destroy).not.toHaveBeenCalled();
+    } finally { held.resolve(); await stopping; }
+    expect(visible.components[0].components.map((button: { custom_id: string }) => button.custom_id.split(':')[3])).toEqual(['confirm', 'back', 'cancel']);
+    expect(f.guild.channels.create).not.toHaveBeenCalled();
+    expect(f.disconnect).toHaveBeenCalledOnce(); expect(f.client.destroy).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('shares one application draft through native wizard events and drains SQL creation before store/timer disposal and disconnect', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
     const f = fixture(false); const entered = deferred(); const held = deferred();

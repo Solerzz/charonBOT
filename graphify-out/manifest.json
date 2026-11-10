@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "tests/unit/application.rooms.test.ts": {
-    "mtime": 1794281962.2393913,
-    "seen": 1794282253.3656244,
-    "ast_hash": "8651768b9282bf47f658c079f04c0fd1",
+    "mtime": 1794285256.9219291,
+    "seen": 1794285370.6905525,
+    "ast_hash": "db04de94260beff3e354d613bde6d322",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/call.interactions.test.ts": {
@@ -798,15 +798,15 @@
     "semantic_hash": ""
   },
   "src/modules/setup/setup-creation.interactions.ts": {
-    "mtime": 1794283013.006057,
-    "seen": 1794283049.1720078,
-    "ast_hash": "465624c4b471f2c13af1be374a8038fe",
+    "mtime": 1794285354.4004316,
+    "seen": 1794285370.681795,
+    "ast_hash": "dc3bf5dbdeec8b34672dfd637a217050",
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup-creation.interactions.test.ts": {
-    "mtime": 1794283013.0071104,
-    "seen": 1794283049.191079,
-    "ast_hash": "18d0ecc83599f281cb06cde2852998d5",
+    "mtime": 1794285316.2059884,
+    "seen": 1794285370.707572,
+    "ast_hash": "ba84066dcf35538d0a0266260c0741e6",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-settings.service.test.ts": {
@@ -816,9 +816,9 @@
     "semantic_hash": ""
   },
   "docs/validation/2026-11-10-setup-guiado-validation.md": {
-    "mtime": 1794284003.4779038,
-    "seen": 1794284026.770782,
-    "ast_hash": "a85538602306dbd785a051a9c19354d5",
+    "mtime": 1794284070.2178116,
+    "seen": 1794285370.7243285,
+    "ast_hash": "512ab0a17da057e878f5298c69540162",
     "semantic_hash": ""
   },
   "package-lock.json": {

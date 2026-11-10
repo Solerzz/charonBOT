@@ -122,6 +122,125 @@ describe('private guided setup', () => {
     expect(f.createVoiceCreator).not.toHaveBeenCalled(); expect(f.configurations).toEqual([]);
   });
 
+  it.each(['confirm', 'back', 'cancel'] as const)('keeps newer review usable after an overlapping recovery edit: %s', async (action) => {
+    const f = fixture(); const ref = await f.start(); const held = gate();
+    let visible: ReturnType<typeof json>;
+    const select = f.event(`setup:v2:create:category:${ref.id}:0`, 'category');
+    select.editReply.mockImplementation(async (payload) => { await held.promise; visible = json(payload); });
+    const recovery = f.handler.execute(select.interaction);
+    await flush();
+    expect(select.editReply).toHaveBeenCalledOnce();
+    const form = f.event(json(select.showModal.mock.calls[0]![0]).custom_id, 'form');
+    form.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+    const submitted = f.handler.execute(form.interaction);
+    try {
+      await flush();
+      expect(form.deferUpdate).toHaveBeenCalledOnce();
+      expect(f.createVoiceCreator).not.toHaveBeenCalled(); expect(f.configurations).toEqual([]);
+    } finally { held.release(); await Promise.all([recovery, submitted]); }
+    expect(f.drafts.get({ ...ref, revision: 2 }, context)).toMatchObject({ status: 'review', input: { name: 'Entrada', defaultUserLimit: 4 } });
+    expect(visible.components[0].components.map((button: { custom_id: string }) => button.custom_id)).toEqual([
+      `setup:v2:create:confirm:${ref.id}:2`, `setup:v2:create:back:${ref.id}:2`, `setup:v2:create:cancel:${ref.id}:2`,
+    ]);
+    const next = f.event(visible.components[0].components[['confirm', 'back', 'cancel'].indexOf(action)].custom_id);
+    await f.handler.execute(next.interaction);
+    if (action === 'confirm') {
+      expect(f.drafts.get({ ...ref, revision: 2 }, context).status).toBe('created');
+      expect(f.createVoiceCreator).toHaveBeenCalledOnce(); expect(f.configurations).toHaveLength(1);
+    } else if (action === 'back') {
+      expect(f.drafts.get({ ...ref, revision: 3 }, context).status).toBe('editing');
+      expect(json(next.editReply.mock.calls[0]![0]).components[0].components[0].custom_id).toBe(`setup:v2:create:category:${ref.id}:3`);
+    } else {
+      expect(() => f.drafts.get({ ...ref, revision: 2 }, context)).toThrow();
+      expect(json(next.editReply.mock.calls[0]![0]).components).toEqual([]);
+    }
+  });
+
+  it.each(['review', 'created', 'cancelled'] as const)('ignores recovery whose modal ACK finishes after a newer %s presentation', async (outcome) => {
+    const f = fixture(); const ref = await f.start(); const held = gate();
+    let visible: ReturnType<typeof json>;
+    const select = f.event(`setup:v2:create:category:${ref.id}:0`, 'category');
+    select.showModal.mockImplementation(async () => { await held.promise; });
+    select.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+    const recovery = f.handler.execute(select.interaction);
+    const form = f.event(json(select.showModal.mock.calls[0]![0]).custom_id, 'form');
+    form.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+    let newer: ReturnType<typeof json>;
+    try {
+      await f.handler.execute(form.interaction);
+      if (outcome !== 'review') {
+        const action = f.event(visible.components[0].components[outcome === 'created' ? 0 : 2].custom_id);
+        action.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+        await f.handler.execute(action.interaction);
+      }
+      newer = visible;
+    } finally { held.release(); await recovery; }
+    expect(visible).toEqual(newer);
+    if (outcome === 'cancelled') expect(() => f.drafts.get({ ...ref, revision: 2 }, context)).toThrow();
+    else expect(f.drafts.get({ ...ref, revision: 2 }, context).status).toBe(outcome);
+  });
+
+  it.each(['back', 'cancel'] as const)('preserves terminal truth when %s queues behind the result edit', async (action) => {
+    const f = fixture(); const ref = await f.review(); const held = gate();
+    let visible: ReturnType<typeof json>;
+    const confirm = f.event(confirmId(ref));
+    confirm.editReply.mockImplementation(async (payload) => { await held.promise; visible = json(payload); });
+    const creating = f.handler.execute(confirm.interaction); await flush();
+    expect(f.drafts.get(ref, context).status).toBe('created');
+    const obsolete = f.event(`setup:v2:create:${action}:${ref.id}:2`);
+    obsolete.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+    const clicked = f.handler.execute(obsolete.interaction);
+    try { await flush(); expect(obsolete.deferUpdate).toHaveBeenCalledOnce(); }
+    finally { held.release(); await Promise.all([creating, clicked]); }
+    expect(visible.content).toContain('Configuração salva');
+    expect(f.drafts.get(ref, context).result?.status).toBe('created');
+    expect(f.createVoiceCreator).toHaveBeenCalledOnce(); expect(f.create).toHaveBeenCalledOnce();
+  });
+
+  it('keeps retry modal immediate and orders its recovery, corrected review and cancel after a held Back edit', async () => {
+    const f = fixture(); const ref = await f.review(); const held = gate();
+    let visible: ReturnType<typeof json>;
+    const back = f.event(`setup:v2:create:back:${ref.id}:2`);
+    back.editReply.mockImplementation(async (payload) => { await held.promise; visible = json(payload); });
+    const returning = f.handler.execute(back.interaction); await flush();
+    const retry = f.event(`setup:v2:create:category:${ref.id}:3`, 'category');
+    retry.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+    const recovery = f.handler.execute(retry.interaction);
+    expect(retry.showModal).toHaveBeenCalledOnce();
+    const form = f.event(json(retry.showModal.mock.calls[0]![0]).custom_id, 'form', { name: 'Corrigido', 'default-limit': '9' });
+    form.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+    const submitted = f.handler.execute(form.interaction);
+    try { await flush(); expect(form.deferUpdate).toHaveBeenCalledOnce(); }
+    finally { held.release(); await Promise.all([returning, recovery, submitted]); }
+    expect(f.drafts.get({ ...ref, revision: 5 }, context)).toMatchObject({ status: 'review', input: { name: 'Corrigido', defaultUserLimit: 9 } });
+    expect(visible.components[0].components[0].custom_id).toBe(`setup:v2:create:confirm:${ref.id}:5`);
+    const cancel = f.event(visible.components[0].components[2].custom_id);
+    cancel.editReply.mockImplementation(async (payload) => { visible = json(payload); });
+    await f.handler.execute(cancel.interaction);
+    expect(visible).toMatchObject({ content: expect.stringContaining('cancelada'), components: [] });
+    expect(f.createVoiceCreator).not.toHaveBeenCalled(); expect(f.configurations).toEqual([]);
+  });
+
+  it('drains a rejected recovery edit without blocking the queued valid review or another original message', async () => {
+    const f = fixture(); const ref = await f.start(); const held = gate();
+    const select = f.event(`setup:v2:create:category:${ref.id}:0`, 'category');
+    select.editReply.mockImplementation(async () => { await held.promise; throw new Error('transport unavailable'); });
+    const rejected = expect(f.handler.execute(select.interaction)).rejects.toThrow('transport unavailable'); await flush();
+    const form = f.event(json(select.showModal.mock.calls[0]![0]).custom_id, 'form');
+    const submitted = f.handler.execute(form.interaction);
+    const other = f.event('setup:v2:create:start');
+    Object.assign(other.interaction.message!, { id: '92345678901234567' });
+    const independent = f.handler.execute(other.interaction);
+    try {
+      await flush(); expect(form.deferUpdate).toHaveBeenCalledOnce();
+      expect(other.editReply).toHaveBeenCalledOnce();
+    } finally { held.release(); await Promise.all([rejected, submitted, independent]); }
+    expect(json(form.editReply.mock.calls.at(-1)![0]).components[0].components[0].custom_id).toBe(`setup:v2:create:confirm:${ref.id}:2`);
+    expect(f.drafts.get({ ...ref, revision: 2 }, context).status).toBe('review');
+    const replay = f.event(`setup:v2:create:cancel:${ref.id}:2`); await f.handler.execute(replay.interaction);
+    expect(json(replay.editReply.mock.calls[0]![0]).content).toContain('cancelada');
+  });
+
   it.each(['cancel', 'reselect'] as const)('keeps rendered controls usable after modal dismissal: %s', async (action) => {
     const f = fixture(); const start = f.event('setup:v2:create:start');
     await f.handler.execute(start.interaction);
