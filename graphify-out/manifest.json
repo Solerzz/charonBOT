@@ -887,6 +887,12 @@
     "ast_hash": "8b4bb56eb5a86b810e9de25c5f556660",
     "semantic_hash": ""
   },
+  "docs/superpowers/specs/2026-11-10-charon-v0.4.0-moderacao-dono-design.md": {
+    "mtime": 1794350324.0898657,
+    "seen": 1794350342.0389032,
+    "ast_hash": "403c6ef0c9ebf688df44f655a2bcc484",
+    "semantic_hash": ""
+  },
   "package-lock.json": {
     "mtime": 1794220656.8724687,
     "seen": 1794220975.8541348,
