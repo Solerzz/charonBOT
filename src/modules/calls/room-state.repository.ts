@@ -7,6 +7,10 @@ type ConfiguredRoom = Prisma.TemporaryRoomGetPayload<{ include: { voiceCreator: 
 
 export interface RoomStateRepository {
   read(roomId: string): Promise<RoomState | null>;
+  // Fence the attempted version before confirming an indeterminate access
+  // writer: it has either completed, or can no longer mutate this generation.
+  // This DB-only barrier must finish before any Discord reconciliation.
+  settleAccess(roomId: string, attemptedVersion: number): Promise<RoomState | null>;
   readTransfer(id: string): Promise<PendingOwnershipTransfer | null>;
   findOwnedRoom(guildId: string, memberId: string): Promise<TemporaryRoomRecord | null>;
   listTracked(): Promise<TemporaryRoomRecord[]>;
@@ -49,6 +53,16 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
     if (!record) return null;
     const { voiceCreator, presences, allowedMembers, pendingTransfer, ...room } = record;
     return { room, controlsEnabled: voiceCreator.roomCommandsEnabled, presences, allowedMemberIds: allowedMembers.map(({ memberDiscordId }) => memberDiscordId), transfer: pendingTransfer };
+  }
+
+  async settleAccess(roomId: string, attemptedVersion: number): Promise<RoomState | null> {
+    // invalidateControls updates/locks this row and commits before read/REST.
+    // An admitted setAllowed holds the same row lock until commit. Settings
+    // UPDATEs recheck their version predicate after a conflicting row update.
+    // Thus an earlier writer either precedes this barrier, or its old-version
+    // CAS is fenced even if it has not acquired a connection/row lock yet.
+    await this.invalidateControls(roomId, attemptedVersion);
+    return this.read(roomId);
   }
 
   readTransfer(id: string): Promise<PendingOwnershipTransfer | null> {

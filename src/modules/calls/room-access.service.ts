@@ -42,7 +42,8 @@ function assertSnapshot(state: RoomState, snapshot: RoomSnapshot | null): assert
 
 export class RoomAccessService {
   private readonly uncertain = new Set<string>();
-  constructor(private readonly store: RoomStateRepository, private readonly coordinator?: RoomCoordinator) {}
+  private readonly unsettled = new Map<string, number>();
+  constructor(private readonly store: RoomStateRepository, private readonly coordinator: RoomCoordinator) {}
 
   isUncertain(roomId: string): boolean { return this.uncertain.has(roomId); }
   markUncertain(roomId: string): void { this.uncertain.add(roomId); }
@@ -83,18 +84,31 @@ export class RoomAccessService {
     }
     try {
       projected = await this.reconcileProjection(actor, state, desired, projected, gateway);
-      this.coordinator?.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
+      this.coordinator.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
       attemptedCommit = true;
       committed = await safeRoomAction(commit);
       rejectedCommit = !committed;
       if (!committed) throw new RoomActionError('STALE_CONTROLS');
       // SQL may yield too: do not acknowledge a superseded owner or leave a
       // participant's temporary grant behind while its departure is queued.
-      await this.reconcileProjection(actor, desired, desired, projected, gateway);
+      const receipts = this.departures(state);
+      projected = await this.reconcileProjection(actor, desired, desired, projected, gateway);
       const confirmed = await safeRoomAction(() => this.store.read(state.room.id));
       if (!confirmed || !sameAuthority(desired, confirmed) || !sameAccess(desired, confirmed)) throw new RoomActionError('STALE_CONTROLS');
-      this.coordinator?.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
+      this.assertRosterCurrent(state, projected, receipts);
+      this.coordinator.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
     } catch (error) {
+      if (attemptedCommit && !committed && !rejectedCommit) {
+        // A transport rejection does not settle the server-side writer. Fence
+        // its version before read-back or REST; retain the obligation if the
+        // barrier itself cannot be confirmed, including across later controls.
+        this.markUncertain(state.room.id);
+        this.unsettled.set(state.room.id, actor.controlVersion);
+        try { await this.synchronizeLocked(state, current.snapshot, gateway); }
+        catch { throw new RoomActionError('PERSISTENCE_FAILURE'); }
+        // Fencing invalidates this attempt's authority, even if it committed.
+        throw new RoomActionError('PERSISTENCE_FAILURE');
+      }
       let confirmed: RoomState | null;
       try { confirmed = await safeRoomAction(() => this.store.read(state.room.id)); }
       catch { this.markUncertain(state.room.id); throw new RoomActionError('PERSISTENCE_FAILURE'); }
@@ -102,23 +116,24 @@ export class RoomAccessService {
         this.markUncertain(state.room.id);
         throw attemptedCommit && !rejectedCommit ? new RoomActionError('PERSISTENCE_FAILURE') : error;
       }
-      if (committed || (attemptedCommit && !rejectedCommit && sameAccess(confirmed, desired))) {
-        // A lost SQL acknowledgement is not a failed CAS. Confirm the current
-        // projection and live authority instead of restoring obsolete grants.
+      if (committed) {
+        // A confirmed SQL commit must not be undone after a later read fails.
         this.markUncertain(state.room.id);
         try {
           await currentOwnedRoom(this.store, actor, gateway, desired);
           await this.synchronizeLocked(confirmed, current.snapshot, gateway);
-          await currentOwnedRoom(this.store, actor, gateway, desired);
+          const receipts = this.departures(state);
+          const recovery = await currentOwnedRoom(this.store, actor, gateway, desired);
           const latest = await safeRoomAction(() => this.store.read(state.room.id));
           if (!latest || !sameAuthority(desired, latest) || !sameAccess(desired, latest)) throw new RoomActionError('STALE_CONTROLS');
-          this.coordinator?.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
+          this.assertRosterCurrent(state, recovery.snapshot.members.map((member) => member.memberDiscordId), receipts);
+          this.coordinator.assertContinuous(actor.guildDiscordId, channelId, [actor.memberDiscordId]);
         } catch (confirmationError) { this.markUncertain(state.room.id); throw confirmationError; }
-        if (committed) throw error;
-        return;
+        throw error;
       }
       if (!sameAccess(state, confirmed)) { this.markUncertain(state.room.id); throw new RoomActionError('PERSISTENCE_FAILURE'); }
       try {
+        const receipts = this.departures(state);
         const live = await safeRoomAction(() => gateway.snapshot(channelId), 'DISCORD_FAILURE');
         assertSnapshot(confirmed, live);
         // Saved member grants are not durable authorization: revoke departed
@@ -129,8 +144,10 @@ export class RoomAccessService {
         if (!latest || !sameAuthority(confirmed, latest) || !sameAccess(confirmed, latest)) {
           this.markUncertain(state.room.id); throw error;
         }
+        this.assertRosterCurrent(state, live.members.map((member) => member.memberDiscordId), receipts);
         const restricted = state.room.isLocked || state.room.visibility === 'PRIVATE';
         await gateway.restoreAccess(channelId, safePrevious(previous, allowed, restricted));
+        const restoredReceipts = this.departures(state);
         const restoredLive = await safeRoomAction(() => gateway.snapshot(channelId), 'DISCORD_FAILURE');
         assertSnapshot(latest, restoredLive);
         if (restricted && !sameIds(allowed, allowedUnion(latest, restoredLive))) throw error;
@@ -138,12 +155,25 @@ export class RoomAccessService {
         if (!restored || !sameAuthority(latest, restored) || !sameAccess(latest, restored)) {
           this.markUncertain(state.room.id); throw error;
         }
+        this.assertRosterCurrent(state, restoredLive.members.map((member) => member.memberDiscordId), restoredReceipts);
       } catch {
         this.markUncertain(state.room.id);
         console.error('Room mutation compensation failed', { roomId: state.room.id, guildDiscordId: state.room.guildDiscordId, channelDiscordId: channelId });
         throw new RoomActionError('PERSISTENCE_FAILURE');
       }
       throw error;
+    }
+  }
+
+  private departures(state: RoomState) {
+    return this.coordinator.pendingDepartures(state.room.guildDiscordId, state.room.channelDiscordId);
+  }
+
+  private assertRosterCurrent(state: RoomState, members: string[], before: ReturnType<RoomAccessService['departures']>): void {
+    // Existing receipts may describe a return already reflected by this live
+    // snapshot. A new receipt across its awaits invalidates that observation.
+    if (this.departures(state).some((receipt) => !before.includes(receipt) && members.includes(receipt.memberId))) {
+      throw new RoomActionError('STALE_CONTROLS');
     }
   }
 
@@ -162,16 +192,23 @@ export class RoomAccessService {
   async synchronizeLocked(state: RoomState, snapshot: RoomSnapshot, gateway: RoomDiscordGateway): Promise<void> {
     assertSnapshot(state, snapshot);
     this.markUncertain(state.room.id);
+    const attemptedVersion = this.unsettled.get(state.room.id);
+    if (attemptedVersion !== undefined) {
+      await safeRoomAction(() => this.store.settleAccess(state.room.id, attemptedVersion));
+      this.unsettled.delete(state.room.id);
+    }
     let projected: { state: RoomState; allowed: string[] } | null = null;
     for (let attempt = 0; attempt < 4; attempt++) {
       const current = await safeRoomAction(() => this.store.read(state.room.id));
       if (!current || current.room.status !== 'ACTIVE') return;
       assertSnapshot(current, snapshot);
+      const receipts = this.departures(current);
       const live = await safeRoomAction(() => gateway.snapshot(current.room.channelDiscordId), 'DISCORD_FAILURE');
       assertSnapshot(current, live);
       // A state read preceding REST is not confirmation of current authority.
       const confirmed = await safeRoomAction(() => this.store.read(state.room.id));
       if (!confirmed || !sameAuthority(current, confirmed) || !sameAccess(current, confirmed)) continue;
+      this.assertRosterCurrent(current, live.members.map((member) => member.memberDiscordId), receipts);
       const next = allowedUnion(confirmed, live);
       if (projected && sameAuthority(projected.state, confirmed) && sameAccess(projected.state, confirmed) && sameIds(next, projected.allowed)) {
         this.uncertain.delete(state.room.id); return;

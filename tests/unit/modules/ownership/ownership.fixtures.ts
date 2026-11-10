@@ -87,7 +87,7 @@ export function ownershipFixture() {
       if (cause === 'timeout' ? deadline === null || deadline > at : deadline !== null && deadline <= at) return false;
       return store.changeOwner(current.room.id, version, current.transfer.ownerDiscordId, current.transfer.targetDiscordId);
     }),
-    listTracked: unused, listForCreator: unused, cancelPreviousRunTransfers: unused,
+    listTracked: unused, listForCreator: unused, cancelPreviousRunTransfers: unused, settleAccess: unused,
     setAllowed: unused, updateSettings: unused, setPanelId: unused, invalidateControls: unused,
   } satisfies RoomStateRepository;
   const gateway = {

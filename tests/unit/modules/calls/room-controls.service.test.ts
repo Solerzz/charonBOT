@@ -6,6 +6,37 @@ import { deferred } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 
 describe('RoomControlsService', () => {
+  it('refreshes the fenced control version after an indeterminate SQL failure without reporting setting success', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room).toMatchObject({ controlVersion: 1, isLocked: false });
+    expect(f.refreshes).toHaveLength(1); expect(f.refreshes[0]!.room.controlVersion).toBe(1);
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+  });
+
+  it('publishes the recovered fence before rejecting the old controls when settlement previously failed', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    f.store.settleAccess.mockRejectedValueOnce(new Error('barrier unavailable'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.refreshes).toHaveLength(0);
+    await expect(f.controls.rename(actor, 'Stale', f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.refreshes).toHaveLength(1);
+    expect(f.refreshes[0]!.room).toMatchObject({ controlVersion: 1, name: 'Game' });
+  });
+
+  it('retries an unconfirmed fenced-control refresh before rejecting another old action', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    f.onChangedLocked.mockRejectedValueOnce(new Error('refresh unavailable'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true); expect(f.refreshes).toHaveLength(0);
+    await expect(f.controls.rename(actor, 'Stale', f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.refreshes).toHaveLength(1); expect(f.refreshes[0]!.room.controlVersion).toBe(1);
+    expect(f.channel.setName).not.toHaveBeenCalled();
+  });
+
   it.each(['PUBLIC', 'PRIVATE'] as const)('keeps visibility %s when toggling the lock and the lock when toggling visibility', async (visibility) => {
     const f = roomSettingsFixture(); f.state().room.visibility = visibility;
     await f.controls.toggleLock(f.actor(), f.gateway);

@@ -10,6 +10,87 @@ const accessBits = P.ViewChannel | P.Connect | P.SendMessages;
 const granted = (f: ReturnType<typeof roomSettingsFixture>) => f.projected().filter((p) => p.type === OverwriteType.Member && p.allow.has(accessBits, false)).map(({ id }) => id).sort();
 
 describe('RoomAccessService', () => {
+  it('does not compensate an indeterminate writer until settlement fences its late completion', async () => {
+    const f = roomSettingsFixture(); const update = f.store.updateSettings.getMockImplementation()!;
+    const releaseWriter = deferred(); const barrierEntered = deferred(); const releaseBarrier = deferred();
+    let writer: Promise<boolean> | undefined;
+    f.store.updateSettings.mockImplementationOnce(async (...args) => {
+      writer = releaseWriter.promise.then(() => update(...args));
+      throw new Error('transport failed before writer completed');
+    });
+    // The persistence boundary certifies settlement; a plain read can still
+    // return the old state and must never substitute for this barrier.
+    Object.assign(f.store, { settleAccess: vi.fn(async () => {
+      barrierEntered.resolve(); await releaseBarrier.promise;
+      f.state().room.controlVersion++; return f.store.read(f.state().room.id);
+    }) });
+    const restore = vi.spyOn(f.gateway, 'restoreAccess');
+    const changing = f.controls.toggleLock(f.actor(), f.gateway); const outcome = changing.catch((error: unknown) => error);
+    const observed = await Promise.race([barrierEntered.promise.then(() => 'barrier'), outcome.then(() => 'finished')]);
+    expect(observed).toBe('barrier');
+    expect(await f.store.read(f.state().room.id)).toMatchObject({ room: { isLocked: false } });
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true); expect(restore).not.toHaveBeenCalled();
+    releaseBarrier.resolve(); expect(await outcome).toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    releaseWriter.resolve(); expect(await writer).toBe(false);
+    expect(f.state().room.isLocked).toBe(false);
+    expect(f.projected().find((p) => p.id === f.guild.id)!.allow.has(P.Connect, false)).toBe(true);
+  });
+
+  it('cannot clear uncertainty through ordinary reads after the settlement barrier fails', async () => {
+    const f = roomSettingsFixture(); f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate writer'));
+    Object.assign(f.store, { settleAccess: vi.fn(async () => { throw new Error('settlement unavailable'); }) });
+    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    const writes = f.channel.permissionOverwrites.set.mock.calls.length;
+    await expect(f.controls.rename(f.actor(), 'Blocked', f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.channel.permissionOverwrites.set.mock.calls).toHaveLength(writes);
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+  });
+
+  it('does not admit rename when a guest departs during the final SQL reconciliation read', async () => {
+    const f = roomSettingsFixture(); f.state().room.isLocked = true; f.join(OTHER); await f.synchronize();
+    f.access.markUncertain(f.state().room.id);
+    const entered = deferred(); const release = deferred();
+    const write = f.channel.permissionOverwrites.set.getMockImplementation()!;
+    const snapshot = f.gateway.snapshot.bind(f.gateway); const read = f.store.read.getMockImplementation()!;
+    f.channel.permissionOverwrites.set.mockImplementationOnce(async (input) => {
+      await write(input);
+      vi.spyOn(f.gateway, 'snapshot').mockImplementationOnce(async (id) => {
+        const live = await snapshot(id);
+        f.store.read.mockImplementationOnce(async (roomId) => { const state = await read(roomId); entered.resolve(); await release.promise; return state; });
+        return live;
+      });
+    });
+    const changing = f.controls.rename(f.actor(), 'Next', f.gateway);
+    const result = changing.catch((error: unknown) => error);
+    await entered.promise; f.leave(OTHER); f.coordinator.recordDeparture(f.guild.id, f.channel.id, OTHER, false); release.resolve();
+    expect(await result).toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+    expect(f.coordinator.pendingDepartures(f.guild.id, f.channel.id)).toHaveLength(1);
+    await f.controls.rename(f.actor(), 'Next', f.gateway);
+    expect(granted(f)).not.toContain(OTHER); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+  });
+
+  it('keeps compensation uncertain when departure is recorded during its final SQL read', async () => {
+    const f = roomSettingsFixture(); f.state().room.isLocked = true; f.join(OTHER); await f.synchronize();
+    const entered = deferred(); const release = deferred();
+    const restore = f.gateway.restoreAccess.bind(f.gateway); const snapshot = f.gateway.snapshot.bind(f.gateway);
+    const read = f.store.read.getMockImplementation()!;
+    vi.spyOn(f.gateway, 'restoreAccess').mockImplementationOnce(async (id, previous) => {
+      await restore(id, previous);
+      vi.spyOn(f.gateway, 'snapshot').mockImplementationOnce(async (channelId) => {
+        const live = await snapshot(channelId);
+        f.store.read.mockImplementationOnce(async (roomId) => { const state = await read(roomId); entered.resolve(); await release.promise; return state; });
+        return live;
+      });
+    });
+    f.store.updateSettings.mockResolvedValueOnce(false);
+    const changing = f.controls.toggleVisibility(f.actor(), f.gateway); const result = changing.catch((error: unknown) => error);
+    await entered.promise; f.leave(OTHER); f.coordinator.recordDeparture(f.guild.id, f.channel.id, OTHER, false); release.resolve();
+    expect(await result).toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+    await f.synchronize(); expect(granted(f)).not.toContain(OTHER);
+  });
+
   it.each([
     { isLocked: false, visibility: 'PUBLIC' }, { isLocked: true, visibility: 'PUBLIC' },
     { isLocked: false, visibility: 'PRIVATE' }, { isLocked: true, visibility: 'PRIVATE' },
@@ -40,12 +121,12 @@ describe('RoomAccessService', () => {
     expect(f.state().room).toMatchObject(policy);
   });
 
-  it('reads back a committed SQL write whose reply was lost without restoring stale access', async () => {
+  it('fences a lost SQL reply without acknowledging the superseded attempt or restoring stale access', async () => {
     const f = roomSettingsFixture(); const update = f.store.updateSettings.getMockImplementation()!;
     const restore = vi.spyOn(f.gateway, 'restoreAccess');
     f.store.updateSettings.mockImplementationOnce(async (...args) => { await update(...args); throw new Error('lost SQL reply'); });
-    await f.controls.toggleLock(f.actor(), f.gateway);
-    expect(f.state().room).toMatchObject({ isLocked: true, visibility: 'PUBLIC' });
+    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room).toMatchObject({ isLocked: true, visibility: 'PUBLIC', controlVersion: 1 });
     expect(f.projected().find((p) => p.id === f.guild.id)!.deny.has(P.Connect, false)).toBe(true);
     expect(restore).not.toHaveBeenCalled(); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
   });
@@ -54,7 +135,7 @@ describe('RoomAccessService', () => {
     const f = roomSettingsFixture(); f.state().room.isLocked = true; f.state().allowedMemberIds = allowed ? [] : [GUEST]; await f.synchronize();
     const commit = f.store.setAllowed.getMockImplementation()!; const restore = vi.spyOn(f.gateway, 'restoreAccess');
     f.store.setAllowed.mockImplementationOnce(async (...args) => { await commit(...args); throw new Error('lost SQL reply'); });
-    await f.controls.setAllowed(f.actor(), GUEST, allowed, f.gateway);
+    await expect(f.controls.setAllowed(f.actor(), GUEST, allowed, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
     expect(f.state().allowedMemberIds).toEqual(allowed ? [GUEST] : []);
     expect(granted(f).includes(GUEST)).toBe(allowed); expect(restore).not.toHaveBeenCalled();
   });
@@ -71,19 +152,20 @@ describe('RoomAccessService', () => {
     await f.synchronize(); expect(granted(f)).toEqual([OTHER, f.bot.id].sort());
   });
 
-  it('keeps uncertainty when authority changes during reconciliation of a lost SQL acknowledgement', async () => {
+  it('rejects a lost SQL acknowledgement and reconciles current authority instead of restoring the old owner', async () => {
     const f = roomSettingsFixture(); await f.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway);
     const update = f.store.updateSettings.getMockImplementation()!;
     f.store.updateSettings.mockImplementationOnce(async (...args) => {
       await update(...args);
       const write = f.channel.permissionOverwrites.set.getMockImplementation()!;
       f.channel.permissionOverwrites.set.mockImplementationOnce(async (input) => {
-        await write(input); await f.store.changeOwner(f.state().room.id, 0, OWNER, OTHER); f.leave(OWNER); f.join(OTHER);
+        await write(input); await f.store.changeOwner(f.state().room.id, f.state().room.controlVersion, OWNER, OTHER); f.leave(OWNER); f.join(OTHER);
       });
       throw new Error('lost SQL acknowledgement');
     });
-    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
-    expect(f.access.isUncertain(f.state().room.id)).toBe(true); expect(f.refreshes).toHaveLength(1);
+    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false); expect(f.refreshes).toHaveLength(2);
+    expect(f.state().room.ownerDiscordId).toBe(OTHER); expect(granted(f)).not.toContain(OWNER);
     await f.synchronize(); expect(granted(f)).toEqual([OTHER, f.bot.id].sort());
   });
 
@@ -140,9 +222,10 @@ describe('RoomAccessService', () => {
     }
     const changing = f.controls.toggleLock(f.actor(), f.gateway);
     const rejected = expect(changing).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
-    await entered.promise; await f.store.changeOwner(f.state().room.id, 0, OWNER, OTHER); f.leave(OWNER); f.join(OTHER);
+    await entered.promise; await f.store.changeOwner(f.state().room.id, f.state().room.controlVersion, OWNER, OTHER); f.leave(OWNER); f.join(OTHER);
     release.resolve(); await rejected;
-    expect(restore).not.toHaveBeenCalled(); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+    expect(restore).not.toHaveBeenCalled(); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+    expect(f.state().room.ownerDiscordId).toBe(OTHER); expect(granted(f)).not.toContain(OWNER);
     await f.controls.toggleLock(f.actorFor(OTHER), f.gateway);
     expect(granted(f)).not.toContain(OWNER); expect(granted(f)).toContain(OTHER);
     expect(f.access.isUncertain(f.state().room.id)).toBe(false);
@@ -150,10 +233,10 @@ describe('RoomAccessService', () => {
 
   it.each(['read', 'restore'] as const)('blocks every new mutation until reconciliation confirms after uncertain %s', async (boundary) => {
     const f = roomSettingsFixture(); await f.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway);
-    f.store.updateSettings.mockImplementationOnce(async () => {
-      if (boundary === 'read') f.store.read.mockRejectedValueOnce(new Error('read-back unavailable'));
-      throw new Error('SQL unavailable');
+    if (boundary === 'read') f.store.updateSettings.mockImplementationOnce(async () => {
+      f.store.read.mockRejectedValueOnce(new Error('read-back unavailable')); throw new Error('SQL unavailable');
     });
+    else f.store.updateSettings.mockResolvedValueOnce(false);
     if (boundary === 'restore') vi.spyOn(f.gateway, 'restoreAccess').mockRejectedValueOnce(new Error('restore unavailable'));
     await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
     expect(f.access.isUncertain(f.state().room.id)).toBe(true);
@@ -250,7 +333,7 @@ describe('RoomAccessService', () => {
     expect(f.projected().find(({ id }) => id === f.bot.id)!.allow.has([P.ManageRoles, P.ManageChannels, P.ReadMessageHistory, P.Connect])).toBe(true);
   });
 
-  it.each(['visibility', 'allow'] as const)('restores captured overwrites after %s persistence failure without public fallback', async (action) => {
+  it.each(['visibility', 'allow'] as const)('reprojects persisted privacy after %s SQL uncertainty and publishes only the fenced state', async (action) => {
     const f = roomSettingsFixture(); await f.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway);
     const previous = await f.gateway.readAccess(f.channel.id); f.onChangedLocked.mockClear();
     f.store.updateSettings.mockRejectedValueOnce(new Error('private SQL'));
@@ -259,7 +342,8 @@ describe('RoomAccessService', () => {
     await expect(change).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
     expect(await f.gateway.readAccess(f.channel.id)).toEqual(previous);
     expect(f.state().room.visibility).toBe('PRIVATE'); expect(f.state().allowedMemberIds).toEqual([]);
-    expect(f.onChangedLocked).not.toHaveBeenCalled();
+    expect(f.onChangedLocked).toHaveBeenCalledOnce();
+    expect(f.refreshes.at(-1)?.room).toMatchObject({ controlVersion: 1, visibility: 'PRIVATE' });
   });
 
   it('does not commit a private list change if Discord fails', async () => {

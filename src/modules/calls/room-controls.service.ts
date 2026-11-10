@@ -63,14 +63,32 @@ export class RoomControlsService {
           const snapshot = await safeRoomAction(() => gateway.snapshot(initial.room.channelDiscordId), 'DISCORD_FAILURE');
           if (!snapshot) throw new RoomActionError('ROOM_UNAVAILABLE');
           await access.synchronizeLocked(initial, snapshot, gateway);
+          await safeRoomAction(() => onChangedLocked(actor.roomId, gateway), 'DISCORD_FAILURE');
         }
         const { state } = await currentOwnedRoom(store, actor, gateway);
         if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);
-        await work(state);
+        try { await work(state); } catch (error) {
+          // An indeterminate access writer may have fenced this generation.
+          // Publish the confirmed current controls even though its action fails.
+          if (error instanceof RoomActionError && error.code === 'PERSISTENCE_FAILURE') {
+            try { await this.refreshInvalidatedLocked(state, gateway); }
+            catch { access.markUncertain(actor.roomId); }
+          }
+          throw error;
+        }
         // Committed state only; callback failure is not a failed setting CAS.
         await safeRoomAction(() => onChangedLocked(actor.roomId, gateway), 'DISCORD_FAILURE');
       });
     }));
+  }
+
+  private async refreshInvalidatedLocked(state: RoomState, gateway: RoomDiscordGateway): Promise<void> {
+    const { access, store, onChangedLocked } = this.dependencies;
+    if (access.isUncertain(state.room.id)) return;
+    const current = await safeRoomAction(() => store.read(state.room.id));
+    if (current && current.room.controlVersion !== state.room.controlVersion) {
+      await safeRoomAction(() => onChangedLocked(state.room.id, gateway), 'DISCORD_FAILURE');
+    }
   }
 }

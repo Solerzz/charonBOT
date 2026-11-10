@@ -11,10 +11,89 @@ import { RoomAccessService } from '../../src/modules/calls/room-access.service.j
 import { RoomControlsService } from '../../src/modules/calls/room-controls.service.js';
 import { roomSettingsFixture } from '../unit/modules/calls/room-settings.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
+import { deferred } from '../unit/modules/calls/call.fixtures.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
 
 describe('independent room lock persistence', () => {
+  integrationTest('settlement waits for a row-locked writer and fences writers not yet admitted without retaining a SQL lock across REST', async () => {
+    assertDisposableDatabaseEnvironment();
+    const client = createPrismaClient({ url: process.env.DATABASE_URL!, directUrl: process.env.DIRECT_URL! });
+    const store = new PrismaRoomStateRepository(client);
+    const creatorId = randomUUID(); const roomId = randomUUID();
+    const locked = deferred(); const release = deferred(); const fenceLocked = deferred(); const releaseFence = deferred();
+    let writer: Promise<boolean> | undefined; let settlement: Promise<unknown> | undefined;
+    let queuedSettings: Promise<boolean> | undefined; let queuedAllowlist: Promise<boolean> | undefined;
+    try {
+      await client.voiceCreator.create({ data: { id: creatorId, guildDiscordId: randomUUID(), creatorChannelDiscordId: randomUUID(), categoryDiscordId: randomUUID() } });
+      await client.temporaryRoom.create({ data: { id: roomId, voiceCreatorId: creatorId, guildDiscordId: randomUUID(), channelDiscordId: randomUUID(), ownerDiscordId: 'owner', name: 'Game', status: 'ACTIVE' } });
+      // Hold the same row lock used by setAllowed; a response may fail while
+      // the transaction still owns the row and can commit later.
+      writer = client.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "TemporaryRoom" WHERE id = ${roomId}::uuid FOR UPDATE`;
+        locked.resolve(); await release.promise;
+        return new PrismaRoomStateRepository(tx as unknown as typeof client).updateSettings(roomId, 0, { isLocked: true });
+      });
+      await locked.promise;
+      expect(await store.read(roomId)).toMatchObject({ room: { isLocked: false, controlVersion: 0 } });
+      // An observer connection proves the barrier is actually waiting on a
+      // PostgreSQL lock, rather than relying on elapsed time to infer ordering.
+      const observer = new Client({ connectionString: process.env.DIRECT_URL });
+      await observer.connect();
+      try {
+        settlement = store.settleAccess(roomId, 0);
+        let waiting = false;
+        for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+          const result = await observer.query<{ waiting: boolean }>(`SELECT EXISTS (
+            SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
+              AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'
+              AND query LIKE '%TemporaryRoom%'
+          ) AS waiting`);
+          waiting = result.rows[0]!.waiting;
+        }
+        expect(waiting).toBe(true);
+        let finished = false; void settlement.then(() => { finished = true; });
+        await Promise.resolve(); expect(finished).toBe(false);
+        release.resolve(); expect(await writer).toBe(true);
+        expect(await settlement).toMatchObject({ room: { isLocked: true, controlVersion: 1 } });
+        // Reverse the order: hold the real barrier's transaction just before
+        // commit and submit both old-generation writers while it owns the row.
+        const transaction = client.$transaction.bind(client);
+        vi.spyOn(client, '$transaction').mockImplementationOnce((async (work: (tx: typeof client) => Promise<unknown>) =>
+          transaction(async (tx) => { const result = await work(tx as unknown as typeof client); fenceLocked.resolve(); await releaseFence.promise; return result; })) as never);
+        settlement = store.settleAccess(roomId, 1); await fenceLocked.promise;
+        queuedSettings = store.updateSettings(roomId, 1, { isLocked: false });
+        queuedAllowlist = store.setAllowed(roomId, 1, 'guest', true);
+        let blocked = 0;
+        for (let attempt = 0; attempt < 100 && blocked < 2; attempt++) {
+          const result = await observer.query<{ blocked: number }>(`SELECT count(*)::int AS blocked FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid()
+              AND wait_event_type = 'Lock' AND query LIKE '%TemporaryRoom%'`);
+          blocked = result.rows[0]!.blocked;
+        }
+        expect(blocked).toBeGreaterThanOrEqual(2);
+        releaseFence.resolve(); expect(await settlement).toMatchObject({ room: { isLocked: true, controlVersion: 2 } });
+        expect(await queuedSettings).toBe(false); expect(await queuedAllowlist).toBe(false);
+      } finally { await observer.end(); }
+      // Even a request which was queued before settlement but starts later
+      // cannot mutate with the old generation, for settings OR allowlist.
+      expect(await store.updateSettings(roomId, 0, { isLocked: false })).toBe(false);
+      expect(await store.setAllowed(roomId, 0, 'guest', true)).toBe(false);
+      expect(await store.read(roomId)).toMatchObject({ room: { isLocked: true, controlVersion: 2 }, allowedMemberIds: [] });
+      await client.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL lock_timeout = '500ms'`;
+        // This independent writer is the REST boundary probe: settlement has
+        // returned and must have released its SQL row lock before any REST.
+        expect(await tx.temporaryRoom.updateMany({ where: { id: roomId, controlVersion: 2 }, data: { userLimit: 7 } })).toMatchObject({ count: 1 });
+      });
+    } finally {
+      release.resolve(); releaseFence.resolve(); await writer?.catch(() => {}); await settlement?.catch(() => {});
+      await queuedSettings?.catch(() => {}); await queuedAllowlist?.catch(() => {});
+      try { await client.temporaryRoom.deleteMany({ where: { id: roomId } }); await client.voiceCreator.deleteMany({ where: { id: creatorId } }); }
+      finally { await disconnectDatabase(client); }
+    }
+  }, 30_000);
+
   integrationTest('serializes independent toggles and confirms lost SQL replies with the real CAS and native projection', async () => {
     assertDisposableDatabaseEnvironment();
     const client = createPrismaClient({ url: process.env.DATABASE_URL!, directUrl: process.env.DIRECT_URL! });
@@ -33,8 +112,8 @@ describe('independent room lock persistence', () => {
       expect(await store.read(roomId)).toMatchObject({ room: { isLocked: true, visibility: 'PRIVATE' } });
       const commit = store.updateSettings.bind(store); const restore = vi.spyOn(f.gateway, 'restoreAccess');
       vi.spyOn(store, 'updateSettings').mockImplementationOnce(async (...args) => { await commit(...args); throw new Error('lost SQL acknowledgement'); });
-      await controls.toggleVisibility(actor, f.gateway);
-      expect(await store.read(roomId)).toMatchObject({ room: { isLocked: true, visibility: 'PUBLIC' } });
+      await expect(controls.toggleVisibility(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+      expect(await store.read(roomId)).toMatchObject({ room: { isLocked: true, visibility: 'PUBLIC', controlVersion: 1 } });
       const everyone = f.projected().find((p) => p.id === f.guild.id)!;
       expect(everyone.allow.has([P.ViewChannel, P.SendMessages], false)).toBe(true);
       expect(everyone.deny.has(P.Connect, false)).toBe(true); expect(restore).not.toHaveBeenCalled();
