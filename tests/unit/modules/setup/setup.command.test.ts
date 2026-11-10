@@ -9,7 +9,7 @@ const guildId = '12345678901234567';
 const configuration: VoiceCreatorConfiguration = {
   id: '123e4567-e89b-42d3-a456-426614174000', guildDiscordId: guildId,
   creatorChannelDiscordId: '22345678901234567', categoryDiscordId: '32345678901234567',
-  roomCommandsEnabled: true, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
+  roomCommandsEnabled: true, defaultUserLimit: 0, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
 };
 const botPermissions = new PermissionsBitField([
   PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.MoveMembers,
@@ -141,7 +141,7 @@ describe('SetupCommand', () => {
     ]));
     expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:delete:${configuration.id}` }));
     expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:change-category:${configuration.id}` }));
-    expect(controls).toContainEqual(expect.objectContaining({ custom_id: 'setup:v1:add' }));
+    expect(controls).toContainEqual(expect.objectContaining({ custom_id: 'setup:v2:create:start' }));
     expect(send).not.toHaveBeenCalled();
   });
 

@@ -10,7 +10,7 @@ const guildId = '12345678901234567';
 const first: VoiceCreatorConfiguration = {
   id: '123e4567-e89b-42d3-a456-426614174000', guildDiscordId: guildId,
   creatorChannelDiscordId: '22345678901234567', categoryDiscordId: '32345678901234567',
-  roomCommandsEnabled: true, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
+  roomCommandsEnabled: true, defaultUserLimit: 0, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
 };
 const second = { ...first, id: '123e4567-e89b-42d3-a456-426614174001', creatorChannelDiscordId: '52345678901234567' };
 type Kind = 'button' | 'channel' | 'string' | 'modal' | 'role';
@@ -35,12 +35,17 @@ function fixture(action = 'toggle-commands', kind: Kind = 'button', values: stri
     return { ...item };
   });
   const remove = vi.fn(async (id: string) => { configurations = configurations.filter((item) => item.id !== id); });
-  const repository: VoiceCreatorRepository = { listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, delete: remove, findByChannel: vi.fn() };
+  const setDefaultUserLimit = vi.fn(async (id: string, limit: number) => {
+    const item = configurations.find((entry) => entry.id === id)!;
+    item.defaultUserLimit = limit;
+    return { ...item };
+  });
+  const repository: VoiceCreatorRepository = { listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, delete: remove, findByChannel: vi.fn(), findStoredByChannel: vi.fn(), setDefaultUserLimit };
   const assertCanConfigure = vi.fn().mockResolvedValue(undefined);
   const getVoiceChannel = vi.fn(async (id: string) => ({ id, name: id === second.creatorChannelDiscordId ? 'Segundo' : 'Criar sala', categoryDiscordId: first.categoryDiscordId }));
   const getCategory = vi.fn(async (id: string) => ({ id, name: 'Salas' }));
   const renameVoiceChannel = vi.fn().mockResolvedValue(undefined);
-  const gateway: SetupDiscordGateway = { assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel };
+  const gateway: SetupDiscordGateway = { assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel, createVoiceCreator: vi.fn(), deleteCreatedVoiceCreatorIfEmpty: vi.fn() };
   const factory = vi.fn<SetupDiscordGatewayFactory>().mockReturnValue(gateway);
   const reply = vi.fn().mockResolvedValue(undefined);
   const deferUpdate = vi.fn().mockResolvedValue(undefined);
@@ -58,7 +63,7 @@ function fixture(action = 'toggle-commands', kind: Kind = 'button', values: stri
     fields: { getTextInputValue: vi.fn().mockReturnValue('Novo nome') },
     channel: { send }, reply, deferUpdate, editReply, showModal,
   } as unknown as SetupInteraction;
-  return { handler: new SetupInteractions(new SetupService(repository, onControlsChanged), factory), interaction, factory, reply, deferUpdate, editReply, showModal, send, listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, remove, assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel, configurations };
+  return { handler: new SetupInteractions(new SetupService(repository, onControlsChanged), factory), interaction, factory, reply, deferUpdate, editReply, showModal, send, listByGuild, findById, create, updateCategory, setRoomCommandsEnabled, setDefaultUserLimit, remove, assertCanConfigure, getVoiceChannel, getCategory, renameVoiceChannel, configurations };
 }
 
 function payload(f: ReturnType<typeof fixture>) {
@@ -66,7 +71,7 @@ function payload(f: ReturnType<typeof fixture>) {
 }
 
 function expectNoMutation(f: ReturnType<typeof fixture>) {
-  for (const mutation of [f.create, f.updateCategory, f.setRoomCommandsEnabled, f.remove, f.renameVoiceChannel]) {
+  for (const mutation of [f.create, f.updateCategory, f.setRoomCommandsEnabled, f.setDefaultUserLimit, f.remove, f.renameVoiceChannel]) {
     expect(mutation).not.toHaveBeenCalled();
   }
   expect(f.send).not.toHaveBeenCalled();
@@ -138,23 +143,54 @@ describe('SetupInteractions', () => {
     expectNoMutation(f);
   });
 
-  it('starts add with a validated existing voice channel and a native category selector', async () => {
-    const f = fixture('add', 'channel', ['62345678901234567']);
+  it.each(['add', 'add-category'])('expires old %s without any external work', async (action) => {
+    const f = fixture(action, 'channel', ['72345678901234567'], '62345678901234567');
     await f.handler.execute(f.interaction);
-    expect(f.getVoiceChannel).toHaveBeenCalledWith('62345678901234567');
-    expect(payload(f).components[0].components[0]).toMatchObject({ custom_id: 'setup:v1:add-category:62345678901234567', type: 8, channel_types: [4] });
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Abra /setup init novamente', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }));
+    expect(f.factory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
     expectNoMutation(f);
   });
 
-  it('revalidates both add targets on the second step and renders the newly persisted creator', async () => {
-    const f = fixture('add-category', 'channel', ['72345678901234567'], '62345678901234567');
+  it('opens the generic default modal before all gateway/repository work', async () => {
+    const f = fixture('default-limit');
+    f.assertCanConfigure.mockReturnValue(new Promise(() => {}));
+    f.listByGuild.mockReturnValue(new Promise(() => {}));
+    const pending = f.handler.execute(f.interaction);
+    expect(f.showModal).toHaveBeenCalledOnce();
+    await pending;
+    const modal = JSON.parse(JSON.stringify(f.showModal.mock.calls[0]![0]));
+    expect(modal).toMatchObject({ custom_id: `setup:v1:default-limit:${first.id}` });
+    expect(modal.components[0].components[0]).toMatchObject({ custom_id: 'default-limit', value: '0' });
+    expect(f.factory).not.toHaveBeenCalled();
+    expect(f.listByGuild).not.toHaveBeenCalled();
+    expectNoMutation(f);
+  });
+
+  it.each(['0', '1', '99'])('saves only the default %s after ack and preserves missing-category recovery', async (value) => {
+    const f = fixture('default-limit', 'modal');
+    const before = structuredClone(f.configurations);
+    if (f.interaction.isModalSubmit()) vi.mocked(f.interaction.fields.getTextInputValue).mockReturnValue(value);
+    f.getCategory.mockResolvedValue(null as never);
     await f.handler.execute(f.interaction);
-    expect(f.getVoiceChannel).toHaveBeenCalledWith('62345678901234567');
-    expect(f.getCategory).toHaveBeenCalledWith('72345678901234567');
-    expect(f.create).toHaveBeenCalledExactlyOnceWith({ guildDiscordId: guildId, creatorChannelDiscordId: '62345678901234567', categoryDiscordId: '72345678901234567' });
-    expect(payload(f).embeds[0].title).toBe('Configuração do Charon');
-    expect(payload(f).components[0].components[0].options).toContainEqual(expect.objectContaining({ value: '123e4567-e89b-42d3-a456-426614174002', default: true }));
-    expect(payload(f).embeds[0].fields).toContainEqual({ name: 'Voice Creator', value: '<#62345678901234567>' });
+    expect(f.deferUpdate.mock.invocationCallOrder[0]).toBeLessThan(f.assertCanConfigure.mock.invocationCallOrder[0]!);
+    expect(f.deferUpdate.mock.invocationCallOrder[0]).toBeLessThan(f.listByGuild.mock.invocationCallOrder[0]!);
+    expect(f.setDefaultUserLimit).toHaveBeenCalledExactlyOnceWith(first.id, Number(value));
+    expect(f.configurations).toEqual([{ ...before[0], defaultUserLimit: Number(value) }, before[1]]);
+    expect(f.renameVoiceChannel).not.toHaveBeenCalled();
+    expect(f.updateCategory).not.toHaveBeenCalled();
+    expect(f.setRoomCommandsEnabled).not.toHaveBeenCalled();
+    expect(payload(f).embeds[0].fields).toContainEqual({ name: 'Limite padrão das novas calls', value: value === '0' ? '0 · sem limite' : value });
+    expect(JSON.stringify(payload(f))).toContain('Categoria indisponível');
+  });
+
+  it.each(['', '-1', '100', '1.5', '01'])('rejects invalid default form %j before I/O', async (value) => {
+    const f = fixture('default-limit', 'modal');
+    if (f.interaction.isModalSubmit()) vi.mocked(f.interaction.fields.getTextInputValue).mockReturnValue(value);
+    await f.handler.execute(f.interaction);
+    expect(f.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
+    expect(f.factory).not.toHaveBeenCalled();
+    expectNoMutation(f);
   });
 
   it('changes destination even when the old category no longer exists', async () => {
@@ -281,8 +317,9 @@ describe('SetupInteractions', () => {
     expectNoMutation(f);
   });
 
-  it.each(['delete', 'confirm-delete', 'cancel', 'toggle-commands', 'rename', 'change-category', 'select'])('rejects a forged foreign-guild configuration on every action: %s', async (action) => {
-    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : action === 'rename' ? 'modal' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
+  it.each(['delete', 'confirm-delete', 'cancel', 'toggle-commands', 'rename', 'default-limit', 'change-category', 'select'])('rejects a forged foreign-guild configuration on every action: %s', async (action) => {
+    const f = fixture(action, action === 'select' ? 'string' : action === 'change-category' ? 'channel' : action === 'rename' || action === 'default-limit' ? 'modal' : 'button', [action === 'change-category' ? '72345678901234567' : first.id]);
+    if (action === 'default-limit' && f.interaction.isModalSubmit()) vi.mocked(f.interaction.fields.getTextInputValue).mockReturnValue('4');
     f.configurations[0]!.guildDiscordId = '92345678901234567';
     await f.handler.execute(f.interaction);
     expectNoMutation(f);
@@ -456,7 +493,7 @@ describe('SetupInteractions', () => {
     expectNoMutation(f);
   });
 
-  it.each(['add', 'add-category', 'rename', 'toggle-commands', 'change-category'])('denies a missing live voice target for actual changes: %s', async (action) => {
+  it.each(['rename', 'toggle-commands', 'change-category'])('denies a missing live voice target for actual changes: %s', async (action) => {
     const f = fixture(action, action === 'add' || action === 'add-category' || action === 'change-category' ? 'channel' : action === 'rename' ? 'modal' : 'button', ['72345678901234567'], action === 'add-category' ? '62345678901234567' : first.id);
     f.getVoiceChannel.mockResolvedValue(null as never);
     await f.handler.execute(f.interaction);
@@ -464,7 +501,7 @@ describe('SetupInteractions', () => {
     expect(payload(f).content).toContain('indisponível');
   });
 
-  it.each(['add-category', 'change-category', 'toggle-commands', 'rename'])('denies missing required destination categories: %s', async (action) => {
+  it.each(['change-category', 'toggle-commands', 'rename'])('denies missing required destination categories: %s', async (action) => {
     const f = fixture(action, action === 'add-category' || action === 'change-category' ? 'channel' : action === 'rename' ? 'modal' : 'button', ['72345678901234567'], action === 'add-category' ? '62345678901234567' : first.id);
     f.getCategory.mockResolvedValue(null as never);
     await f.handler.execute(f.interaction);
@@ -473,8 +510,8 @@ describe('SetupInteractions', () => {
   });
 
   it.each([new VoiceCreatorAlreadyConfiguredError(), new VoiceCreatorNotFoundError()])('renders safe domain failures rather than raw storage details', async (error) => {
-    const f = fixture('add-category', 'channel', ['72345678901234567'], '62345678901234567');
-    f.create.mockRejectedValue(error);
+    const f = fixture('confirm-delete');
+    f.remove.mockRejectedValue(error);
     await f.handler.execute(f.interaction);
     expect(payload(f).content).toEqual(expect.any(String));
     expect(payload(f).content).not.toContain(error.message);

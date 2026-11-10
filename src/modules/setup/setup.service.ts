@@ -8,6 +8,7 @@ import {
   type VoiceCreatorRepository,
 } from './setup.repository.js';
 import {
+  defaultUserLimitSchema,
   discordIdSchema,
   setupChannelNameSchema,
   voiceCreatorIdSchema,
@@ -37,6 +38,9 @@ export class SetupService {
         input.creatorChannelDiscordId,
       ),
       categoryDiscordId: discordIdSchema.parse(input.categoryDiscordId),
+      ...(input.defaultUserLimit === undefined ? {} : {
+        defaultUserLimit: defaultUserLimitSchema.parse(input.defaultUserLimit),
+      }),
     });
   }
 
@@ -47,6 +51,16 @@ export class SetupService {
     return this.repository.updateCategory(
       voiceCreatorIdSchema.parse(id),
       discordIdSchema.parse(categoryDiscordId),
+    );
+  }
+
+  async setDefaultUserLimit(
+    id: string,
+    limit: number,
+  ): Promise<VoiceCreatorConfiguration> {
+    return this.repository.setDefaultUserLimit(
+      voiceCreatorIdSchema.parse(id),
+      defaultUserLimitSchema.parse(limit),
     );
   }
 

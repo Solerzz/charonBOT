@@ -10,8 +10,9 @@ import {
 } from 'discord.js';
 
 import type { SetupVoiceChannel } from './setup.discord.js';
+import type { ReadySetupDraft, SetupDraft } from './setup-creation.types.js';
 import type { VoiceCreatorConfiguration } from './setup.repository.js';
-import { encodeSetupCustomId } from './setup.schemas.js';
+import { encodeSetupCustomId, encodeSetupCreationCustomId } from './setup.schemas.js';
 
 export interface SetupDashboardInput {
   configurations: readonly VoiceCreatorConfiguration[];
@@ -33,21 +34,18 @@ export function buildSetupDashboard(input: SetupDashboardInput): SetupDashboardP
   const embed = new EmbedBuilder()
     .setTitle('Configuração do Charon')
     .setColor(0x2b2d31);
-  const add = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
-    new ChannelSelectMenuBuilder()
-      .setCustomId(encodeSetupCustomId({ version: 'v1', action: 'add' }))
-      .setPlaceholder('Adicionar Voice Creator')
-      .setChannelTypes(ChannelType.GuildVoice)
-      .setMinValues(1)
-      .setMaxValues(1),
+  const add = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(encodeSetupCreationCustomId({ version: 'v2', action: 'start' }))
+      .setLabel('Criar canal de entrada').setStyle(ButtonStyle.Primary),
   );
 
   if (selected === undefined) {
-    embed.setDescription('Nenhum Voice Creator configurado. Adicione um canal de voz existente para começar.');
+    embed.setDescription('Nenhum Voice Creator configurado. Crie um canal de entrada para começar.');
     return { embeds: [embed], components: [add], allowedMentions: { parse: [] } };
   }
 
-  const customId = (action: 'select' | 'change-category' | 'rename' | 'toggle-commands' | 'delete') =>
+  const customId = (action: 'select' | 'change-category' | 'rename' | 'default-limit' | 'toggle-commands' | 'delete') =>
     encodeSetupCustomId({ version: 'v1', action, voiceCreatorId: selected.id });
   const nameOf = (item: VoiceCreatorConfiguration) =>
     unavailableChannelDiscordIds.includes(item.creatorChannelDiscordId)
@@ -63,7 +61,8 @@ export function buildSetupDashboard(input: SetupDashboardInput): SetupDashboardP
       { name: 'Voice Creator', value: voiceUnavailable ? `Indisponível · ID ${selected.creatorChannelDiscordId}` : `<#${selected.creatorChannelDiscordId}>` },
       { name: 'Categoria das salas', value: categoryUnavailable ? `Indisponível · ID ${selected.categoryDiscordId}` : `<#${selected.categoryDiscordId}>` },
       { name: 'Nome do canal', value: voiceUnavailable ? 'Indisponível' : nameOf(selected) },
-      { name: 'Comandos da sala', value: `${enabled ? 'Habilitados' : 'Desabilitados'} · disponíveis em versões futuras` },
+      { name: 'Comandos da sala', value: enabled ? 'Habilitados' : 'Desabilitados' },
+      { name: 'Limite padrão das novas calls', value: formatDefaultLimit(selected.defaultUserLimit) },
       { name: 'Zona de perigo', value: 'Excluir remove apenas a configuração. O canal e as salas ativas são preservados.' },
     );
   const warnings: string[] = [];
@@ -124,11 +123,52 @@ export function buildSetupDashboard(input: SetupDashboardInput): SetupDashboardP
   );
   const actions = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(customId('rename')).setLabel('Renomear').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(customId('default-limit')).setLabel('Limite padrão').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(customId('toggle-commands')).setLabel(`Comandos: ${enabled ? 'habilitados' : 'desabilitados'}`).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(customId('delete')).setLabel('Excluir configuração').setStyle(ButtonStyle.Danger),
   );
   return {
     embeds: [embed], components: [creators, add, category, actions],
     allowedMentions: { parse: [] },
+  };
+}
+
+function formatDefaultLimit(limit: number): string {
+  return limit === 0 ? '0 · sem limite' : String(limit);
+}
+
+export function buildSetupCreationCategory(draft: SetupDraft): SetupDashboardPayload {
+  const category = new ChannelSelectMenuBuilder()
+    .setCustomId(encodeSetupCreationCustomId({ version: 'v2', action: 'category', id: draft.id, revision: draft.revision }))
+    .setPlaceholder('Categoria do canal de entrada e das calls')
+    .setChannelTypes(ChannelType.GuildCategory).setMinValues(1).setMaxValues(1);
+  if (draft.input.categoryDiscordId !== undefined) category.setDefaultChannels(draft.input.categoryDiscordId);
+  return {
+    embeds: [new EmbedBuilder().setTitle('Criar canal de entrada').setColor(0x2b2d31)
+      .setDescription('Escolha uma categoria existente para o canal de entrada e as novas calls.')],
+    components: [new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(category),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder()
+        .setCustomId(encodeSetupCreationCustomId({ version: 'v2', action: 'cancel', id: draft.id, revision: draft.revision }))
+        .setLabel('Cancelar').setStyle(ButtonStyle.Secondary))],
+    allowedMentions: { parse: [] },
+  };
+}
+
+export function buildSetupCreationReview(draft: ReadySetupDraft): SetupDashboardPayload {
+  const button = (action: 'confirm' | 'back' | 'cancel', label: string, style: ButtonStyle) => new ButtonBuilder()
+    .setCustomId(encodeSetupCreationCustomId({ version: 'v2', action, id: draft.id, revision: draft.revision }))
+    .setLabel(label).setStyle(style);
+  return {
+    embeds: [new EmbedBuilder().setTitle('Confirmar canal de entrada').setColor(0x2b2d31).addFields(
+      { name: 'Nome do canal de entrada', value: draft.input.name },
+      { name: 'Categoria de entrada e das calls', value: `<#${draft.input.categoryDiscordId}>` },
+      { name: 'Limite inicial das calls', value: formatDefaultLimit(draft.input.defaultUserLimit) },
+      { name: 'Canal de entrada', value: 'Sempre sem limite de participantes.' },
+      { name: 'Nome das calls', value: 'Nome automático baseado no jogo ou nome de exibição.' },
+    )],
+    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      button('confirm', 'Confirmar criação', ButtonStyle.Primary),
+      button('back', 'Voltar', ButtonStyle.Secondary), button('cancel', 'Cancelar', ButtonStyle.Secondary),
+    )], allowedMentions: { parse: [] },
   };
 }

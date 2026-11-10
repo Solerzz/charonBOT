@@ -5,10 +5,25 @@ import { CallMoveUnconfirmedError } from '../../../../src/modules/calls/call.dis
 import { creator, deferred, entry, room } from './call.fixtures.js';
 import { discordFixture as fixture } from './call.discord.fixtures.js';
 
-const createInput = { categoryDiscordId: creator.categoryDiscordId, name: 'Game' };
+const createInput = { categoryDiscordId: creator.categoryDiscordId, name: 'Game', userLimit: 0 };
 const panel = { embeds: [], components: [], allowedMentions: { parse: [] as never[] } };
 
 describe('DiscordCallGateway', () => {
+  it.each([0, 1, 4, 99])('includes limit %i in the single create request, without a later limit edit', async (userLimit) => {
+    const f = fixture();
+    await f.gateway.createTemporaryChannel({ ...createInput, userLimit });
+    expect(f.guild.channels.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ userLimit }));
+    expect((await f.gateway.snapshot(room.channelDiscordId))?.userLimit).toBe(userLimit);
+    expect(f.channel.setUserLimit).not.toHaveBeenCalled();
+  });
+
+  it.each([-1, 100, 1.5, undefined])('rejects invalid or missing limit %s before any HTTP', async (userLimit) => {
+    const f = fixture();
+    await expect(f.gateway.createTemporaryChannel({ ...createInput, userLimit: userLimit as number })).rejects.toThrow();
+    expect(f.guild.channels.fetch).not.toHaveBeenCalled();
+    expect(f.guild.members.fetchMe).not.toHaveBeenCalled();
+    expect(f.guild.channels.create).not.toHaveBeenCalled();
+  });
   it('delegates exact native name restoration while keeping owner rename strict', async () => {
     const f = fixture(); const previous = `  ${'x'.repeat(96)}  `;
     f.channel.setName.mockImplementation(async (name) => { f.channel.name = name; });

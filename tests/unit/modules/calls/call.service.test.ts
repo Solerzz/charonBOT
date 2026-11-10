@@ -23,6 +23,65 @@ function fields(payload: CallPanelPayload) {
 const departure = { ...entry, oldChannelDiscordId: room.channelDiscordId, newChannelDiscordId: null, oldChannelMemberCount: 0 };
 
 describe('CallService', () => {
+  it.each([[0, '1 / Ilimitado'], [1, '1 / 1'], [4, '1 / 4'], [99, '1 / 99']] as const)('copies default %i to Discord, initial persistence and the retained panel', async (userLimit, capacity) => {
+    const f = fixture(); f.configuration.defaultUserLimit = userLimit;
+    await f.handle();
+    expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game', userLimit });
+    expect(f.rooms.createCreating).toHaveBeenCalledWith(expect.objectContaining({ name: 'Game', userLimit }));
+    expect(f.records.get(room.id)).toMatchObject({ userLimit, controlMessageDiscordId: room.controlMessageDiscordId });
+    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: capacity });
+    expect(f.gateway.setLimit).not.toHaveBeenCalled();
+    expect(f.gateway.rename).not.toHaveBeenCalled();
+  });
+
+  it.each([-1, 100, 1.5, undefined])('rejects invalid creator default %s before creating a channel or row', async (limit) => {
+    const f = fixture(); f.configuration.defaultUserLimit = limit as number;
+    await expect(f.handle()).rejects.toThrow();
+    expect(f.gateway.createTemporaryChannel).not.toHaveBeenCalled();
+    expect(f.rooms.createCreating).not.toHaveBeenCalled();
+  });
+
+  it('uses a captured creator snapshot while create awaits a concurrent default/category edit', async () => {
+    const f = fixture(); f.configuration.defaultUserLimit = 4;
+    const started = deferred(); const release = deferred();
+    f.gateway.createTemporaryChannel.mockImplementationOnce(async () => {
+      started.resolve(); await release.promise; return { channelDiscordId: room.channelDiscordId };
+    });
+    const creating = f.handle(); await started.promise;
+    f.configuration.defaultUserLimit = 8; f.configuration.categoryDiscordId = '82345678901234567';
+    release.resolve(); await creating;
+    expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game', userLimit: 4 });
+    expect(f.records.get(room.id)?.userLimit).toBe(4);
+    expect(f.creators.findByChannel).toHaveBeenCalledOnce();
+    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / 4' });
+  });
+
+  it('reuses an owner-edited room without resetting its name, limit or panel after a template edit', async () => {
+    const f = fixture(); f.configuration.defaultUserLimit = 99;
+    f.records.set(room.id, { ...room, name: 'Owner name', userLimit: 8 });
+    f.counts.set(room.channelDiscordId, 1);
+    await f.handle();
+    expect(f.gateway.createTemporaryChannel).not.toHaveBeenCalled();
+    expect(f.rooms.createCreating).not.toHaveBeenCalled();
+    expect(f.gateway.rename).not.toHaveBeenCalled(); expect(f.gateway.setLimit).not.toHaveBeenCalled();
+    expect(f.records.get(room.id)).toMatchObject({ name: 'Owner name', userLimit: 8, controlMessageDiscordId: room.controlMessageDiscordId });
+    expect(f.gateway.sendControlPanel).not.toHaveBeenCalled();
+    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2 / 8' });
+  });
+
+  it('applies an edited default only to the next newly created room and keeps automatic display-name fallback', async () => {
+    const f = fixture(); f.configuration.defaultUserLimit = 4;
+    await f.handle();
+    const previous = f.records.get(room.id)!;
+    f.configuration.defaultUserLimit = 8;
+    expect(previous.userLimit).toBe(4);
+    f.counts.set(room.channelDiscordId, 0); f.setMemberChannel(null);
+    await f.handle(departure);
+    f.setMemberChannel(creator.creatorChannelDiscordId);
+    await f.handle({ ...entry, activityName: null });
+    expect(f.gateway.createTemporaryChannel).toHaveBeenNthCalledWith(2, { categoryDiscordId: creator.categoryDiscordId, name: 'Member', userLimit: 8 });
+    expect(f.records.get(room.id)?.userLimit).toBe(8);
+  });
   it('retires historical coordinator metadata after permanently closing successive rooms', async () => {
     const f = fixture();
     const state = f.runtime.coordinator as unknown as { generations: Map<string, number>; departures: Map<string, unknown>; ownershipAttempts: Map<string, unknown>; accepted: Map<string, unknown> };
@@ -88,8 +147,8 @@ describe('CallService', () => {
   it('creates, persists, moves and sends a real panel, then activates with the message ID', async () => {
     const f = fixture();
     await f.handle();
-    expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game' });
-    expect(f.rooms.createCreating).toHaveBeenCalledExactlyOnceWith({ guildDiscordId: entry.guildDiscordId, voiceCreatorId: creator.id, channelDiscordId: room.channelDiscordId, ownerDiscordId: entry.memberDiscordId, name: 'Game' });
+    expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game', userLimit: 0 });
+    expect(f.rooms.createCreating).toHaveBeenCalledExactlyOnceWith({ guildDiscordId: entry.guildDiscordId, voiceCreatorId: creator.id, channelDiscordId: room.channelDiscordId, ownerDiscordId: entry.memberDiscordId, name: 'Game', userLimit: 0 });
     expect(f.gateway.moveMember).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, creator.creatorChannelDiscordId);
     expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / Ilimitado' });
     expect(f.records.get(room.id)).toMatchObject({ status: 'ACTIVE', controlMessageDiscordId: room.controlMessageDiscordId });
@@ -235,7 +294,7 @@ describe('CallService', () => {
   });
 
   it('compensates failed creating persistence by deleting the Discord channel', async () => {
-    const f = fixture();
+    const f = fixture(); f.configuration.defaultUserLimit = 4;
     f.rooms.createCreating.mockRejectedValueOnce(new Error('sensitive name'));
     await f.handle();
     expect(f.gateway.deleteChannel).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId);
@@ -244,10 +303,11 @@ describe('CallService', () => {
   });
 
   it('compensates move failure by closing and deleting the unoccupied new room', async () => {
-    const f = fixture();
+    const f = fixture(); f.configuration.defaultUserLimit = 4;
     f.gateway.moveMember.mockRejectedValueOnce(new Error('move failed'));
     await f.handle();
     expect(f.records.get(room.id)?.status).toBe('CLOSED');
+    expect(f.records.get(room.id)?.userLimit).toBe(4);
     expect(f.gateway.deleteChannel).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId);
     expect(f.gateway.sendControlPanel).not.toHaveBeenCalled();
   });
@@ -358,14 +418,14 @@ describe('CallService', () => {
   });
 
   it('does not destroy an occupied room after an uncertain move failure and clears the absent owner', async () => {
-    const f = fixture();
+    const f = fixture(); f.configuration.defaultUserLimit = 4;
     f.gateway.moveMember.mockImplementationOnce(async () => {
       f.counts.set(room.channelDiscordId, 1); // A different member arrived.
       throw new Error('move failed');
     });
     await f.handle();
     expect(f.gateway.deleteChannel).not.toHaveBeenCalled();
-    expect(f.records.get(room.id)).toMatchObject({ status: 'ACTIVE', ownerDiscordId: null });
+    expect(f.records.get(room.id)).toMatchObject({ status: 'ACTIVE', ownerDiscordId: null, userLimit: 4 });
   });
 
   it('clears the absent creator owner when creation is cancelled but somebody else occupies the new room', async () => {

@@ -14,10 +14,20 @@ export const setupChannelNameSchema: z.ZodString = z
   .min(1, 'Setup channel name is required')
   .max(100, 'Setup channel name must contain at most 100 characters');
 
+export const defaultUserLimitSchema = z.number().int().min(0).max(99);
+
+export const setupDefaultLimitInputSchema = z
+  .string()
+  .trim()
+  .regex(/^(0|[1-9][0-9]?)$/, 'Invalid default room limit')
+  .transform(Number)
+  .pipe(defaultUserLimitSchema);
+
 type VoiceCreatorAction =
   | 'select'
   | 'change-category'
   | 'rename'
+  | 'default-limit'
   | 'toggle-commands'
   | 'delete'
   | 'confirm-delete'
@@ -36,6 +46,7 @@ const voiceCreatorActions = new Set<VoiceCreatorAction>([
   'select',
   'change-category',
   'rename',
+  'default-limit',
   'toggle-commands',
   'delete',
   'confirm-delete',
@@ -100,4 +111,34 @@ export function encodeSetupCustomId(value: SetupCustomId): string {
     default:
       return `setup:v1:${value.action}:${value.voiceCreatorId}`;
   }
+}
+
+type SetupCreationAction = 'category' | 'form' | 'back' | 'cancel' | 'confirm';
+export type SetupCreationCustomId =
+  | { version: 'v2'; action: 'start' }
+  | { version: 'v2'; action: SetupCreationAction; id: string; revision: number };
+
+const setupCreationActionSchema = z.enum(['category', 'form', 'back', 'cancel', 'confirm']);
+
+export const setupCreationCustomIdSchema: z.ZodType<SetupCreationCustomId> = z.string().max(100)
+  .transform((value, context): SetupCreationCustomId => {
+    if (value === 'setup:v2:create:start') return { version: 'v2', action: 'start' };
+    const parts = value.split(':');
+    const action = setupCreationActionSchema.safeParse(parts[3]);
+    const id = voiceCreatorIdSchema.safeParse(parts[4]);
+    const revision = parts[5];
+    if (parts.length === 6 && parts[0] === 'setup' && parts[1] === 'v2' && parts[2] === 'create'
+      && action.success && id.success && revision !== undefined && /^(0|[1-9]\d*)$/.test(revision)
+      && Number.isSafeInteger(Number(revision))) {
+      return { version: 'v2', action: action.data, id: id.data, revision: Number(revision) };
+    }
+    context.addIssue({ code: 'custom', message: 'Invalid setup creation custom ID' });
+    return z.NEVER;
+  });
+
+export function encodeSetupCreationCustomId(value: SetupCreationCustomId): string {
+  const encoded = value.action === 'start' ? 'setup:v2:create:start'
+    : `setup:v2:create:${value.action}:${value.id}:${value.revision}`;
+  setupCreationCustomIdSchema.parse(encoded);
+  return encoded;
 }

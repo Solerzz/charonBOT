@@ -4,14 +4,14 @@ import { vi } from 'vitest';
 import type { TemporaryRoom, VoiceCreator } from '../../../../src/generated/prisma/client.js';
 import type { CallDiscordGateway } from '../../../../src/modules/calls/call.discord.js';
 import type { CallPanelPayload } from '../../../../src/modules/calls/call-panel.view.js';
-import type { TemporaryRoomRepository } from '../../../../src/modules/calls/call.repository.js';
+import type { CreateTemporaryRoomInput, TemporaryRoomRepository } from '../../../../src/modules/calls/call.repository.js';
 import type { VoiceTransition } from '../../../../src/modules/calls/call.schemas.js';
 import type { VoiceCreatorRepository } from '../../../../src/modules/setup/setup.repository.js';
 
 export const creator: VoiceCreator = {
   id: '123e4567-e89b-42d3-a456-426614174000',
   guildDiscordId: '12345678901234567', creatorChannelDiscordId: '22345678901234567',
-  categoryDiscordId: '32345678901234567', roomCommandsEnabled: true,
+  categoryDiscordId: '32345678901234567', roomCommandsEnabled: true, defaultUserLimit: 0,
   deletedAt: null, createdAt: new Date(0), updatedAt: new Date(0),
 };
 export const room: TemporaryRoom = {
@@ -41,6 +41,7 @@ export function lifecycleFixture() {
   const creators = {
     listByGuild: vi.fn(), findById: vi.fn(), create: vi.fn(), updateCategory: vi.fn(),
     setRoomCommandsEnabled: vi.fn(), delete: vi.fn(),
+    findStoredByChannel: vi.fn(), setDefaultUserLimit: vi.fn(),
     findByChannel: vi.fn(async (id: string) => id === creator.creatorChannelDiscordId ? configuration : null),
   } satisfies VoiceCreatorRepository;
   const change = (id: string, data: Partial<TemporaryRoom>) => {
@@ -53,8 +54,8 @@ export function lifecycleFixture() {
   const rooms = {
     findActiveByChannel: vi.fn(async (id: string) => [...records.values()].find((r) => r.channelDiscordId === id && r.status !== 'CLOSED') ?? null),
     findActiveByOwner: vi.fn(async (guild: string, owner: string) => [...records.values()].find((r) => r.guildDiscordId === guild && r.ownerDiscordId === owner && r.status !== 'CLOSED') ?? null),
-    createCreating: vi.fn(async (input) => {
-      const created = { ...room, ...input, status: 'CREATING' as const, controlMessageDiscordId: null };
+    createCreating: vi.fn(async (input: CreateTemporaryRoomInput) => {
+      const created = { ...room, ...input, userLimit: input.userLimit, status: 'CREATING' as const, controlMessageDiscordId: null };
       records.set(created.id, created);
       return created;
     }),

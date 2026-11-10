@@ -7,7 +7,7 @@ import {
   type VoiceChannel,
 } from 'discord.js';
 
-import { discordIdSchema } from '../setup/setup.schemas.js';
+import { defaultUserLimitSchema, discordIdSchema } from '../setup/setup.schemas.js';
 import type { CallPanelPayload } from './call-panel.view.js';
 import { temporaryRoomNameSchema } from './call.schemas.js';
 import { DiscordRoomGateway } from './room.discord.js';
@@ -16,6 +16,7 @@ import type { RoomDiscordGateway } from './room.types.js';
 export interface CreateDiscordRoomInput {
   categoryDiscordId: string;
   name: string;
+  userLimit: number;
 }
 export interface CreatedDiscordRoom {
   channelDiscordId: string;
@@ -86,12 +87,13 @@ export class DiscordCallGateway implements CallDiscordGateway {
 
   async createTemporaryChannel(input: CreateDiscordRoomInput): Promise<CreatedDiscordRoom> {
     const name = temporaryRoomNameSchema.parse(input.name);
+    const userLimit = defaultUserLimitSchema.parse(input.userLimit);
     const category = await this.fetchChannel(input.categoryDiscordId);
     if (category?.type !== ChannelType.GuildCategory) throw new CallDiscordError();
     const bot = await this.guild.members.fetchMe({ force: true });
     this.assertPermissions(category, bot, [PermissionFlagsBits.ManageChannels]);
     const channel = await this.guild.channels.create({
-      name, type: ChannelType.GuildVoice, parent: category.id, userLimit: 0,
+      name, type: ChannelType.GuildVoice, parent: category.id, userLimit,
       // Explicit overwrites prevent inheriting hidden/private category denies.
       // Role/member-specific category denies are intentionally not copied.
       permissionOverwrites: [

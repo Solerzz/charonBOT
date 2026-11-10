@@ -24,12 +24,24 @@ export interface SetupDiscordGateway extends SetupChannelGateway {
   getVoiceChannel(channelDiscordId: string): Promise<SetupVoiceChannel | null>;
   getCategory(categoryDiscordId: string): Promise<SetupCategory | null>;
   assertCanConfigure(channelDiscordId: string): Promise<void>;
+  createVoiceCreator(input: { categoryDiscordId: string; name: string }): Promise<SetupVoiceChannel>;
+  deleteCreatedVoiceCreatorIfEmpty(channelDiscordId: string): Promise<boolean>;
 }
 
 export class SetupDiscordError extends Error {
   constructor(message = 'Canal de voz ou categoria indisponível neste servidor.') {
     super(message);
     this.name = 'SetupDiscordError';
+  }
+}
+
+export class SetupChannelCreationError extends Error {
+  constructor(
+    readonly certainty: 'rejected' | 'unknown' | 'created',
+    readonly channelDiscordId?: string,
+  ) {
+    super('Não foi possível confirmar a criação do canal de entrada.');
+    this.name = 'SetupChannelCreationError';
   }
 }
 
@@ -50,7 +62,88 @@ function discordErrorCode(error: unknown): unknown {
 }
 
 export class DiscordSetupGateway implements SetupDiscordGateway {
+  private readonly createdChannelIds = new Set<string>();
+
   constructor(private readonly guild: Guild) {}
+
+  public async createVoiceCreator(input: {
+    categoryDiscordId: string;
+    name: string;
+  }): Promise<SetupVoiceChannel> {
+    let options;
+    try {
+      const name = setupChannelNameSchema.parse(input.name);
+      const category = await this.fetchChannel(input.categoryDiscordId);
+      if (category?.type !== ChannelType.GuildCategory || category.id !== input.categoryDiscordId) {
+        throw new SetupDiscordError();
+      }
+      this.assertChannelPermissions(category, await this.guild.members.fetchMe({ force: true }), voicePermissions);
+      options = {
+        name, type: ChannelType.GuildVoice as const, parent: category.id, userLimit: 0,
+        // Entry channels inherit restrictions, unlike the public temporary rooms.
+        permissionOverwrites: category.permissionOverwrites.cache.map((overwrite) => ({
+          id: overwrite.id, type: overwrite.type,
+          allow: overwrite.allow.bitfield, deny: overwrite.deny.bitfield,
+        })),
+      };
+    } catch {
+      // No POST has started, so even an uncertain preflight read cannot create.
+      throw new SetupChannelCreationError('rejected');
+    }
+
+    let channel;
+    try {
+      channel = await this.guild.channels.create(options);
+    } catch (error: unknown) {
+      const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : undefined;
+      const rejected = typeof status === 'number' && status >= 400 && status < 500 && status !== 408;
+      throw new SetupChannelCreationError(rejected ? 'rejected' : 'unknown');
+    }
+    if (!discordIdSchema.safeParse(channel.id).success) {
+      throw new SetupChannelCreationError('unknown');
+    }
+
+    // Retain only IDs returned by our own POST; never compensate by name.
+    if (channel.guildId === this.guild.id && channel.type === ChannelType.GuildVoice) {
+      this.createdChannelIds.add(channel.id);
+    }
+    try {
+      const fresh = await this.fetchChannel(channel.id);
+      if (
+        channel.guildId !== this.guild.id || channel.type !== ChannelType.GuildVoice ||
+        fresh?.id !== channel.id || fresh.type !== ChannelType.GuildVoice ||
+        fresh.parentId !== input.categoryDiscordId || fresh.userLimit !== 0
+      ) {
+        throw new SetupDiscordError();
+      }
+      this.assertChannelPermissions(fresh, await this.guild.members.fetchMe({ force: true }), voicePermissions);
+      return { id: fresh.id, name: fresh.name, categoryDiscordId: fresh.parentId };
+    } catch {
+      // The service must verify persistence before deciding whether to compensate.
+      throw new SetupChannelCreationError('created', channel.id);
+    }
+  }
+
+  public async deleteCreatedVoiceCreatorIfEmpty(channelDiscordId: string): Promise<boolean> {
+    if (!this.createdChannelIds.has(channelDiscordId)) return false;
+    try {
+      const channel = await this.guild.channels.fetch(channelDiscordId, { force: true });
+      if (channel !== null) {
+        if (channel.id !== channelDiscordId || channel.guildId !== this.guild.id || channel.type !== ChannelType.GuildVoice) return false;
+        // Recheck the live voice cache after the awaited fetch, next to DELETE.
+        if (this.guild.voiceStates.cache.some((state) => state.channelId === channelDiscordId)) return false;
+        await channel.delete();
+      }
+      this.createdChannelIds.delete(channelDiscordId);
+      return true;
+    } catch (error: unknown) {
+      if (discordErrorCode(error) === 10003) {
+        this.createdChannelIds.delete(channelDiscordId);
+        return true;
+      }
+      return false;
+    }
+  }
 
   public async assertCanConfigure(channelDiscordId: string): Promise<void> {
     const channel = await this.fetchChannel(channelDiscordId);

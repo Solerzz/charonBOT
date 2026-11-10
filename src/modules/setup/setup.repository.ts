@@ -9,7 +9,7 @@ export type VoiceCreatorConfiguration = VoiceCreator;
 export type CreateVoiceCreatorInput = Pick<
   VoiceCreatorConfiguration,
   'guildDiscordId' | 'creatorChannelDiscordId' | 'categoryDiscordId'
->;
+> & { defaultUserLimit?: number };
 
 export class VoiceCreatorAlreadyConfiguredError extends Error {
   constructor() {
@@ -31,6 +31,9 @@ export interface VoiceCreatorRepository {
   findByChannel(
     creatorChannelDiscordId: string,
   ): Promise<VoiceCreatorConfiguration | null>;
+  findStoredByChannel(
+    creatorChannelDiscordId: string,
+  ): Promise<VoiceCreatorConfiguration | null>;
   create(input: CreateVoiceCreatorInput): Promise<VoiceCreatorConfiguration>;
   updateCategory(
     id: string,
@@ -40,6 +43,7 @@ export interface VoiceCreatorRepository {
     id: string,
     enabled: boolean,
   ): Promise<VoiceCreatorConfiguration>;
+  setDefaultUserLimit(id: string, limit: number): Promise<VoiceCreatorConfiguration>;
   delete(id: string): Promise<void>;
 }
 
@@ -77,7 +81,9 @@ export class PrismaVoiceCreatorRepository implements VoiceCreatorRepository {
     input: CreateVoiceCreatorInput,
   ): Promise<VoiceCreatorConfiguration> {
     try {
-      return await this.prisma.voiceCreator.create({ data: input });
+      return await this.prisma.voiceCreator.create({
+        data: { ...input, defaultUserLimit: input.defaultUserLimit ?? 0 },
+      });
     } catch (error: unknown) {
       if (isPrismaErrorWithCode(error, 'P2002')) {
         try {
@@ -89,7 +95,11 @@ export class PrismaVoiceCreatorRepository implements VoiceCreatorRepository {
               guildDiscordId: input.guildDiscordId,
               deletedAt: { not: null },
             },
-            data: { deletedAt: null, categoryDiscordId: input.categoryDiscordId },
+            data: {
+              deletedAt: null,
+              categoryDiscordId: input.categoryDiscordId,
+              ...(input.defaultUserLimit === undefined ? {} : { defaultUserLimit: input.defaultUserLimit }),
+            },
           });
         } catch (restoreError: unknown) {
           if (isPrismaErrorWithCode(restoreError, 'P2025')) {
@@ -100,6 +110,28 @@ export class PrismaVoiceCreatorRepository implements VoiceCreatorRepository {
       }
 
       throw error;
+    }
+  }
+
+  findStoredByChannel(
+    creatorChannelDiscordId: string,
+  ): Promise<VoiceCreatorConfiguration | null> {
+    return this.prisma.voiceCreator.findUnique({
+      where: { creatorChannelDiscordId },
+    });
+  }
+
+  async setDefaultUserLimit(
+    id: string,
+    limit: number,
+  ): Promise<VoiceCreatorConfiguration> {
+    try {
+      return await this.prisma.voiceCreator.update({
+        where: { id, deletedAt: null },
+        data: { defaultUserLimit: limit },
+      });
+    } catch (error: unknown) {
+      this.throwNotFound(error);
     }
   }
 

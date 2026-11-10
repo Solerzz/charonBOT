@@ -21,6 +21,11 @@ export function attachRoomRuntime(f: ReturnType<typeof lifecycleFixture>, logger
       joinedAt: !reset ? presence.get(id)?.find((p) => p.memberDiscordId === member.memberDiscordId)?.joinedAt ?? at : at })));
   });
   vi.spyOn(runtime.store, 'findOwnedRoom').mockImplementation(f.rooms.findActiveByOwner);
+  vi.spyOn(runtime.store, 'updateSettings').mockImplementation(async (id, version, patch) => {
+    const record = f.records.get(id);
+    if (!record || record.status !== 'ACTIVE' || record.controlVersion !== version || !f.configuration.roomCommandsEnabled) return false;
+    Object.assign(record, patch); return true;
+  });
   vi.spyOn(runtime.store, 'savePriority').mockImplementation(async (id, version, member, deadline) => {
     const record = f.records.get(id);
     if (!record || record.controlVersion !== version || record.ownerDiscordId !== null) return false;

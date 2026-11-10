@@ -21,6 +21,8 @@ import { VoiceStateHandler, type VoiceStateDispatcher } from '../../src/modules/
 import { CallInteractions } from '../../src/modules/calls/call.interactions.js';
 import { SetupCommand } from '../../src/modules/setup/setup.command.js';
 import { SetupInteractions } from '../../src/modules/setup/setup.interactions.js';
+import { SetupCreationInteractions } from '../../src/modules/setup/setup-creation.interactions.js';
+import { SetupDraftStore } from '../../src/modules/setup/setup-drafts.js';
 import { StatusCommand } from '../../src/modules/status/status.command.js';
 
 const config: AppConfig = {
@@ -104,6 +106,41 @@ function gate() {
 }
 
 describe('application lifecycle', () => {
+  it.each(['stop', 'database-failure', 'login-failure'] as const)('owns/disposes drafts and drains creation before disconnect with custom dispatchers: %s', async (scenario) => {
+    const events: string[] = [];
+    const ports = dependencies(events);
+    const held = gate();
+    const original = SetupDraftStore.prototype.dispose;
+    let owned!: SetupDraftStore;
+    let completed = false;
+    const dispose = vi.spyOn(SetupDraftStore.prototype, 'dispose').mockImplementation(function (this: SetupDraftStore) {
+      owned = this;
+      const context = { guildDiscordId: '12345678901234567', administratorDiscordId: '22345678901234567', messageDiscordId: '32345678901234567' };
+      const initial = this.begin(context);
+      const category = this.selectCategory(initial, context, '42345678901234567');
+      const review = this.review(category, context, { name: 'Entrada', defaultUserLimit: 4 });
+      void this.confirm(review, context, async () => { events.push('creation:started'); await held.promise; completed = true; events.push('creation:finished'); return { status: 'uncertain' }; });
+      return original.call(this);
+    });
+    if (scenario === 'database-failure') ports.database.$connect = async () => { throw new Error('offline'); };
+    if (scenario === 'login-failure') ports.discord.login = async () => { throw new Error('offline'); };
+    const app = createApplication(config, { ...ports, logger: createLogger({ level: 'silent' }) });
+    let closing: Promise<unknown>;
+    if (scenario === 'stop') { await app.start(); closing = app.stop('test'); }
+    else closing = expect(app.start()).rejects.toThrow();
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(dispose).toHaveBeenCalledOnce();
+      expect(completed).toBe(false);
+      expect(events).toContain('creation:started');
+      expect(events).not.toContain('database:disconnect');
+      expect(events).not.toContain('discord:destroy');
+      expect(() => owned.begin({ guildDiscordId: '12345678901234567', administratorDiscordId: '22345678901234567', messageDiscordId: '32345678901234567' })).toThrow();
+    } finally { held.release(); await closing; dispose.mockRestore(); }
+    expect(completed).toBe(true);
+    expect(events.indexOf('creation:finished')).toBeLessThan(events.indexOf('database:disconnect'));
+    await app.stop('test');
+  });
   it('checks the database and attaches listeners before Discord login', async () => {
     const events: string[] = [];
     const ports = dependencies(events);
@@ -467,7 +504,7 @@ describe('default module composition', () => {
     try {
       const registry = createDefaultDispatcher(createLogger({ level: 'silent' }), database);
       expect(registry).toBeInstanceOf(InteractionRegistry);
-      expect(register.mock.calls.map(([handler]) => handler.constructor)).toEqual([StatusCommand, SetupCommand, SetupInteractions, CallInteractions]);
+      expect(register.mock.calls.map(([handler]) => handler.constructor)).toEqual([StatusCommand, SetupCommand, SetupInteractions, SetupCreationInteractions, CallInteractions]);
       expect(connect).not.toHaveBeenCalled();
     } finally {
       register.mockRestore();

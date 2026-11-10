@@ -40,6 +40,8 @@ Os intents são `Guilds` e `GuildVoiceStates`, sem `GuildPresences`.
 O shutdown bloqueia novos despachos e fecha admissão de timers antes de aguardar
 startup/despachos/callbacks, inclusive os esperando lock. Só depois destrói o
 cliente Discord e desconecta o banco. Stop antes de ready interrompe essa espera.
+O armazenamento de rascunhos de setup pertence à aplicação; o shutdown também
+fecha sua admissão e drena confirmações em andamento antes de desconectar o banco.
 Startup cancela transferências anteriores, invalida controles e reobserva presença
 sem inventar sequência de entradas offline; não faz recuperação global de canais
 não acompanhados. Fetch incerto não prova exclusão; ausência confirmada encerra
@@ -53,10 +55,13 @@ O processo do bot cria `PrismaPg` com `DATABASE_URL` e timeout de conexão de
 cinco segundos.
 
 `VoiceCreator` guarda UUID, servidor, canal de voz único, categoria de destino,
-preferência `roomCommandsEnabled`, timestamps e `deletedAt`. A exclusão é lógica:
+preferência `roomCommandsEnabled`, `defaultUserLimit`, timestamps e `deletedAt`.
+O limite padrão é inteiro não nulo de 0 a 99, com default 0 e CHECK no PostgreSQL;
+0 significa ilimitado. Não há índice novo para esse campo. A exclusão é lógica:
 não remove o canal Discord nem as salas. Reconfigurar o mesmo canal no mesmo
 servidor restaura a identidade, o histórico e a preferência, atualizando a
-categoria; não sobrescreve uma configuração ativa ou de outro servidor.
+categoria; não sobrescreve uma configuração ativa ou de outro servidor. Restaurar
+sem informar limite preserva o padrão salvo e a preferência de painel.
 
 `TemporaryRoom` guarda UUID, servidor, Voice Creator, canal único, proprietário
 opcional, mensagem do painel opcional, nome, limite, visibilidade, timestamps e
@@ -71,13 +76,16 @@ guarda entradas continuamente observadas; `RoomAllowedMember` guarda autorizados
 entrega confirmada. Um índice parcial único impede dois registros acompanhados
 com o mesmo dono/servidor (histórico `CLOSED` não bloqueia).
 
-Migrations anteriores são imutáveis. A nova migration é
-`prisma/migrations/20261108010000_room_ownership_state/migration.sql`, após
-`20261108000000_enable_backend_table_rls`. As seis tabelas, incluindo histórico
+Migrations anteriores são imutáveis. O setup guiado acrescenta somente
+`prisma/migrations/20261110010000_voice_creator_default_limit/migration.sql`, após
+`20261108010000_room_ownership_state`. As seis tabelas, incluindo histórico
 de migrations, usam RLS sem políticas públicas: backend apenas; Data API Supabase
-já estava desabilitada. Startup/testes não aplicam DDL automaticamente. As três
-migrations foram verificadas em PostgreSQL local; deploy remoto segue pendente
-de autorização. Procedimento em [v0.3.0](releases/v0.3.0.md).
+já estava desabilitada. A alteração de default não adiciona tabelas nem políticas.
+Startup/testes não aplicam DDL automaticamente. As quatro migrations são validadas
+somente no PostgreSQL descartável local nesta entrega; aplicar a nova migration
+no Supabase exige nova autorização explícita de destino/backup. A validação
+anterior da v0.3.0 não autoriza essa aplicação. Procedimento anterior em
+[v0.3.0](releases/v0.3.0.md).
 
 ## Interações
 
@@ -90,15 +98,40 @@ sem a mensagem potencialmente sensível e geram uma resposta efêmera segura.
 `/setup init` abre um dashboard efêmero no servidor. Administrador ou a combinação
 Gerenciar Servidor + Gerenciar Canais é exigida novamente nas ações. Botões,
 seletores e modais validam payload, servidor, configuração e permissões antes
-de mutações. Adicionar seleciona um canal de voz **já existente**, depois uma
-categoria; não cria o Voice Creator no Discord. É possível mudar a categoria,
-renomear o canal, alternar a preferência de comandos e confirmar a remoção.
+de mutações. **Criar canal de entrada** inicia um rascunho: categoria existente,
+modal com nome da entrada (trim, 1–100 caracteres) e limite inicial (0–99), resumo
+privado e confirmação. Voltar permite editar; cancelar não cria recursos. O resumo
+explica entrada ilimitada, nome automático das calls e limite das novas calls.
+É possível mudar a categoria de calls futuras, renomear somente a entrada,
+editar o limite padrão, alternar a preferência de comandos e confirmar a remoção.
+
+`SetupDraftStore` mantém cópias em memória, TTL de dez minutos, identidade opaca,
+revisão e vínculo com servidor, administrador e mensagem privada. Outra autoria,
+mensagem, servidor, revisão antiga ou expiração não confirma. Reinício invalida
+rascunhos. Confirmações simultâneas compartilham uma operação; resultados terminais
+são preservados antes da apresentação e nunca oferecem retry automático. IDs v1
+de adicionar canal existente expiram explicitamente; controles de edição continuam.
+
+Modais são o ACK inicial, sem consultas externas anteriores; submissão e confirmação
+reconhecem a interação antes de preflight/banco/Discord. Os controles de recuperação
+acompanham a revisão atual mesmo se o modal for fechado ou a submissão for inválida.
 
 O preflight do bot é conservador: exige Gerenciar Canais, Mover Membros,
-Gerenciar Cargos e
 Conectar no servidor, além de acesso/envio no contexto do painel. Também
 verifica permissões efetivas no canal de voz e na categoria selecionados.
 Permissões concedidas somente por sobrescritas locais podem não bastar.
+Não exige Administrador do bot nem altera cargos. A entrada é criada com
+`userLimit=0`, copiando restrições da categoria, diferentemente da projeção pública
+das calls; o gateway revalida as permissões efetivas após criar.
+
+`SetupCreationService` coordena Discord e repositório sem manter transação SQL
+durante I/O externo. Após falha de persistência consulta o ID exato para reconhecer
+commit confirmado; só ausência comprovada permite remover o canal criado nesta
+operação, identificado e vazio após nova leitura. Ocupado/falha de remoção produz
+resultado parcial; banco incerto ou create sem ID produz resultado incerto. Não há
+retry cego do POST (cliente REST com retries 0), adoção ou remoção por nome.
+Falha de renderização não desfaz sucesso. Crash pode deixar canal órfão sem
+configuração: não há exactly-once entre reinícios nem reparo global de órfãos.
 
 ### Calls: fluxo de eventos
 
@@ -109,11 +142,16 @@ Permissões concedidas somente por sobrescritas locais podem não bastar.
    usam o cache atual, sem criar domínio de locks concorrente.
 3. Entrar em um Voice Creator reutiliza uma sala ainda acompanhada do mesmo
    proprietário no servidor, quando possível; caso contrário, cria um canal
-   público sem limite na categoria configurada e persiste `CREATING`.
+   público na categoria configurada. Um único snapshot do creator fornece o
+   `defaultUserLimit` tanto ao POST de criação quanto ao primeiro persist
+   `CREATING.userLimit`, antes de publicar painel; nenhum setLimit posterior aplica
+   o padrão. Ambos os inputs exigem limite numérico, validado antes de HTTP/SQL.
+   Reuso não reaplica nome, limite ou configuração, mesmo após edição do modelo.
 4. O bot move o membro, sincroniza o painel se habilitado e marca `ACTIVE`.
    O nome inicial usa atividade `Playing` disponível na presença, ou nome de
    exibição, limitado a 11 grafemas. Atividade é best effort: não há busca de
    presença nem intent privilegiado; não há renomeação automática posterior.
+   O nome da entrada não é usado como nome-base da call.
 5. Entradas/saídas revalidam presença, transferência, acesso e painel. Se o
    proprietário sair e a sala continuar ocupada, fica sem dono com prioridade
    para reivindicação, sem transferência automática por saída.
@@ -142,6 +180,10 @@ são autorização: ações revalidam servidor/canal/sala/versão, preferência,
 presença humana. Renomear normaliza até 11 grafemas; limite é `0`/ilimitado ou
 `1..99`, sem expulsar presentes. Modal é resposta inicial, sem defer prévio;
 latência real contra o prazo de três segundos do Discord ainda exige smoke.
+Limite do dono altera somente a sala e seu canal: não é teto administrativo e pode
+passar de 4 para 8. Reduzir abaixo da ocupação não expulsa presentes. Modelo e
+entrada permanecem intactos; editar o modelo afeta apenas criações que lerem a
+nova configuração. Painel público B e menu privado do dono são os existentes.
 
 Transferência prepara UUID, publica prompt privado e só então arma 5.000 ms.
 Somente dono confirma/desfaz; não há aceite do destinatário. Ambos devem estar
@@ -194,3 +236,8 @@ GitHub hospedada e smoke Discord não foram realizados. Grafo AST-only é parcia
 (SQL/schema/testes sem símbolos/docs sem indexação semântica), não prova de SQL
 ou renderização. Registro [v0.2.0](validation/2026-11-07-v0.2.0-validation.md)
 permanece histórico, sem reescrita.
+
+[Validação do setup guiado](validation/2026-11-10-setup-guiado-validation.md)
+separa evidências locais de casos Discord pendentes. Não é declaração de feature
+ativa no servidor real; não houve nova migration remota, login, registro de
+comandos, publicação ou hospedagem nesta entrega.

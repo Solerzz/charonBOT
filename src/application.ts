@@ -26,6 +26,9 @@ import { DiscordSetupGateway } from './modules/setup/setup.discord.js';
 import { SetupInteractions } from './modules/setup/setup.interactions.js';
 import { PrismaVoiceCreatorRepository } from './modules/setup/setup.repository.js';
 import { SetupService } from './modules/setup/setup.service.js';
+import { SetupCreationInteractions } from './modules/setup/setup-creation.interactions.js';
+import { SetupCreationService } from './modules/setup/setup-creation.service.js';
+import { SetupDraftStore } from './modules/setup/setup-drafts.js';
 import { StatusCommand } from './modules/status/status.command.js';
 
 export interface DiscordClientPort {
@@ -73,6 +76,7 @@ export function createApplication(
   const logger = overrides.logger ?? createLogger({ level: config.logLevel });
   const database = overrides.database ?? createPrismaClient(config.database);
   const discord: DiscordClientPort = overrides.discord ?? createDiscordClient();
+  const drafts = new SetupDraftStore();
   // Lifecycle doubles remain health-only when explicit dispatchers are supplied.
   const runtimeDatabase = (): PrismaClient => {
     if (!hasRuntimeRepositories(database)) {
@@ -85,7 +89,7 @@ export function createApplication(
   const runtime = !overrides.dispatcher || !overrides.voiceDispatcher
     ? createRoomRuntime(runtimeDatabase(), logger) : undefined;
   const dispatcher =
-    overrides.dispatcher ?? createDefaultDispatcher(logger, runtimeDatabase(), runtime);
+    overrides.dispatcher ?? createDefaultDispatcher(logger, runtimeDatabase(), runtime, drafts);
   const voiceDispatcher =
     overrides.voiceDispatcher ?? createDefaultVoiceDispatcher(logger, runtimeDatabase(), runtime);
   let state: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed' =
@@ -117,6 +121,7 @@ export function createApplication(
       // Callers have already closed admission by entering stopping/failed.
       const timersDrained = runtime?.stop();
       await Promise.allSettled([...inFlight, timersDrained]);
+      await drafts.dispose();
       discord.destroy();
       await disconnectDatabase(database);
     })();
@@ -280,8 +285,10 @@ export function createDefaultDispatcher(
   logger: Logger,
   database: PrismaClient,
   runtime: RoomRuntime = createRoomRuntime(database, logger),
+  drafts: SetupDraftStore = new SetupDraftStore(),
 ): InteractionRegistry {
-  const setupService = new SetupService(new PrismaVoiceCreatorRepository(database), (id) => runtime.synchronizeCreator(id), logger);
+  const setupRepository = new PrismaVoiceCreatorRepository(database);
+  const setupService = new SetupService(setupRepository, (id) => runtime.synchronizeCreator(id), logger);
   const registry = new InteractionRegistry(logger);
   registry.register(new StatusCommand());
   registry.register(new SetupCommand(setupService));
@@ -291,6 +298,8 @@ export function createDefaultDispatcher(
       (interaction) => new DiscordSetupGateway(interaction.guild),
     ),
   );
+  registry.register(new SetupCreationInteractions(drafts, new SetupCreationService(setupRepository, logger),
+    (interaction) => new DiscordSetupGateway(interaction.guild)));
   registry.register(new CallInteractions(runtime, (guild) => new DiscordRoomGateway(guild)));
   return registry;
 }
