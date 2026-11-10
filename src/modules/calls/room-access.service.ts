@@ -43,7 +43,8 @@ function assertSnapshot(state: RoomState, snapshot: RoomSnapshot | null): assert
 export class RoomAccessService {
   private readonly uncertain = new Set<string>();
   private readonly unsettled = new Map<string, number>();
-  constructor(private readonly store: RoomStateRepository, private readonly coordinator: RoomCoordinator) {}
+  constructor(private readonly store: RoomStateRepository, private readonly coordinator: RoomCoordinator,
+    private readonly onInvalidated?: (roomId: string) => void) {}
 
   isUncertain(roomId: string): boolean { return this.uncertain.has(roomId); }
   markUncertain(roomId: string): void { this.uncertain.add(roomId); }
@@ -194,6 +195,9 @@ export class RoomAccessService {
     this.markUncertain(state.room.id);
     const attemptedVersion = this.unsettled.get(state.room.id);
     if (attemptedVersion !== undefined) {
+      // Private delivery generations must be retired even if the fence or the
+      // subsequent native projection fails and no success callback is reached.
+      this.onInvalidated?.(state.room.id);
       await safeRoomAction(() => this.store.settleAccess(state.room.id, attemptedVersion));
       this.unsettled.delete(state.room.id);
     }

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { createApplication, type DiscordClientPort } from '../../src/application.js';
 import { createPrismaClient } from '../../src/core/database/prisma.js';
 import { createLogger } from '../../src/core/logger/logger.js';
+import { CallPrivateWorkspace } from '../../src/modules/calls/call-workspace.js';
 import type { PendingOwnershipTransfer, RoomPresence } from '../../src/modules/calls/room.types.js';
 import { creator, room, deferred } from './modules/calls/call.fixtures.js';
 import { discordFixture } from './modules/calls/call.discord.fixtures.js';
@@ -99,6 +100,27 @@ const flush = async () => { await new Promise<void>((resolve) => setImmediate(re
 afterEach(() => vi.useRealTimers());
 
 describe('default room lifecycle at SQL/REST/client boundaries', () => {
+  it('drains the application-owned private workspace before destroying Discord or disconnecting SQL', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
+    const reconcile = vi.spyOn(CallPrivateWorkspace.prototype, 'reconcile');
+    const f = fixture(); const starting = f.app.start(); await flush(); f.markReady(); await starting;
+    const workspace = reconcile.mock.contexts.at(-1);
+    if (!(workspace instanceof CallPrivateWorkspace)) throw new Error('Runtime workspace was not reconciled');
+    const entered = deferred(); const release = deferred(); const deactivateEntered = deferred(); const deactivateRelease = deferred();
+    const delivered = { messageId: 'private-workspace', expiresAt: 900_000, edit: async () => ({ id: 'private-workspace' }),
+      deactivate: vi.fn(async () => { deactivateEntered.resolve(); await deactivateRelease.promise; }) };
+    const showing = workspace.show({ roomId: room.id, guildDiscordId: room.guildDiscordId, memberDiscordId: OWNER, controlVersion: f.record.controlVersion },
+      { kind: 'access', payload: { embeds: [], components: [] } }, async () => { entered.resolve(); await release.promise; return delivered; });
+    const rejected = expect(showing).rejects.toMatchObject({ code: 'STALE_CONTROLS' }); await entered.promise;
+    const stopping = f.app.stop('test'); await flush();
+    expect(f.client.destroy).not.toHaveBeenCalled(); expect(f.disconnect).not.toHaveBeenCalled();
+    release.resolve(); await deactivateEntered.promise;
+    expect(f.client.destroy).not.toHaveBeenCalled(); expect(f.disconnect).not.toHaveBeenCalled();
+    deactivateRelease.resolve(); await rejected; await stopping;
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); expect(f.disconnect).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+    reconcile.mockRestore();
+  });
+
   it('drains held setup recovery and the acknowledged form before disposing drafts or disconnecting', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
     const f = fixture(false); const held = deferred();

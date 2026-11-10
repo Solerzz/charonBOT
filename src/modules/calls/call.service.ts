@@ -159,6 +159,7 @@ export class CallService {
 
   private async closeIfEmpty(room: TemporaryRoomRecord, input: VoiceTransition, gateway: CallDiscordGateway): Promise<boolean> {
     if (gateway.getChannelMemberCount(room.channelDiscordId) !== 0) return false;
+    await this.runtime.workspaces.reconcile(room.id, null);
     const closing = await this.rooms.beginClosing(room.id);
     this.runtime.timers.cancel(`transfer:${room.id}`);
     this.runtime.timers.cancel(`countdown:${room.id}`);

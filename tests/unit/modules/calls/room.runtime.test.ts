@@ -92,6 +92,174 @@ function runtimeFixture() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('application-owned room runtime', () => {
+  const workspacePayload = { embeds: [{ title: 'Private selection' }], components: [], allowedMentions: { parse: [] } };
+  const workspaceDelivery = () => ({ messageId: 'private-workspace', expiresAt: Date.now() + 900_000,
+    edit: vi.fn(async () => ({ id: 'private-workspace' })), deactivate: vi.fn(async () => {}) });
+
+  it('retains same-generation selections across settings projection without granting anyone management', async () => {
+    const f = runtimeFixture(); const delivered = workspaceDelivery(); const create = vi.fn(async () => delivered);
+    await f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, create);
+    await f.runtime.controls.rename(f.actor(), 'Renamed', f.gateway);
+    await f.runtime.workspaces.show(f.actor(), { kind: 'transfer-target', payload: workspacePayload }, create);
+    expect(create).toHaveBeenCalledOnce(); expect(delivered.deactivate).not.toHaveBeenCalled();
+    f.join(OTHER);
+    await expect(f.runtime.controls.rename(f.actorFor(OTHER), 'Forbidden', f.gateway)).rejects.toMatchObject({ code: 'NOT_OWNER' });
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates before an ownership projection fails after a successful transfer', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const actor = f.actor(); const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway);
+    const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    const finish = f.store.finishTransfer.getMockImplementation()!;
+    vi.mocked(f.runtime.store.finishTransfer).mockImplementationOnce(async (...args) => {
+      const result = await finish(...args); f.guild.channels.fetch.mockRejectedValueOnce(new Error('projection unavailable')); return result;
+    });
+    await expect(f.runtime.transfers.confirm(actor, pending.id, f.gateway)).rejects.toThrow();
+    expect(delivered.deactivate).toHaveBeenCalledOnce();
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([false, true])('invalidates an uncertain access fence even when subsequent projection fails: %s', async (failProjection) => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const actor = f.actor(); const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway);
+    const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    vi.spyOn(f.runtime.store, 'settleAccess').mockImplementation(f.store.settleAccess);
+    vi.mocked(f.runtime.store.updateSettings).mockRejectedValueOnce(new Error('private-lost-sql-reply'));
+    if (failProjection) {
+      const settle = f.store.settleAccess;
+      vi.mocked(f.runtime.store.settleAccess).mockImplementationOnce(async (...args) => {
+        const result = await settle(...args); f.guild.channels.fetch.mockRejectedValueOnce(new Error('private-projection-failure')); return result;
+      });
+    }
+    await expect(f.runtime.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room.controlVersion).toBe(actor.controlVersion + 1);
+    expect(delivered.deactivate).toHaveBeenCalledOnce();
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('retires a workspace when the ownership SQL commit loses its acknowledgement', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const actor = f.actor(); const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway);
+    const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    const finish = f.store.finishTransfer.getMockImplementation()!;
+    vi.mocked(f.runtime.store.finishTransfer).mockImplementationOnce(async (...args) => {
+      await finish(...args); throw new Error('private-ownership-acknowledgement-lost');
+    });
+    await expect(f.runtime.transfers.confirm(actor, pending.id, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room.ownerDiscordId).toBe(OTHER);
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    expect(delivered.deactivate).toHaveBeenCalledOnce();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('does not delay the SQL access fence while private deactivation is held', async () => {
+    const f = runtimeFixture(); await f.observe(); const actor = f.actor(); const delivered = workspaceDelivery();
+    const entered = deferred(); const release = deferred();
+    delivered.deactivate.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    vi.spyOn(f.runtime.store, 'settleAccess').mockImplementation(f.store.settleAccess);
+    vi.mocked(f.runtime.store.updateSettings).mockRejectedValueOnce(new Error('private-lost-sql-reply'));
+    const changing = expect(f.runtime.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    await entered.promise;
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.runtime.store.settleAccess).toHaveBeenCalledOnce();
+      expect(f.state().room.controlVersion).toBe(actor.controlVersion + 1);
+    } finally {
+      release.resolve(); await changing; await f.runtime.stop(); await f.database.$disconnect();
+    }
+  });
+
+  it('invalidates an owner departure in departure reconciliation without waiting for panel refresh', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe(); const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    f.runtime.coordinator.recordDeparture(f.guild.id, f.channel.id, OWNER, false);
+    await f.runtime.coordinator.room(f.guild.id, f.channel.id, () => f.runtime.reconcileDeparturesLocked(actor.roomId));
+    expect(f.state().room.ownerDiscordId).toBeNull(); expect(delivered.deactivate).toHaveBeenCalledOnce();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates an owner discovered absent even if the post-CAS state read fails', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe(); const actor = f.actor();
+    const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    const change = f.store.changeOwner.getMockImplementation()!;
+    vi.mocked(f.runtime.store.changeOwner).mockImplementationOnce(async (...args) => {
+      const result = await change(...args); vi.mocked(f.runtime.store.read).mockRejectedValueOnce(new Error('private-post-cas-read')); return result;
+    });
+    f.leave(OWNER); await expect(f.observe()).rejects.toThrow();
+    expect(f.state().room.ownerDiscordId).toBeNull();
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates setup handles before a failed guild resolution and never revives them on reenable', async () => {
+    const f = runtimeFixture(); const resolve = vi.fn(f.resolveGuild); await f.runtime.start(resolve);
+    const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    resolve.mockRejectedValueOnce(new Error('private-guild-unavailable'));
+    await f.toggle(false); expect(delivered.deactivate).toHaveBeenCalledOnce();
+    await f.toggle(true);
+    const create = vi.fn(async () => workspaceDelivery());
+    await f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, create);
+    expect(create).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates a committed setup generation even if its first state read fails', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild); const actor = f.actor();
+    const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    vi.mocked(f.runtime.store.read).mockRejectedValueOnce(new Error('private-setup-read-failure'));
+    await expect(f.toggle(false)).rejects.toThrow();
+    expect(f.state().room.controlVersion).toBe(actor.controlVersion + 1);
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each(['closed', 'missing'] as const)('invalidates %s rooms discovered by observe', async (kind) => {
+    const f = runtimeFixture(); const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    if (kind === 'closed') f.state().room.status = 'CLOSED'; else f.roomStates.delete(actor.roomId);
+    await f.runtime.coordinator.room(f.guild.id, f.channel.id, () => f.runtime.observeLocked(actor.roomId, f.gateway));
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates the last-member workspace even when deleting the closing room fails', async () => {
+    const f = runtimeFixture(); const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    f.leave(OWNER); f.channel.delete.mockRejectedValueOnce(new Error('private-delete-failed'));
+    await f.voice(OWNER, true);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates startup workspaces before unconfirmed Discord reads', async () => {
+    const f = runtimeFixture(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, async () => delivered);
+    f.guild.channels.fetch.mockRejectedValueOnce(new Error('private-startup-unavailable'));
+    await f.runtime.start(f.resolveGuild);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('closes workspace admission synchronously and drains an in-flight create during runtime stop', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); const entered = deferred(); const release = deferred(); const delivered = workspaceDelivery();
+    const showing = f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, async () => {
+      entered.resolve(); await release.promise; return delivered;
+    });
+    const rejected = expect(showing).rejects.toMatchObject({ code: 'STALE_CONTROLS' }); await entered.promise;
+    let stopped = false; const stopping = f.runtime.stop().then(() => { stopped = true; });
+    await Promise.resolve(); expect(stopped).toBe(false);
+    release.resolve(); await rejected; await stopping;
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+    await f.database.$disconnect();
+  });
+
   it('blocks settings when an ownership change cannot confirm the native access projection', async () => {
     const f = runtimeFixture(); f.join(OTHER); f.state().room.visibility = 'PRIVATE'; await f.observe();
     const pending = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
