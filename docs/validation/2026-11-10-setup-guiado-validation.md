@@ -142,3 +142,28 @@ multi-instância ou reparo global de órfãos. Discord fake + PostgreSQL local n
 comprovam transporte, aparência, permissões efetivas ou experiência com múltiplos
 participantes no Discord real. AST-only do graphify é navegação parcial, não prova
 de renderização, schema SQL ou autorização remota.
+
+## Aceitação final após revisão independente
+
+Código final revisado: `e771cfb382aa88cfa523215d0e917ec110e4bedc`.
+As cinco tarefas passaram por revisão de conformidade e qualidade. A revisão
+final encontrou uma corrida de apresentação entre a atualização após abrir o
+modal e a confirmação exibida após submeter o formulário. A correção ordena
+atualizações da mesma mensagem após o ACK, sem atrasar a resposta inicial.
+
+O teste de sobreposição reproduziu a falha antes da correção; testes adicionais
+cobrem ACK atrasado, Cancelar/Voltar, resultado salvo, falha de atualização e
+encerramento da aplicação. A mutação que remove a espera na fila volta a falhar.
+Após restaurar a ordenação, **341 testes focados**, typecheck e build passaram.
+A revisão específica da correção confirmou o achado resolvido, sem nova quebra,
+e atualizou o parecer do código para **aprovado**, sem achados abertos.
+
+O controlador repetiu o gate sobre esse mesmo código final: **1078 testes comuns
+aprovados** (41 integrações puladas somente nessa execução sem opt-in), **41/41
+integrações PostgreSQL locais aprovadas** na execução serial com opt-ins e guard,
+typecheck, build e verificação de whitespace aprovados. Os números 1067 da seção
+anterior são a evidência histórica da tarefa 5 antes desses onze testes novos.
+
+Essa aceitação é de código e testes locais. O checklist Discord real e a nova
+migration Supabase continuam pendentes de autorização separada. Nenhum push,
+merge, release, deploy ou nova sessão do bot é autorizado por este registro.
