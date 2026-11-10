@@ -177,7 +177,8 @@ describe('CallInteractions real controllers', () => {
     const select = f.interaction('allow-add', 'user'); select.values = [OTHER];
     await f.execute(select);
     expect(f.state().room.controlVersion).toBe(1); expect(f.state().allowedMemberIds).toEqual([OTHER]);
-    expect(JSON.stringify(select.editReply.mock.calls)).toContain('expirou');
+    expect(select.editReply).not.toHaveBeenCalled();
+    expect(JSON.stringify(select.followUp.mock.calls)).toContain('expirou');
     expect(f.onChangedLocked).toHaveBeenCalled();
     const reopen = f.interaction('access'); await f.execute(reopen);
     expect(reopen.followUp).toHaveBeenCalledOnce();
@@ -217,6 +218,73 @@ describe('CallInteractions real controllers', () => {
     expect(undo.webhook.editMessage.mock.calls.at(-1)?.[1]).toMatchObject({ content: '' });
     expect(JSON.stringify(undo.webhook.editMessage.mock.calls.at(-1))).toContain('Adicionar autorizado');
     await f.workspaces.stop(); await f.timers.stop();
+  });
+
+  it('keeps a newly armed transfer visible when an older invalid selection resumes with a stale error snapshot', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = fixture();
+    let visible: { content?: string; components: { components: { custom_id: string; label: string }[] }[] };
+    const render = (payload: unknown) => { visible = JSON.parse(JSON.stringify(payload)); return { id: '82345678901234567' }; };
+    const open = f.interaction('access'); open.followUp.mockImplementation(async payload => render(payload)); await f.execute(open);
+    const invalid = f.interaction('allow-add', 'user');
+    invalid.editReply.mockImplementation(async payload => render(payload));
+    invalid.webhook.editMessage.mockImplementation(async (_id, payload) => render(payload));
+    const entered = deferred(); const release = deferred();
+    let pauseNextRead = false;
+    const adopt = f.workspaces.adopt.bind(f.workspaces);
+    vi.spyOn(f.workspaces, 'adopt').mockImplementationOnce((...args) => { adopt(...args); pauseNextRead = true; });
+    const read = f.store.read.getMockImplementation()!;
+    f.store.read.mockImplementation(async id => {
+      const snapshot = await read(id);
+      if (pauseNextRead) {
+        pauseNextRead = false;
+        expect(snapshot?.transfer).toBeNull(); entered.resolve(); await release.promise;
+      }
+      return snapshot;
+    });
+    const failing = f.execute(invalid); await entered.promise;
+    try {
+      const target = f.interaction('transfer-target', 'user'); target.values = [OTHER];
+      target.webhook.editMessage.mockImplementation(async (_id, payload) => render(payload));
+      await f.execute(target);
+      const pending = structuredClone(f.state().transfer!);
+      expect(pending.expiresAt).toEqual(new Date(5_000));
+      expect(visible!.components.flatMap(row => row.components).map(button => button.label)).toEqual(['Confirmar', 'Desfazer']);
+      vi.setSystemTime(1_000); release.resolve(); await failing;
+      expect(f.state().transfer).toEqual(pending);
+      expect(visible!.components.flatMap(row => row.components).map(button => button.custom_id)).toEqual([
+        `call:v3:confirm:${f.state().room.id}:${pending.id}`, `call:v3:undo:${f.state().room.id}:${pending.id}`,
+      ]);
+      expect(invalid.editReply).not.toHaveBeenCalled();
+      expect(f.store.createTransfer).toHaveBeenCalledOnce(); expect(f.store.armTransfer).toHaveBeenCalledOnce();
+      expect(open.followUp).toHaveBeenCalledOnce(); expect(invalid.followUp).not.toHaveBeenCalled(); expect(target.followUp).not.toHaveBeenCalled();
+      expect(f.state().room.ownerDiscordId).toBe(OWNER);
+    } finally {
+      release.resolve(); await failing; await f.workspaces.stop(); await f.timers.stop();
+    }
+  });
+
+  it('releases the coordinator while a queued private error waits for Discord delivery', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = fixture(); await f.execute(f.interaction('access'));
+    const entered = deferred(); const release = deferred(); const created = deferred();
+    const invalid = f.interaction('allow-add', 'user');
+    invalid.webhook.editMessage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
+    const failing = f.execute(invalid); await entered.promise;
+    const create = f.store.createTransfer.getMockImplementation()!;
+    f.store.createTransfer.mockImplementationOnce(async input => { const pending = await create(input); created.resolve(); return pending; });
+    const target = f.interaction('transfer-target', 'user'); target.values = [OTHER];
+    const transferring = f.execute(target);
+    try {
+      await created.promise;
+      expect(f.state().transfer?.expiresAt).toBeNull();
+      release.resolve(); await Promise.all([failing, transferring]);
+      expect(f.state().transfer?.expiresAt).toEqual(new Date(5_000));
+      expect(JSON.stringify(target.webhook.editMessage.mock.calls.at(-1))).toContain(f.state().transfer!.id);
+      expect(invalid.editReply).not.toHaveBeenCalled();
+    } finally {
+      release.resolve(); await Promise.all([failing, transferring]); await f.workspaces.stop(); await f.timers.stop();
+    }
   });
 
   it('checks SQL pending state again at private adoption, not only in preflight', async () => {

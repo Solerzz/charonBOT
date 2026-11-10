@@ -18,8 +18,12 @@ export async function completeCallAction(interaction: CallInteraction, mode: Cal
   if (mode === 'ephemeral') await interaction.deleteReply();
 }
 
-export async function replyCallFailure(interaction: CallInteraction, mode: CallAckMode, payload: CallPanelPayload & { content: string }): Promise<void> {
+export async function replyCallFailure(interaction: CallInteraction, mode: CallAckMode, payload: CallPanelPayload & { content: string }, deliverPrivate?: () => Promise<boolean>): Promise<void> {
   if (mode === 'none') await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
-  else if (mode === 'ephemeral' || interaction.message?.flags.has(MessageFlags.Ephemeral)) await interaction.editReply(payload);
-  else await interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral });
+  else if (mode === 'ephemeral') await interaction.editReply(payload);
+  else {
+    // An old component error must never edit its source outside the workspace queue.
+    if (interaction.message?.flags.has(MessageFlags.Ephemeral) && deliverPrivate && await deliverPrivate().catch(() => false)) return;
+    await interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral });
+  }
 }

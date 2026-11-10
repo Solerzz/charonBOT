@@ -589,6 +589,7 @@ describe('room ownership database', () => {
         isButton: () => false, isUserSelectMenu: () => true, isStringSelectMenu: () => false, isModalSubmit: () => false,
         deferUpdate: async () => {}, reply: async (payload: unknown) => { responses.push(payload); },
         editReply: async (payload: unknown) => { responses.push(payload); },
+        followUp: async (payload: unknown) => { responses.push(payload); return { id: '92345678901234567' }; },
         webhook: { editMessage: async (_id: string, payload: unknown) => {
           responses.push(payload);
           if (publication) {

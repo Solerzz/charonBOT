@@ -36,11 +36,24 @@ describe('call responses by origin', () => {
     const { i, interaction } = fixture(origin, origin === 'none');
     const mode = await acknowledgeCallAction(interaction);
     await replyCallFailure(interaction, mode, failure);
-    if (origin === 'public') {
+    if (origin !== 'none') {
       expect(i.followUp).toHaveBeenCalledWith({ ...failure, flags: MessageFlags.Ephemeral });
       expect(i.editReply).not.toHaveBeenCalled();
     } else expect(i.editReply).toHaveBeenCalledWith(failure);
     expect(i.deleteReply).not.toHaveBeenCalled();
+  });
+  it.each(['delivered', 'superseded', 'failed'] as const)('uses the ordered private delivery when %s without an unordered source edit', async outcome => {
+    const { i, interaction } = fixture('private');
+    const queued: string[] = [];
+    await replyCallFailure(interaction, 'source', failure, async () => {
+      if (outcome === 'failed') throw new Error('delivery unavailable');
+      if (outcome === 'delivered') queued.push(failure.content);
+      return outcome === 'delivered';
+    });
+    expect(queued).toEqual(outcome === 'delivered' ? ['Falhou'] : []);
+    expect(i.editReply).not.toHaveBeenCalled();
+    expect(i.followUp).toHaveBeenCalledTimes(outcome === 'delivered' ? 0 : 1);
+    if (outcome !== 'delivered') expect(i.followUp).toHaveBeenCalledWith({ ...failure, flags: MessageFlags.Ephemeral });
   });
   it('uses a private initial reply for pre-ack failure', async () => {
     const { i, interaction } = fixture('public');

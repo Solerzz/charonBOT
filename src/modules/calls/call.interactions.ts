@@ -136,18 +136,22 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
     } catch (error) {
       // Never echo SQL, Discord payloads or forged IDs. All failures stay private.
       const payload = { content: failureMessage(error, invalidInput), embeds: [], components: [], allowedMentions: { parse: [] as never[] } };
-      if (actor) {
-        // An access failure can durably fence the generation. Never keep its old handle.
-        const current = await store.read(actor.roomId).catch(() => null);
-        await workspaces.reconcile(actor.roomId, current);
-        if (privateOrigin && current?.transfer && current.room.controlVersion === actor.controlVersion && interaction.guild) {
-          try {
-            await this.showWorkspace(interaction, actor, this.gatewayFactory(interaction.guild), 'transfer-target', current.transfer.id, payload.content);
-            return;
-          } catch { /* Fall through to a private failure, never the shared panel. */ }
-        }
+      let delivery: Promise<boolean> | undefined;
+      if (actor && interaction.guild) {
+        // Locate the lock only. This possibly delayed snapshot is never authority
+        // for reconciliation; validateWorkspace rereads SQL under the coordinator,
+        // drains obsolete delivery and then revalidates SQL/live authority again.
+        const location = await store.read(actor.roomId).catch(() => null);
+        const failedActor = actor;
+        await this.validateWorkspace(interaction, failedActor, this.gatewayFactory(interaction.guild), undefined, state => {
+          if (privateOrigin && mode === 'source') {
+            const pending = state.transfer;
+            delivery = workspaces.editFailure(failedActor, interaction.message!.id, payload,
+              pending ? { operationId: pending.id, payload: buildTransferPrompt(failedActor, pending, this.seconds(pending)) } : null);
+          }
+        }, location?.room.channelDiscordId ?? interaction.channelId!).catch(() => undefined);
       }
-      await replyCallFailure(interaction, mode, payload).catch(() => undefined);
+      await replyCallFailure(interaction, mode, payload, delivery ? () => delivery! : undefined).catch(() => undefined);
     }
   }
 
@@ -174,9 +178,9 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
       deactivate: async () => { await edit({ content: 'Área encerrada. Use os controles atuais da sala.', embeds: [], components: [], allowedMentions: { parse: [] } }); } };
   }
 
-  private async validateWorkspace(interaction: CallInteraction, actor: RoomActor, gateway: RoomDiscordGateway, operationId: string | undefined, prepare: (state: RoomState) => void): Promise<void> {
+  private async validateWorkspace(interaction: CallInteraction, actor: RoomActor, gateway: RoomDiscordGateway, operationId: string | undefined, prepare: (state: RoomState) => void, channelId = interaction.channelId!): Promise<void> {
     const { store, coordinator } = this.dependencies;
-    await coordinator.member(actor.guildDiscordId, actor.memberDiscordId, () => coordinator.room(actor.guildDiscordId, interaction.channelId!, async () => {
+    await coordinator.member(actor.guildDiscordId, actor.memberDiscordId, () => coordinator.room(actor.guildDiscordId, channelId, async () => {
       await this.dependencies.workspaces.reconcile(actor.roomId, await store.read(actor.roomId));
       const { state } = await requireOwnedRoom(store, actor, gateway);
       if (state.room.channelDiscordId !== interaction.channelId) throw new RoomActionError('ROOM_UNAVAILABLE');
@@ -191,15 +195,13 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
     }));
   }
 
-  private async showWorkspace(interaction: CallInteraction, actor: RoomActor, gateway: RoomDiscordGateway, kind: 'access' | 'transfer-target', operationId?: string, content?: string): Promise<void> {
+  private async showWorkspace(interaction: CallInteraction, actor: RoomActor, gateway: RoomDiscordGateway, kind: 'access' | 'transfer-target', operationId?: string): Promise<void> {
     let publishing!: Promise<CallWorkspaceDelivery>;
-    let pendingFailure: { operationId: string; payload: CallPanelPayload } | undefined;
     await this.validateWorkspace(interaction, actor, gateway, operationId, state => {
       const pending = state.transfer;
       const view: CallWorkspaceView = pending
-        ? { kind: 'transfer-pending', operationId: pending.id, payload: { ...buildTransferPrompt(actor, pending, this.seconds(pending)), ...(content ? { content } : {}) } }
+        ? { kind: 'transfer-pending', operationId: pending.id, payload: buildTransferPrompt(actor, pending, this.seconds(pending)) }
         : { kind, payload: kind === 'access' ? buildAccessPrompt(actor) : buildTransferTargetPrompt(actor) };
-      if (content && view.kind === 'transfer-pending') pendingFailure = view;
       publishing = this.dependencies.workspaces.show(actor, view, async payload => {
         // Only public opens create a response. Private selections proved their
         // origin and adopted it before entering this path.
@@ -210,7 +212,6 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
       });
     });
     await publishing;
-    if (pendingFailure) await this.dependencies.workspaces.editPending(actor, pendingFailure.operationId, pendingFailure.payload);
   }
 
   private seconds(pending: PendingOwnershipTransfer): number {

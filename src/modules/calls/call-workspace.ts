@@ -102,6 +102,26 @@ export class CallPrivateWorkspace {
     });
   }
 
+  editFailure(actor: RoomActor, messageId: string, payload: CallPanelPayload & { content: string }, pending: { operationId: string; payload: CallPanelPayload } | null): Promise<boolean> {
+    this.prune();
+    const entry = this.entries.get(keyOf(actor));
+    if (!entry?.delivery || entry.delivery.messageId !== messageId) return Promise.resolve(false);
+    if (entry.view?.kind === 'transfer-pending' && entry.view.operationId !== pending?.operationId) return Promise.resolve(false);
+    if (pending && entry.view?.kind !== 'transfer-pending') {
+      entry.view = { kind: 'transfer-pending', ...pending }; entry.revision++;
+    }
+    const revision = entry.revision;
+    const failure = { ...(pending?.payload ?? entry.view?.payload ?? payload), content: payload.content };
+    return this.enqueue(entry, async () => {
+      if (!this.current(entry) || entry.revision !== revision || entry.delivery?.messageId !== messageId) return false;
+      const delivered = entry.delivery;
+      try {
+        const result = await delivered.edit(failure);
+        return this.current(entry) && entry.revision === revision && entry.delivery === delivered && result?.id === messageId;
+      } catch { return false; }
+    });
+  }
+
   adopt(actor: RoomActor, delivery: CallWorkspaceDelivery): void {
     this.prune();
     if (this.stopped || !validDelivery(delivery) || delivery.expiresAt <= this.now()) return;

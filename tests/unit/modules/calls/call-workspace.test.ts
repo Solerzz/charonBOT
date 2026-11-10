@@ -1,3 +1,4 @@
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CallPrivateWorkspace, type CallWorkspaceDelivery, type CallWorkspaceView } from '../../../../src/modules/calls/call-workspace.js';
 import type { CallPanelPayload } from '../../../../src/modules/calls/call-panel.view.js';
@@ -51,6 +52,66 @@ describe('CallPrivateWorkspace delivery lifecycle (not room authorization)', () 
     expect(first.edit).toHaveBeenCalledExactlyOnceWith(payload('operation-1'));
     expect(await workspaces.editPending(actor, 'operation-2', payload('wrong'))).toBe(false);
     expect(await workspaces.editPending(actor, 'operation-1', payload('countdown'))).toBe(true);
+    await workspaces.stop();
+  });
+
+  it('delivers a private failure through the current operation without replacing its controls', async () => {
+    const workspaces = new CallPrivateWorkspace(); const first = delivery();
+    const controls = { ...payload('pending'), components: [new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('confirm').setLabel('Confirmar').setStyle(ButtonStyle.Secondary))] };
+    await workspaces.show(actor, { kind: 'transfer-pending', operationId: 'current', payload: controls }, async () => first);
+    expect(await workspaces.editFailure(actor, first.messageId, { ...payload('error'), content: 'Invalid selection' }, { operationId: 'current', payload: controls })).toBe(true);
+    expect(first.edit).toHaveBeenCalledExactlyOnceWith({ ...controls, content: 'Invalid selection' });
+    expect(await workspaces.editPending(actor, 'current', controls)).toBe(true);
+    await workspaces.stop();
+  });
+
+  it('keeps the current selection view when an older input reports a private failure', async () => {
+    const workspaces = new CallPrivateWorkspace(); const first = delivery();
+    await workspaces.show(actor, access, async () => first);
+    await workspaces.show(actor, target, async () => first);
+    expect(await workspaces.editFailure(actor, first.messageId, { ...payload('old-error'), content: 'Invalid selection' }, null)).toBe(true);
+    expect(first.edit).toHaveBeenLastCalledWith({ ...target.payload, content: 'Invalid selection' });
+    await workspaces.stop();
+  });
+
+  it('does not create or edit a failure for a different source, operation or expired generation', async () => {
+    const workspaces = new CallPrivateWorkspace(); const first = delivery();
+    const failure = { ...payload('error'), content: 'Invalid selection' };
+    expect(await workspaces.editFailure(actor, first.messageId, failure, null)).toBe(false);
+    await workspaces.show(actor, pending('current'), async () => first);
+    expect(await workspaces.editFailure(actor, 'another-message', failure, { operationId: 'current', payload: payload('current') })).toBe(false);
+    expect(await workspaces.editFailure(actor, first.messageId, failure, { operationId: 'old', payload: payload('old') })).toBe(false);
+    expect(await workspaces.editFailure(actor, first.messageId, failure, null)).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled();
+    await workspaces.reconcile(actor.roomId, null);
+    expect(await workspaces.editFailure(actor, first.messageId, failure, { operationId: 'current', payload: payload('current') })).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled(); await workspaces.stop();
+  });
+
+  it('fences a queued private failure when a newer view is prepared before its delivery', async () => {
+    const workspaces = new CallPrivateWorkspace(); const first = delivery();
+    await workspaces.show(actor, access, async () => first);
+    const entered = deferred(); const release = deferred();
+    first.edit.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: first.messageId }; });
+    const running = workspaces.show(actor, target, async () => first); await entered.promise;
+    const failed = workspaces.editFailure(actor, first.messageId, { ...payload('old-error'), content: 'Invalid selection' }, null);
+    const next = workspaces.show(actor, pending('new'), async () => first);
+    release.resolve(); await running; expect(await failed).toBe(false); await next;
+    expect(first.edit.mock.calls.map(([p]) => p)).toEqual([target.payload, payload('new')]);
+    await workspaces.stop();
+  });
+
+  it('drops a queued failure for a completed operation before a replacement pending transfer', async () => {
+    const workspaces = new CallPrivateWorkspace(); const first = delivery();
+    await workspaces.show(actor, pending('old'), async () => first);
+    const entered = deferred(); const release = deferred();
+    first.edit.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: first.messageId }; });
+    const running = workspaces.editPending(actor, 'old', payload('running')); await entered.promise;
+    const failed = workspaces.editFailure(actor, first.messageId, { ...payload('error'), content: 'Invalid selection' }, { operationId: 'old', payload: payload('old') });
+    const terminal = workspaces.editPending(actor, 'old', payload('terminal'), true);
+    const next = workspaces.show(actor, pending('new'), async () => first);
+    release.resolve(); await running; expect(await failed).toBe(false); await terminal; await next;
+    expect(first.edit.mock.calls.map(([p]) => p)).toEqual([payload('running'), payload('new')]);
     await workspaces.stop();
   });
 
