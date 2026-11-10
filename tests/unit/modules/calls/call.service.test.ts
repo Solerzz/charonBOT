@@ -29,7 +29,7 @@ describe('CallService', () => {
     expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game', userLimit });
     expect(f.rooms.createCreating).toHaveBeenCalledWith(expect.objectContaining({ name: 'Game', userLimit }));
     expect(f.records.get(room.id)).toMatchObject({ userLimit, controlMessageDiscordId: room.controlMessageDiscordId });
-    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: capacity });
+    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: capacity, inline: true });
     expect(f.gateway.setLimit).not.toHaveBeenCalled();
     expect(f.gateway.rename).not.toHaveBeenCalled();
   });
@@ -53,7 +53,7 @@ describe('CallService', () => {
     expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game', userLimit: 4 });
     expect(f.records.get(room.id)?.userLimit).toBe(4);
     expect(f.creators.findByChannel).toHaveBeenCalledOnce();
-    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / 4' });
+    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / 4', inline: true });
   });
 
   it('reuses an owner-edited room without resetting its name, limit or panel after a template edit', async () => {
@@ -66,7 +66,7 @@ describe('CallService', () => {
     expect(f.gateway.rename).not.toHaveBeenCalled(); expect(f.gateway.setLimit).not.toHaveBeenCalled();
     expect(f.records.get(room.id)).toMatchObject({ name: 'Owner name', userLimit: 8, controlMessageDiscordId: room.controlMessageDiscordId });
     expect(f.gateway.sendControlPanel).not.toHaveBeenCalled();
-    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2 / 8' });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2 / 8', inline: true });
   });
 
   it('applies an edited default only to the next newly created room and keeps automatic display-name fallback', async () => {
@@ -150,7 +150,7 @@ describe('CallService', () => {
     expect(f.gateway.createTemporaryChannel).toHaveBeenCalledExactlyOnceWith({ categoryDiscordId: creator.categoryDiscordId, name: 'Game', userLimit: 0 });
     expect(f.rooms.createCreating).toHaveBeenCalledExactlyOnceWith({ guildDiscordId: entry.guildDiscordId, voiceCreatorId: creator.id, channelDiscordId: room.channelDiscordId, ownerDiscordId: entry.memberDiscordId, name: 'Game', userLimit: 0 });
     expect(f.gateway.moveMember).toHaveBeenCalledExactlyOnceWith(room.channelDiscordId, creator.creatorChannelDiscordId);
-    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / Ilimitado' });
+    expect(fields(f.gateway.sendControlPanel.mock.calls[0]![1])).toContainEqual({ name: 'Participantes', value: '1 / Ilimitado', inline: true });
     expect(f.records.get(room.id)).toMatchObject({ status: 'ACTIVE', controlMessageDiscordId: room.controlMessageDiscordId });
   });
 
@@ -184,8 +184,8 @@ describe('CallService', () => {
     f.setMemberChannel(null);
     await f.handle(departure);
     expect(f.records.get(room.id)?.ownerDiscordId).toBeNull();
-    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Proprietário', value: 'Sem proprietário' });
-    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2 / Ilimitado' });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Proprietário', value: 'Sem proprietário', inline: true });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[0]![2])).toContainEqual({ name: 'Participantes', value: '2 / Ilimitado', inline: true });
     await f.handle();
     expect(f.gateway.createTemporaryChannel).not.toHaveBeenCalled();
   });
@@ -210,7 +210,7 @@ describe('CallService', () => {
     f.setMemberChannel(other.channelDiscordId);
     await f.handle({ ...departure, newChannelDiscordId: other.channelDiscordId });
     expect(f.gateway.updateControlPanel.mock.calls.map((c) => c[0])).toEqual([room.channelDiscordId, other.channelDiscordId]);
-    expect(fields(f.gateway.updateControlPanel.mock.calls[1]![2])).toContainEqual({ name: 'Participantes', value: '3 / Ilimitado' });
+    expect(fields(f.gateway.updateControlPanel.mock.calls[1]![2])).toContainEqual({ name: 'Participantes', value: '3 / Ilimitado', inline: true });
   });
 
   it('closes an empty room using live state even when the event snapshot says occupied', async () => {

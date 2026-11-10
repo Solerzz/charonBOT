@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder,
-  StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, UserSelectMenuBuilder,
+  TextInputBuilder, TextInputStyle, UserSelectMenuBuilder,
 } from 'discord.js';
 
 import type { CallPanelPayload } from './call-panel.view.js';
@@ -8,25 +8,7 @@ import { encodeCallComponent, type CallControlAction } from './call.schemas.js';
 import type { PendingOwnershipTransfer, RoomActor } from './room.types.js';
 
 function customId(actor: RoomActor, action: CallControlAction): string {
-  return encodeCallComponent({ version: 'v2', action, roomId: actor.roomId, controlVersion: actor.controlVersion });
-}
-
-export function buildOwnerMenu(actor: RoomActor): CallPanelPayload {
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId(customId(actor, 'menu')).setPlaceholder('Escolher ação')
-    .setMinValues(1).setMaxValues(1)
-    .addOptions(
-      { label: 'Renomear sala', value: 'rename' },
-      { label: 'Alterar limite', value: 'limit' },
-      { label: 'Alternar pública / privada', value: 'visibility' },
-      { label: 'Gerenciar autorizados', value: 'access' },
-      { label: 'Transferir propriedade', value: 'transfer' },
-    );
-  return {
-    embeds: [new EmbedBuilder().setTitle('Controles da sala').setColor(0x2b2d31)],
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
-    allowedMentions: { parse: [] },
-  };
+  return encodeCallComponent({ version: 'v3', action, roomId: actor.roomId, controlVersion: actor.controlVersion });
 }
 
 export function buildTransferPrompt(actor: RoomActor, pending: PendingOwnershipTransfer, remainingSeconds: number): CallPanelPayload {
@@ -40,7 +22,7 @@ export function buildTransferPrompt(actor: RoomActor, pending: PendingOwnershipT
       { name: 'Novo proprietário', value: `<@${pending.targetDiscordId}>` },
       { name: 'Transferência automática', value: `${remainingSeconds} s` },
     );
-  const id = (action: 'confirm' | 'undo') => encodeCallComponent({ version: 'v2', action, roomId: actor.roomId, operationId: pending.id });
+  const id = (action: 'confirm' | 'undo') => encodeCallComponent({ version: 'v3', action, roomId: actor.roomId, operationId: pending.id });
   return {
     embeds: [embed],
     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(

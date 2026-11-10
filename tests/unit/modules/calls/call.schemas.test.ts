@@ -6,7 +6,6 @@ import {
   voiceTransitionSchema,
   callComponentSchema,
   encodeCallComponent,
-  callOwnerMenuSelectionSchema,
   callMemberSelectionSchema,
   callRenameSubmissionSchema,
   callLimitSubmissionSchema,
@@ -64,60 +63,54 @@ describe('call schemas', () => {
 
 const roomId = '123e4567-e89b-42d3-a456-426614174000';
 const operationId = '223e4567-e89b-42d3-a456-426614174000';
-const versionActions = ['open', 'claim', 'menu', 'rename', 'rename-save', 'limit', 'limit-save', 'visibility', 'access', 'allow-add', 'allow-remove', 'transfer', 'transfer-target'] as const;
+const versionActions = ['lock', 'claim', 'rename', 'rename-save', 'limit', 'limit-save', 'visibility', 'access', 'allow-add', 'allow-remove', 'transfer', 'transfer-target'] as const;
 
-describe('call v2 components', () => {
+describe('call v3 components', () => {
   it.each(versionActions)('round-trips %s using the room and safe integer version', (action) => {
-    const value: CallComponent = { version: 'v2', action, roomId, controlVersion: Number.MAX_SAFE_INTEGER };
+    const value: CallComponent = { version: 'v3', action, roomId, controlVersion: Number.MAX_SAFE_INTEGER };
     const encoded = encodeCallComponent(value);
-    expect(encoded).toBe(`call:v2:${action}:123e4567-e89b-42d3-a456-426614174000:9007199254740991`);
+    expect(encoded).toBe(`call:v3:${action}:123e4567-e89b-42d3-a456-426614174000:9007199254740991`);
     expect(callComponentSchema.parse(encoded)).toEqual(value);
     expect(encoded.length).toBeLessThanOrEqual(100);
   });
 
   it.each(['confirm', 'undo'] as const)('round-trips %s using the operation UUID, not the version', (action) => {
-    const value: CallComponent = { version: 'v2', action, roomId, operationId };
-    expect(encodeCallComponent(value)).toBe(`call:v2:${action}:${roomId}:${operationId}`);
+    const value: CallComponent = { version: 'v3', action, roomId, operationId };
+    expect(encodeCallComponent(value)).toBe(`call:v3:${action}:${roomId}:${operationId}`);
     expect(callComponentSchema.parse(encodeCallComponent(value))).toEqual(value);
   });
 
   it.each([
-    `call:v1:open:${roomId}:0`, `setup:v2:open:${roomId}:0`, `call:v20:open:${roomId}:0`,
-    `call:v2:moderation:${roomId}:0`, `call:v2:open:bad:0`,
-    'call:v2:open:123e4567-e89b-42d3-z456-426614174000:0',
-    `call:v2:open:${roomId}`, `call:v2:open:${roomId}:0:extra`,
-    ...['', '-1', '1.5', 'NaN', 'Infinity', '1e2', '+1', '01', ' 1', '9007199254740992', '9'.repeat(70), operationId].map((v) => `call:v2:open:${roomId}:${v}`),
-    `call:v2:confirm:${roomId}:0`, `call:v2:undo:${roomId}:bad`,
+    `call:v1:open:${roomId}:0`, `setup:v3:lock:${roomId}:0`, `call:v20:lock:${roomId}:0`,
+    ...['visibility', 'menu', 'rename-save', 'confirm', 'claim'].map(action => `call:v2:${action}:${roomId}:${action === 'confirm' ? operationId : '0'}`),
+    `call:v3:open:${roomId}:0`, `call:v3:menu:${roomId}:0`,
+    `call:v3:moderation:${roomId}:0`, `call:v3:lock:bad:0`,
+    'call:v3:lock:123e4567-e89b-42d3-z456-426614174000:0',
+    `call:v3:lock:${roomId}`, `call:v3:lock:${roomId}:0:extra`,
+    ...['', '-1', '1.5', 'NaN', 'Infinity', '1e2', '+1', '01', ' 1', '9007199254740992', '9'.repeat(70), operationId].map((v) => `call:v3:lock:${roomId}:${v}`),
+    `call:v3:confirm:${roomId}:0`, `call:v3:undo:${roomId}:bad`,
   ])('rejects malformed, stale or forged ID %s', (value) => {
     expect(callComponentSchema.safeParse(value).success).toBe(false);
   });
 
   it('accepts version zero and rejects invalid/overlong encoded builder inputs', () => {
-    expect(callComponentSchema.parse(`call:v2:claim:${roomId}:0`)).toEqual({ version: 'v2', action: 'claim', roomId, controlVersion: 0 });
+    expect(callComponentSchema.parse(`call:v3:claim:${roomId}:0`)).toEqual({ version: 'v3', action: 'claim', roomId, controlVersion: 0 });
     for (const controlVersion of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(() => encodeCallComponent({ version: 'v2', action: 'open', roomId, controlVersion })).toThrow();
+      expect(() => encodeCallComponent({ version: 'v3', action: 'lock', roomId, controlVersion })).toThrow();
     }
-    expect(() => encodeCallComponent({ version: 'v2', action: 'open', roomId: 'a'.repeat(100), controlVersion: 0 })).toThrow();
-    expect(() => encodeCallComponent({ version: 'v2', action: 'confirm', roomId, operationId: 'bad' })).toThrow();
+    expect(() => encodeCallComponent({ version: 'v3', action: 'lock', roomId: 'a'.repeat(100), controlVersion: 0 })).toThrow();
+    expect(() => encodeCallComponent({ version: 'v3', action: 'confirm', roomId, operationId: 'bad' })).toThrow();
   });
 
   it.each([
-    `call:v2:open:${roomId}:1\n`, `call:v2:open:${roomId}\n:1`,
-    `call:v2:confirm:${roomId}:${operationId}\n`,
+    `call:v3:lock:${roomId}:1\n`, `call:v3:lock:${roomId}\n:1`,
+    `call:v3:confirm:${roomId}:${operationId}\n`,
   ])('rejects trailing line breaks in UUID/version segments %j', (value) => {
     expect(callComponentSchema.safeParse(value).success).toBe(false);
   });
 });
 
 describe('call modal and select submissions', () => {
-  it.each(['rename', 'limit', 'visibility', 'access', 'transfer'])('accepts the single owner action %s', (action) => {
-    expect(callOwnerMenuSelectionSchema.parse([action])).toEqual([action]);
-  });
-
-  it.each([[], ['rename', 'limit'], ['moderation'], ['confirm'], ['call:v2:rename'], 'rename'].map((values) => ({ values })))('rejects forged or wrong-cardinality menu values $values', ({ values }) => {
-    expect(callOwnerMenuSelectionSchema.safeParse(values).success).toBe(false);
-  });
-
   it('accepts exactly one valid member ID without treating it as eligibility', () => {
     expect(callMemberSelectionSchema.parse(['12345678901234567'])).toEqual(['12345678901234567']);
     for (const values of [[], ['12345678901234567', '22345678901234567'], ['bad'], ['1234567890123456'], ['1'.repeat(21)]]) {

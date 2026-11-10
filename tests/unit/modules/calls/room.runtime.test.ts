@@ -1,4 +1,4 @@
-import { PermissionFlagsBits as P, type Guild } from 'discord.js';
+import { MessageFlags, PermissionFlagsBits as P, type Guild } from 'discord.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaClient } from '../../../../src/core/database/prisma.js';
 import { createLogger } from '../../../../src/core/logger/logger.js';
@@ -53,14 +53,22 @@ function runtimeFixture() {
     return runtime.synchronizeCreator(creator.id);
   };
   const handler = new CallInteractions(runtime, () => f.gateway);
-  const interaction = (action: string, kind = 'button') => ({
-    customId: `call:v2:${action}:${f.state().room.id}:${['confirm', 'undo'].includes(action) ? f.state().transfer!.id : f.state().room.controlVersion}`,
-    guild, guildId: guild.id, channelId: f.channel.id, user: { id: OWNER }, values: [OTHER],
-    inGuild: () => true, isButton: () => kind === 'button', isStringSelectMenu: () => false,
-    isUserSelectMenu: () => kind === 'user', isModalSubmit: () => false,
-    deferReply: vi.fn(async () => {}), reply: vi.fn(async (_payload: unknown) => {}),
-    editReply: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
-  });
+  const privatePayloads: unknown[] = [];
+  const interaction = (action: string, kind = 'button') => {
+    const customId = `call:v3:${action}:${f.state().room.id}:${['confirm', 'undo'].includes(action) ? f.state().transfer!.id : f.state().room.controlVersion}`;
+    return {
+      customId, createdTimestamp: Date.now(), applicationId: '92345678901234567',
+      message: { id: '82345678901234567', flags: { has: (flag: number) => flag === MessageFlags.Ephemeral },
+        author: { id: '92345678901234567' }, interactionMetadata: { user: { id: OWNER } }, components: [{ components: [{ customId }] }] },
+      guild, guildId: guild.id, channelId: f.channel.id, user: { id: OWNER }, values: [OTHER],
+      inGuild: () => true, isButton: () => kind === 'button', isStringSelectMenu: () => false,
+      isUserSelectMenu: () => kind === 'user', isModalSubmit: () => false,
+      deferReply: vi.fn(async () => {}), reply: vi.fn(async (_payload: unknown) => {}),
+      deferUpdate: vi.fn(async () => {}), followUp: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
+      webhook: { editMessage: vi.fn(async (_id: string, payload: unknown) => { privatePayloads.push(payload); return { id: '82345678901234567' }; }) },
+      editReply: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
+    };
+  };
   const execute = (input: ReturnType<typeof interaction>) => handler.execute(input as unknown as CallInteraction);
   const roomRepository = {
     findActiveByChannel: async (id: string) => id === f.channel.id && f.state().room.status !== 'CLOSED' ? structuredClone(f.state().room) : null,
@@ -86,7 +94,7 @@ function runtimeFixture() {
     await voiceService.handleVoiceTransition({ ...entry, memberDiscordId: OWNER, oldChannelDiscordId: null,
       newChannelDiscordId: creator.creatorChannelDiscordId }, lifecycleGateway(OWNER));
   };
-  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice, reuse, timerFailures };
+  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice, reuse, timerFailures, privatePayloads };
 }
 
 afterEach(() => { vi.useRealTimers(); });
@@ -591,31 +599,58 @@ describe('application-owned room runtime', () => {
     await f.runtime.stop(); await f.database.$disconnect();
   });
 
-  it('keeps exact old/new prompt renderers separate while a terminal edit fails', async () => {
+  it('keeps exact old/new prompt renderers separate after a canceled late render', async () => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
     const original = f.interaction('transfer-target', 'user'); await f.execute(original);
     const oldId = f.state().transfer!.id;
     const entered = deferred(); const release = deferred();
-    original.editReply.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
+    original.webhook.editMessage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
     await vi.advanceTimersByTimeAsync(1_000); await entered.promise;
-    await f.execute(f.interaction('undo'));
-    const next = f.interaction('transfer-target', 'user'); await f.execute(next);
+    const undo = f.interaction('undo'); await f.execute(undo);
+    const next = f.interaction('transfer-target', 'user'); const publishing = f.execute(next);
+    release.resolve(); await publishing;
     expect(f.state().transfer?.id).not.toBe(oldId);
     expect(f.state().transfer?.expiresAt).toEqual(new Date(6_000));
-    original.editReply.mockRejectedValueOnce(new Error('private-terminal-sentinel'));
-    release.resolve(); await vi.advanceTimersByTimeAsync(1_000);
-    expect(original.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
-    expect(next.editReply).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(original.webhook.editMessage).toHaveBeenCalledTimes(2);
+    expect(next.webhook.editMessage).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(f.privatePayloads.at(-1))).toContain(f.state().transfer!.id);
     await f.runtime.transfers.expire(oldId, f.gateway);
     expect(f.state().transfer?.expiresAt).toEqual(new Date(6_000));
     expect(f.state().room.ownerDiscordId).toBe(OWNER);
     await vi.advanceTimersByTimeAsync(4_001);
     expect(f.state().room).toMatchObject({ ownerDiscordId: OTHER, controlVersion: 2 });
-    expect(next.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
-    const edits = original.editReply.mock.calls.length + next.editReply.mock.calls.length;
-    await f.runtime.stop(); await vi.advanceTimersByTimeAsync(600_000);
-    expect(original.editReply.mock.calls.length + next.editReply.mock.calls.length).toBe(edits);
+    expect(f.privatePayloads.at(-1)).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    await f.runtime.stop(); const edits = f.privatePayloads.length;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(f.privatePayloads).toHaveLength(edits);
+    await f.database.$disconnect();
+  });
+
+  it('leaves an undone transfer canceled when the private terminal edit fails, then reuses the area', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    await f.execute(f.interaction('transfer-target', 'user'));
+    const undo = f.interaction('undo'); undo.webhook.editMessage.mockRejectedValueOnce(new Error('private-terminal-sentinel'));
+    await f.execute(undo); await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().transfer).toBeNull(); expect(f.state().room.ownerDiscordId).toBe(OWNER);
+    expect(f.timerFailures).not.toHaveBeenCalled();
+    const next = f.interaction('transfer-target', 'user'); await f.execute(next);
+    expect(f.state().transfer?.expiresAt).toEqual(new Date(5_001));
+    expect(next.webhook.editMessage).toHaveBeenCalledOnce();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('drains shutdown during handler publication without arming the late private prompt', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    const entered = deferred(); const release = deferred();
+    const target = f.interaction('transfer-target', 'user');
+    target.webhook.editMessage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
+    const handling = f.execute(target); await entered.promise;
+    const stopping = f.runtime.stop(); release.resolve(); await Promise.all([handling, stopping]);
+    expect(f.state().transfer).toBeNull(); expect(f.runtime.store.armTransfer).not.toHaveBeenCalled();
+    expect(f.state().room.ownerDiscordId).toBe(OWNER);
     await f.database.$disconnect();
   });
 
@@ -650,11 +685,11 @@ describe('application-owned room runtime', () => {
     if (cause === 'setup') await f.toggle(false);
     if (cause === 'departure') { f.leave(OTHER); await f.observe(); }
     await vi.advanceTimersByTimeAsync(cause === 'timeout' ? 5_001 : 1);
-    expect(original.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    expect(f.privatePayloads.at(-1)).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
     expect(f.state().room.ownerDiscordId).toBe(cause === 'confirm' || cause === 'timeout' ? OTHER : OWNER);
-    const edits = original.editReply.mock.calls.length;
-    await f.runtime.stop(); await vi.advanceTimersByTimeAsync(600_000);
-    expect(original.editReply).toHaveBeenCalledTimes(edits);
+    await f.runtime.stop(); const edits = f.privatePayloads.length;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(f.privatePayloads).toHaveLength(edits);
     await f.database.$disconnect();
   });
 

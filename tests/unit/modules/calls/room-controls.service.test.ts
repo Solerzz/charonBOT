@@ -13,7 +13,7 @@ describe('RoomControlsService', () => {
     const panels = new RoomPanelService({ store: f.store, coordinator: f.coordinator, logger: createLogger({ level: 'silent' }) });
     let published: unknown;
     f.message.edit.mockImplementation(async (...args: unknown[]) => { published = args[0]; });
-    const publishedVersions = () => [...new Set([...JSON.stringify(published).matchAll(/"custom_id":"call:v2:[^"]+:(\d+)"/g)].map((match) => Number(match[1])))];
+    const publishedVersions = () => [...new Set([...JSON.stringify(published).matchAll(/"custom_id":"call:v3:[^"]+:(\d+)"/g)].map((match) => Number(match[1])))];
     await f.coordinator.room(f.guild.id, f.channel.id, () => panels.synchronizeLocked(f.state().room.id, f.gateway));
     expect(publishedVersions()).toEqual([0]);
     // Preserve the runtime's actual order: mark -> read -> access sync (which

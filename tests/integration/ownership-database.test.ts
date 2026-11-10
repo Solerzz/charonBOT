@@ -19,8 +19,9 @@ import { DiscordRoomGateway } from '../../src/modules/calls/room.discord.js';
 import { createRoomRuntime } from '../../src/modules/calls/room.runtime.js';
 import { CallInteractions, type CallInteraction } from '../../src/modules/calls/call.interactions.js';
 import { SetupService } from '../../src/modules/setup/setup.service.js';
-import type { Guild } from 'discord.js';
+import { MessageFlags, type Guild } from 'discord.js';
 import { discordFixture } from '../unit/modules/calls/call.discord.fixtures.js';
+import { deferred } from '../unit/modules/calls/call.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 import { roomSettingsFixture } from '../unit/modules/calls/room-settings.fixtures.js';
 
@@ -569,26 +570,41 @@ describe('room ownership database', () => {
       await f.client.temporaryRoom.update({ where: { id: f.first }, data: { guildDiscordId: d.guild.id, channelDiscordId: d.channel.id, ownerDiscordId: d.member.id } });
       d.states.set(d.member.id, { channelId: d.channel.id }); d.states.set(target, { channelId: d.channel.id });
       await runtime.start(async () => d.guild as unknown as Guild);
-      const setup = new SetupService(new PrismaVoiceCreatorRepository(f.client), (id) => runtime.synchronizeCreator(id), createLogger({ level: 'silent' }));
+      const creators = new PrismaVoiceCreatorRepository(f.client);
+      const setup = new SetupService(creators, (id) => runtime.synchronizeCreator(id), createLogger({ level: 'silent' }));
       const handler = new CallInteractions(runtime, (guild) => new DiscordRoomGateway(guild));
       const responses: unknown[] = [];
+      const entered = deferred(); const release = deferred(); const disabled = deferred();
+      const save = creators.setRoomCommandsEnabled.bind(creators);
+      vi.spyOn(creators, 'setRoomCommandsEnabled').mockImplementationOnce(async (...args) => {
+        const result = await save(...args); disabled.resolve(); return result;
+      });
       let publication = true;
+      const customId = `call:v3:transfer-target:${f.first}:1`;
       const interaction = {
-        customId: `call:v2:transfer-target:${f.first}:1`, guild: d.guild, guildId: d.guild.id, channelId: d.channel.id,
+        customId, guild: d.guild, guildId: d.guild.id, channelId: d.channel.id, createdTimestamp: Date.now(), applicationId: '92345678901234567',
+        message: { id: '82345678901234567', flags: { has: (flag: number) => flag === MessageFlags.Ephemeral },
+          author: { id: '92345678901234567' }, interactionMetadata: { user: { id: d.member.id } }, components: [{ components: [{ customId }] }] },
         user: { id: d.member.id }, values: [target], inGuild: () => true,
         isButton: () => false, isUserSelectMenu: () => true, isStringSelectMenu: () => false, isModalSubmit: () => false,
-        deferReply: async () => {}, editReply: async (payload: unknown) => {
+        deferUpdate: async () => {}, reply: async (payload: unknown) => { responses.push(payload); },
+        editReply: async (payload: unknown) => { responses.push(payload); },
+        webhook: { editMessage: async (_id: string, payload: unknown) => {
           responses.push(payload);
           if (publication) {
             publication = false;
             expect((await runtime.store.read(f.first))?.transfer?.expiresAt).toBeNull();
-            expect((await setup.toggleRoomCommands(f.creatorId)).synchronization).toEqual({ synced: 1, failed: 0 });
-            expect((await setup.toggleRoomCommands(f.creatorId)).synchronization).toEqual({ synced: 1, failed: 0 });
+            entered.resolve(); await release.promise;
           }
           return { id: '82345678901234567' };
-        },
+        } },
       } as unknown as CallInteraction;
-      await handler.execute(interaction);
+      const handling = handler.execute(interaction); await entered.promise;
+      const disabling = setup.toggleRoomCommands(f.creatorId); await disabled.promise;
+      release.resolve();
+      expect((await disabling).synchronization).toEqual({ synced: 1, failed: 0 });
+      expect((await setup.toggleRoomCommands(f.creatorId)).synchronization).toEqual({ synced: 1, failed: 0 });
+      await handling;
       expect(await runtime.store.read(f.first)).toMatchObject({ controlsEnabled: true, transfer: null, room: { ownerDiscordId: d.member.id, controlVersion: 3 } });
       expect(JSON.stringify(responses.at(-1))).toContain('expirou');
       expect(d.message.delete).toHaveBeenCalledOnce();

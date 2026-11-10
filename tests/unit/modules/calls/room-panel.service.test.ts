@@ -77,7 +77,7 @@ describe('RoomPanelService', () => {
     expect(f.messages.size).toBe(1); expect(f.state().room.controlMessageDiscordId).toBe(id);
     const panel = JSON.parse(JSON.stringify(f.messages.get(id)));
     expect(panel.embeds[0].fields).toEqual(expect.arrayContaining([
-      { name: 'Participantes', value: '1 / 4' }, { name: 'Visibilidade', value: 'Privada' },
+      { name: 'Participantes', value: '1 / 4', inline: true }, { name: 'Acesso e visibilidade', value: 'Aberta · Oculta', inline: true },
       { name: 'Sala disponível', value: 'Qualquer participante elegível presente pode assumir a sala.' },
     ]));
     expect(panel.components[0].components[0].custom_id).toContain(':8');

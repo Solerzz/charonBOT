@@ -7,13 +7,17 @@ import type { OwnershipTimers } from '../ownership/ownership.timers.js';
 import type { RoomControlsService } from './room-controls.service.js';
 import type { RoomPanelService } from './room-panel.service.js';
 import type { RoomStateRepository } from './room-state.repository.js';
-import { RoomActionError, type RoomActor, type RoomDiscordGateway, type PendingOwnershipTransfer } from './room.types.js';
-import { callComponentSchema, callLimitSubmissionSchema, callMemberSelectionSchema, callOwnerMenuSelectionSchema, callRenameSubmissionSchema } from './call.schemas.js';
+import type { RoomCoordinator } from './room.coordinator.js';
+import type { CallPrivateWorkspace, CallWorkspaceDelivery, CallWorkspaceView } from './call-workspace.js';
+import type { CallPanelPayload } from './call-panel.view.js';
+import { RoomActionError, type RoomActor, type RoomDiscordGateway, type PendingOwnershipTransfer, type RoomState } from './room.types.js';
+import { callComponentSchema, callLimitSubmissionSchema, callMemberSelectionSchema, callRenameSubmissionSchema } from './call.schemas.js';
 import { requireOwnedRoom } from './room-context.js';
-import { buildAccessPrompt, buildLimitModal, buildOwnerMenu, buildRenameModal, buildTransferPrompt, buildTransferTargetPrompt } from './call-controls.view.js';
+import { buildAccessPrompt, buildLimitModal, buildRenameModal, buildTransferPrompt, buildTransferTargetPrompt } from './call-controls.view.js';
+import { acknowledgeCallAction, completeCallAction, replyCallFailure, type CallAckMode } from './call-interaction-response.js';
 
 export type CallInteraction = ButtonInteraction | StringSelectMenuInteraction | UserSelectMenuInteraction | ModalSubmitInteraction;
-type Dependencies = { store: RoomStateRepository; ownership: OwnershipService; transfers: TransferService; controls: RoomControlsService; panels: RoomPanelService; timers: OwnershipTimers };
+type Dependencies = { store: RoomStateRepository; ownership: OwnershipService; transfers: TransferService; controls: RoomControlsService; panels: RoomPanelService; timers: OwnershipTimers; coordinator: RoomCoordinator; workspaces: CallPrivateWorkspace };
 
 const unavailable = 'Esta ação não está disponível para você ou expirou. Use os controles atuais da sua sala.';
 function failureMessage(error: unknown, invalidInput: string): string {
@@ -44,31 +48,31 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
   }
 
   async execute(interaction: CallInteraction): Promise<void> {
-    let acknowledged = false;
+    let mode: CallAckMode = 'none';
     let invalidInput = 'Seleção inválida. Use os controles atuais da sala.';
-    const { store, controls, ownership, transfers } = this.dependencies;
+    let actor: RoomActor | undefined;
+    let privateOrigin = false;
+    const { store, controls, ownership, transfers, workspaces } = this.dependencies;
     try {
       const parsed = callComponentSchema.safeParse(interaction.customId);
       if (!parsed.success || !interaction.inGuild() || !interaction.guild || interaction.guild.id !== interaction.guildId) {
         throw new RoomActionError('STALE_CONTROLS');
       }
       const component = parsed.data;
-      let action = component.action;
-      if (action === 'menu') {
-        if (!interaction.isStringSelectMenu()) throw new RoomActionError('STALE_CONTROLS');
-        [action] = callOwnerMenuSelectionSchema.parse(interaction.values);
-      }
+      const action = component.action;
       // Modal launch must be the initial response, never a deferred reply followed by showModal.
       const modal = action === 'rename' || action === 'limit';
       if (!modal) {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        acknowledged = true;
+        mode = await acknowledgeCallAction(interaction);
       }
       const state = await store.read(component.roomId);
       if (!state || state.room.guildDiscordId !== interaction.guildId || state.room.channelDiscordId !== interaction.channelId) throw new RoomActionError('ROOM_UNAVAILABLE');
+      privateOrigin = this.assertOrigin(interaction, state);
+      const privateAction = ['allow-add', 'allow-remove', 'transfer-target', 'confirm', 'undo'].includes(action);
+      if (privateAction !== privateOrigin) throw new RoomActionError('STALE_CONTROLS');
       const operation = 'operationId' in component ? await store.readTransfer(component.operationId) : null;
-      if ('operationId' in component && (!operation || operation.roomId !== component.roomId)) throw new RoomActionError('STALE_CONTROLS');
-      const actor: RoomActor = { roomId: component.roomId, guildDiscordId: interaction.guildId, memberDiscordId: interaction.user.id,
+      if ('operationId' in component && (!operation || operation.roomId !== component.roomId || state.transfer?.id !== operation.id)) throw new RoomActionError('STALE_CONTROLS');
+      actor = { roomId: component.roomId, guildDiscordId: interaction.guildId, memberDiscordId: interaction.user.id,
         controlVersion: 'controlVersion' in component ? component.controlVersion : operation!.controlVersion };
       const gateway = this.gatewayFactory(interaction.guild);
       if (action === 'claim') {
@@ -76,12 +80,15 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
         await ownership.claim(actor, gateway);
       } else {
         const context = await requireOwnedRoom(store, actor, gateway);
+        if (privateOrigin) {
+          await this.validateWorkspace(interaction, actor, gateway, operation?.id, state => {
+            workspaces.adopt(actor!, this.delivery(interaction, interaction.message!.id));
+            if (state.transfer && !operation) throw new RoomActionError('TRANSFER_PENDING');
+          });
+        }
         switch (action) {
-          case 'open':
-            if (!interaction.isButton()) throw new RoomActionError('STALE_CONTROLS');
-            await interaction.editReply(buildOwnerMenu(actor)); return;
           case 'rename': case 'limit':
-            if (!interaction.isButton() && !interaction.isStringSelectMenu()) throw new RoomActionError('STALE_CONTROLS');
+            if (!interaction.isButton()) throw new RoomActionError('STALE_CONTROLS');
             await interaction.showModal(action === 'rename' ? buildRenameModal(actor, context.state.room.name) : buildLimitModal(actor, context.state.room.userLimit)); return;
           case 'rename-save':
             if (!interaction.isModalSubmit()) throw new RoomActionError('STALE_CONTROLS');
@@ -91,31 +98,33 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
             if (!interaction.isModalSubmit()) throw new RoomActionError('STALE_CONTROLS');
             invalidInput = 'Informe 0 para ilimitado ou um número inteiro entre 1 e 99.';
             await controls.setLimit(actor, callLimitSubmissionSchema.parse({ limit: interaction.fields.getTextInputValue('limit') }).limit, gateway); break;
+          case 'lock':
+            if (!interaction.isButton()) throw new RoomActionError('STALE_CONTROLS');
+            await controls.toggleLock(actor, gateway); break;
           case 'visibility':
-            if (!interaction.isButton() && !interaction.isStringSelectMenu()) throw new RoomActionError('STALE_CONTROLS');
-            await controls.setVisibility(actor, context.state.room.visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC', gateway); break;
+            if (!interaction.isButton()) throw new RoomActionError('STALE_CONTROLS');
+            await controls.toggleVisibility(actor, gateway); break;
           case 'access': case 'transfer':
-            if (!interaction.isButton() && !interaction.isStringSelectMenu()) throw new RoomActionError('STALE_CONTROLS');
-            await interaction.editReply(action === 'access' ? buildAccessPrompt(actor) : buildTransferTargetPrompt(actor)); return;
+            if (!interaction.isButton()) throw new RoomActionError('STALE_CONTROLS');
+            await this.showWorkspace(interaction, actor, gateway, action === 'access' ? 'access' : 'transfer-target'); return;
           case 'allow-add': case 'allow-remove': case 'transfer-target': {
             if (!interaction.isUserSelectMenu()) throw new RoomActionError('STALE_CONTROLS');
             const [member] = callMemberSelectionSchema.parse(interaction.values);
             if (action === 'transfer-target') {
               const pending = await transfers.begin(actor, member, gateway);
               try {
-                const published = await interaction.editReply(buildTransferPrompt(actor, pending, 5));
-                // editReply's native Message is delivery confirmation; a missing/uncertain reply never arms.
-                if (!published?.id) throw new RoomActionError('DISCORD_FAILURE');
+                await this.showWorkspace(interaction, actor, gateway, 'transfer-target', pending.id);
                 const armed = await transfers.activate(actor, pending.id, gateway);
                 if (!armed?.expiresAt) throw new RoomActionError('STALE_CONTROLS');
-                this.countdown(interaction, actor, armed);
+                this.countdown(actor, armed);
               } catch (error) {
                 await transfers.abortUnpublished(pending.id, gateway);
                 throw error;
               }
               return;
             }
-            await controls.setAllowed(actor, member, action === 'allow-add', gateway); break;
+            await controls.setAllowed(actor, member, action === 'allow-add', gateway);
+            await this.showWorkspace(interaction, actor, gateway, 'access'); break;
           }
           case 'confirm': case 'undo':
             if (!interaction.isButton() || !operation) throw new RoomActionError('STALE_CONTROLS');
@@ -123,26 +132,99 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
           default: throw new RoomActionError('STALE_CONTROLS');
         }
       }
-      await interaction.editReply({ content: 'Ação concluída.', embeds: [], components: [], allowedMentions: { parse: [] } });
+      await completeCallAction(interaction, mode);
     } catch (error) {
       // Never echo SQL, Discord payloads or forged IDs. All failures stay private.
       const payload = { content: failureMessage(error, invalidInput), embeds: [], components: [], allowedMentions: { parse: [] as never[] } };
-      if (acknowledged) await interaction.editReply(payload).catch(() => undefined);
-      else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+      if (actor) {
+        // An access failure can durably fence the generation. Never keep its old handle.
+        const current = await store.read(actor.roomId).catch(() => null);
+        await workspaces.reconcile(actor.roomId, current);
+        if (privateOrigin && current?.transfer && current.room.controlVersion === actor.controlVersion && interaction.guild) {
+          try {
+            await this.showWorkspace(interaction, actor, this.gatewayFactory(interaction.guild), 'transfer-target', current.transfer.id, payload.content);
+            return;
+          } catch { /* Fall through to a private failure, never the shared panel. */ }
+        }
+      }
+      await replyCallFailure(interaction, mode, payload).catch(() => undefined);
     }
   }
 
-  private countdown(interaction: CallInteraction, actor: RoomActor, pending: PendingOwnershipTransfer): void {
-    const { timers, store, transfers } = this.dependencies;
+  private assertOrigin(interaction: CallInteraction, state: RoomState): boolean {
+    if (!state.room.controlMessageDiscordId) throw new RoomActionError('STALE_CONTROLS');
+    if (interaction.isModalSubmit() && !interaction.isFromMessage()) return false;
+    const message = interaction.message;
+    if (!message?.id) throw new RoomActionError('STALE_CONTROLS');
+    if (!message.flags.has(MessageFlags.Ephemeral)) {
+      if (message.id !== state.room.controlMessageDiscordId) throw new RoomActionError('STALE_CONTROLS');
+      return false;
+    }
+    if (message.id === state.room.controlMessageDiscordId || message.author.id !== interaction.applicationId
+      || message.interactionMetadata?.user.id !== interaction.user.id
+      || !message.components.some(row => 'components' in row && row.components.some(component => 'customId' in component && component.customId === interaction.customId))) {
+      throw new RoomActionError('STALE_CONTROLS');
+    }
+    return true;
+  }
+
+  private delivery(interaction: CallInteraction, messageId: string): CallWorkspaceDelivery {
+    const edit = (payload: CallPanelPayload) => interaction.webhook.editMessage(messageId, { content: '', ...payload });
+    return { messageId, expiresAt: interaction.createdTimestamp + 900_000, edit,
+      deactivate: async () => { await edit({ content: 'Área encerrada. Use os controles atuais da sala.', embeds: [], components: [], allowedMentions: { parse: [] } }); } };
+  }
+
+  private async validateWorkspace(interaction: CallInteraction, actor: RoomActor, gateway: RoomDiscordGateway, operationId: string | undefined, prepare: (state: RoomState) => void): Promise<void> {
+    const { store, coordinator } = this.dependencies;
+    await coordinator.member(actor.guildDiscordId, actor.memberDiscordId, () => coordinator.room(actor.guildDiscordId, interaction.channelId!, async () => {
+      await this.dependencies.workspaces.reconcile(actor.roomId, await store.read(actor.roomId));
+      const { state } = await requireOwnedRoom(store, actor, gateway);
+      if (state.room.channelDiscordId !== interaction.channelId) throw new RoomActionError('ROOM_UNAVAILABLE');
+      this.assertOrigin(interaction, state);
+      const pending = state.transfer;
+      if ((pending && (pending.roomId !== actor.roomId || pending.controlVersion !== actor.controlVersion || pending.ownerDiscordId !== actor.memberDiscordId))
+        || (operationId && pending?.id !== operationId)) throw new RoomActionError('STALE_CONTROLS');
+      coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);
+      // Start delivery synchronously with the validated generation, but never hold
+      // coordinator locks while awaiting this delivery queue (lifecycle drains it).
+      prepare(state);
+    }));
+  }
+
+  private async showWorkspace(interaction: CallInteraction, actor: RoomActor, gateway: RoomDiscordGateway, kind: 'access' | 'transfer-target', operationId?: string, content?: string): Promise<void> {
+    let publishing!: Promise<CallWorkspaceDelivery>;
+    let pendingFailure: { operationId: string; payload: CallPanelPayload } | undefined;
+    await this.validateWorkspace(interaction, actor, gateway, operationId, state => {
+      const pending = state.transfer;
+      const view: CallWorkspaceView = pending
+        ? { kind: 'transfer-pending', operationId: pending.id, payload: { ...buildTransferPrompt(actor, pending, this.seconds(pending)), ...(content ? { content } : {}) } }
+        : { kind, payload: kind === 'access' ? buildAccessPrompt(actor) : buildTransferTargetPrompt(actor) };
+      if (content && view.kind === 'transfer-pending') pendingFailure = view;
+      publishing = this.dependencies.workspaces.show(actor, view, async payload => {
+        // Only public opens create a response. Private selections proved their
+        // origin and adopted it before entering this path.
+        if (interaction.message?.flags.has(MessageFlags.Ephemeral)) throw new RoomActionError('STALE_CONTROLS');
+        const message = await interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral });
+        if (!message?.id || message.id === state.room.controlMessageDiscordId) throw new RoomActionError('DISCORD_FAILURE');
+        return this.delivery(interaction, message.id);
+      });
+    });
+    await publishing;
+    if (pendingFailure) await this.dependencies.workspaces.editPending(actor, pendingFailure.operationId, pendingFailure.payload);
+  }
+
+  private seconds(pending: PendingOwnershipTransfer): number {
+    return pending.expiresAt ? Math.min(5, Math.max(0, Math.ceil((pending.expiresAt.getTime() - Date.now()) / 1_000))) : 5;
+  }
+
+  private countdown(actor: RoomActor, pending: PendingOwnershipTransfer): void {
+    const { timers, store, transfers, workspaces } = this.dependencies;
     let ended = false;
-    let rendering = Promise.resolve();
     transfers.watchPrompt(actor.roomId, pending.id, () => {
       ended = true;
       timers.cancel(`countdown:${actor.roomId}`);
       if (!timers.isStopped) timers.schedule(`transfer-prompt-terminal:${pending.id}`, new Date(), async () => {
-        // A late countdown write must finish before the one terminal edit.
-        await rendering;
-        await interaction.editReply({ content: 'Transferência encerrada. Use os controles atuais da sala.', embeds: [], components: [], allowedMentions: { parse: [] } }).catch(() => undefined);
+        await workspaces.editPending(actor, pending.id, { embeds: [], components: [], allowedMentions: { parse: [] }, content: 'Transferência encerrada. Use os controles atuais da sala.' }, true);
       });
     });
     const tick = async (): Promise<void> => {
@@ -153,9 +235,7 @@ export class CallInteractions implements InteractionHandler<CallInteraction> {
         return;
       }
       if (ended || timers.isStopped) return;
-      const seconds = Math.min(5, Math.max(0, Math.ceil((current.expiresAt.getTime() - Date.now()) / 1_000)));
-      rendering = interaction.editReply(buildTransferPrompt(actor, current, seconds)).then(() => undefined, () => undefined);
-      await rendering;
+      await workspaces.editPending(actor, pending.id, buildTransferPrompt(actor, current, this.seconds(current)));
       // Rendering never owns or extends the transfer's real deadline.
       const stillPending = await store.readTransfer(pending.id);
       if (!ended && !timers.isStopped && stillPending?.expiresAt && stillPending.expiresAt > new Date()) {

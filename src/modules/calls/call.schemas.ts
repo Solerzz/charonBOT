@@ -25,20 +25,20 @@ export function buildInitialRoomName(
 }
 
 const callControlActionSchema = z.enum([
-  'open', 'claim', 'menu', 'rename', 'rename-save', 'limit', 'limit-save',
+  'lock', 'claim', 'rename', 'rename-save', 'limit', 'limit-save',
   'visibility', 'access', 'allow-add', 'allow-remove', 'transfer', 'transfer-target',
 ]);
 export type CallControlAction = z.infer<typeof callControlActionSchema>;
 export type CallComponent =
-  | { [Action in CallControlAction]: { version: 'v2'; action: Action; roomId: string; controlVersion: number } }[CallControlAction]
-  | { [Action in 'confirm' | 'undo']: { version: 'v2'; action: Action; roomId: string; operationId: string } }['confirm' | 'undo'];
+  | { [Action in CallControlAction]: { version: 'v3'; action: Action; roomId: string; controlVersion: number } }[CallControlAction]
+  | { [Action in 'confirm' | 'undo']: { version: 'v3'; action: Action; roomId: string; operationId: string } }['confirm' | 'undo'];
 
 const roomUuidSchema = z.string().uuid();
 
 function decodeCallComponent(value: string): CallComponent | null {
   const parts = value.split(':');
   const [prefix, version, action, roomId, token] = parts;
-  if (parts.length !== 5 || prefix !== 'call' || version !== 'v2' ||
+  if (parts.length !== 5 || prefix !== 'call' || version !== 'v3' ||
       !roomUuidSchema.safeParse(roomId).success || roomId === undefined || token === undefined) return null;
 
   if (action === 'confirm' || action === 'undo') {
@@ -66,8 +66,6 @@ export function encodeCallComponent(value: CallComponent): string {
   return encoded;
 }
 
-export const callOwnerMenuActionSchema = z.enum(['rename', 'limit', 'visibility', 'access', 'transfer']);
-export const callOwnerMenuSelectionSchema = z.tuple([callOwnerMenuActionSchema]);
 export const callMemberSelectionSchema = z.tuple([discordIdSchema]);
 export const callRenameSubmissionSchema = z.object({ name: temporaryRoomNameSchema }).strict();
 export const callLimitSubmissionSchema = z.object({
