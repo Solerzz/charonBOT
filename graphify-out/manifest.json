@@ -888,9 +888,15 @@
     "semantic_hash": ""
   },
   "docs/superpowers/specs/2026-11-10-charon-v0.4.0-moderacao-dono-design.md": {
-    "mtime": 1794350324.0898657,
-    "seen": 1794350342.0389032,
-    "ast_hash": "403c6ef0c9ebf688df44f655a2bcc484",
+    "mtime": 1794350877.4471855,
+    "seen": 1794351220.785267,
+    "ast_hash": "176f2f05e831f92c2b0640afa2e49201",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-11-10-charon-v0.4.0-moderacao-dono.md": {
+    "mtime": 1794351202.519463,
+    "seen": 1794351220.784243,
+    "ast_hash": "b4c8b0c44ccaa01958dd13fd2d39c502",
     "semantic_hash": ""
   },
   "package-lock.json": {
