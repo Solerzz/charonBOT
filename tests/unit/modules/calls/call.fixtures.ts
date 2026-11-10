@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 import type { TemporaryRoom, VoiceCreator } from '../../../../src/generated/prisma/client.js';
 import type { CallDiscordGateway } from '../../../../src/modules/calls/call.discord.js';
 import type { CallPanelPayload } from '../../../../src/modules/calls/call-panel.view.js';
-import type { TemporaryRoomRepository } from '../../../../src/modules/calls/call.repository.js';
+import type { CreateTemporaryRoomInput, TemporaryRoomRepository } from '../../../../src/modules/calls/call.repository.js';
 import type { VoiceTransition } from '../../../../src/modules/calls/call.schemas.js';
 import type { VoiceCreatorRepository } from '../../../../src/modules/setup/setup.repository.js';
 
@@ -54,8 +54,8 @@ export function lifecycleFixture() {
   const rooms = {
     findActiveByChannel: vi.fn(async (id: string) => [...records.values()].find((r) => r.channelDiscordId === id && r.status !== 'CLOSED') ?? null),
     findActiveByOwner: vi.fn(async (guild: string, owner: string) => [...records.values()].find((r) => r.guildDiscordId === guild && r.ownerDiscordId === owner && r.status !== 'CLOSED') ?? null),
-    createCreating: vi.fn(async (input) => {
-      const created = { ...room, ...input, status: 'CREATING' as const, controlMessageDiscordId: null };
+    createCreating: vi.fn(async (input: CreateTemporaryRoomInput) => {
+      const created = { ...room, ...input, userLimit: input.userLimit, status: 'CREATING' as const, controlMessageDiscordId: null };
       records.set(created.id, created);
       return created;
     }),

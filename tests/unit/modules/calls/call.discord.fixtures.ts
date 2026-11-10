@@ -1,4 +1,4 @@
-import { ChannelType, Collection, PermissionFlagsBits, PermissionsBitField, type Guild, type GuildMember } from 'discord.js';
+import { ChannelType, Collection, PermissionFlagsBits, PermissionsBitField, type Guild, type GuildMember, type GuildChannelCreateOptions } from 'discord.js';
 import { vi } from 'vitest';
 
 import { DiscordCallGateway } from '../../../../src/modules/calls/call.discord.js';
@@ -8,7 +8,7 @@ const rights = new PermissionsBitField(Object.values(PermissionFlagsBits));
 export function discordFixture() {
   const message = { id: room.controlMessageDiscordId!, edit: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
   const channel = {
-    id: room.channelDiscordId, guildId: creator.guildDiscordId, type: ChannelType.GuildVoice, name: 'Game', userLimit: 0,
+    id: room.channelDiscordId, guildId: creator.guildDiscordId, type: ChannelType.GuildVoice, parentId: creator.categoryDiscordId, name: 'Game', userLimit: 0,
     isThread: () => false,
     permissionsFor: vi.fn(() => rights), delete: vi.fn(async () => {}),
     send: vi.fn(async () => message), messages: { fetch: vi.fn(async () => message) },
@@ -16,6 +16,11 @@ export function discordFixture() {
     permissionOverwrites: { cache: new Collection<string, { id: string; type: number; allow: PermissionsBitField; deny: PermissionsBitField }>(), set: vi.fn(async (_overwrites: unknown) => {}) },
   };
   const category = { ...channel, id: creator.categoryDiscordId, type: ChannelType.GuildCategory, permissionsFor: vi.fn(() => rights) };
+  const entryChannel = { ...channel, id: creator.creatorChannelDiscordId, name: 'Entry', userLimit: 0,
+    setUserLimit: vi.fn(async (_limit: number) => {}) };
+  entryChannel.setUserLimit.mockImplementation(async (limit) => { entryChannel.userLimit = limit; });
+  channel.setName.mockImplementation(async (name) => { channel.name = name; });
+  channel.setUserLimit.mockImplementation(async (limit) => { channel.userLimit = limit; });
   const states = new Collection<string, { channelId: string | null }>([[entry.memberDiscordId, { channelId: creator.creatorChannelDiscordId }]]);
   let serverChannel: string | null = creator.creatorChannelDiscordId;
   const bot = { id: '92345678901234567', guild: { id: creator.guildDiscordId }, permissions: rights, user: { bot: true } };
@@ -36,10 +41,14 @@ export function discordFixture() {
       return id === member.id ? member : { ...member, id };
     }) },
     channels: {
-      fetch: vi.fn(async (id: string) => id === creator.categoryDiscordId ? category : channel),
-      create: vi.fn(async () => channel),
+      fetch: vi.fn(async (id: string) => id === creator.categoryDiscordId ? category : id === entryChannel.id ? entryChannel : channel),
+      create: vi.fn(async (input: GuildChannelCreateOptions) => {
+        channel.name = input.name;
+        channel.userLimit = input.userLimit!;
+        return channel;
+      }),
     },
   };
   const gateway = new DiscordCallGateway(guild as unknown as Guild, member as unknown as GuildMember);
-  return { guild, member, bot, channel, category, message, states, gateway, setServerChannel: (id: string) => { serverChannel = id; } };
+  return { guild, member, bot, channel, entryChannel, category, message, states, gateway, setServerChannel: (id: string) => { serverChannel = id; } };
 }

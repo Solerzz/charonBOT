@@ -24,12 +24,22 @@ describe('PrismaTemporaryRoomRepository', () => {
     expect(db.findFirst).toHaveBeenNthCalledWith(2, { where: { guildDiscordId: room.guildDiscordId, ownerDiscordId: room.ownerDiscordId, status: { in: ['CREATING', 'ACTIVE', 'CLOSING'] } } });
   });
 
-  it('persists public unlimited creating rooms with a nullable owner and panel', async () => {
+  it.each([0, 1, 4, 99])('persists limit %i on the first public CREATING write with nullable owner and panel', async (userLimit) => {
     const { temporaryRoom: db, repository } = fixture();
-    const input = { guildDiscordId: room.guildDiscordId, voiceCreatorId: room.voiceCreatorId, channelDiscordId: room.channelDiscordId, ownerDiscordId: null, name: 'Game' };
+    const input = { guildDiscordId: room.guildDiscordId, voiceCreatorId: room.voiceCreatorId, channelDiscordId: room.channelDiscordId, ownerDiscordId: null, name: 'Game', userLimit };
     db.create.mockResolvedValue({ ...room, ...input, status: 'CREATING', controlMessageDiscordId: null });
     await expect(repository.createCreating(input)).resolves.toMatchObject({ status: 'CREATING', ownerDiscordId: null });
-    expect(db.create).toHaveBeenCalledExactlyOnceWith({ data: { ...input, status: 'CREATING', userLimit: 0, visibility: 'PUBLIC', controlMessageDiscordId: null } });
+    expect(db.create).toHaveBeenCalledExactlyOnceWith({ data: { ...input, status: 'CREATING', visibility: 'PUBLIC', controlMessageDiscordId: null } });
+  });
+
+  it.each([-1, 100, 1.5, undefined])('rejects invalid or missing limit %s before SQL', (userLimit) => {
+    const f = fixture();
+    expect(() => f.repository.createCreating({
+      guildDiscordId: room.guildDiscordId, voiceCreatorId: room.voiceCreatorId,
+      channelDiscordId: room.channelDiscordId, ownerDiscordId: null, name: 'Game', userLimit: userLimit as number,
+    })).toThrow();
+    expect(f.temporaryRoom.create).not.toHaveBeenCalled();
+    expect(f.$transaction).not.toHaveBeenCalled();
   });
 
   it.each([

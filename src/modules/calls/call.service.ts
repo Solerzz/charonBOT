@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 
 import type { VoiceCreatorRepository } from '../setup/setup.repository.js';
+import { defaultUserLimitSchema } from '../setup/setup.schemas.js';
 import { CallDiscordError, CallMoveUnconfirmedError, type CallDiscordGateway } from './call.discord.js';
 import type { TemporaryRoomRecord, TemporaryRoomRepository } from './call.repository.js';
 import { buildInitialRoomName, voiceTransitionSchema, type VoiceTransition } from './call.schemas.js';
@@ -32,6 +33,7 @@ export class CallService {
       if (transition.memberIsBot) return;
       const creator = await this.creators.findByChannel(transition.newChannelDiscordId);
       if (creator === null || creator.guildDiscordId !== transition.guildDiscordId) return;
+      const { id: voiceCreatorId, categoryDiscordId, defaultUserLimit } = creator;
       if (gateway.getMemberChannelDiscordId() !== transition.newChannelDiscordId) return;
       const owned = await this.rooms.findActiveByOwner(transition.guildDiscordId, transition.memberDiscordId);
       if (owned !== null) {
@@ -56,8 +58,9 @@ export class CallService {
       if (gateway.getMemberChannelDiscordId() !== transition.newChannelDiscordId) return;
       let channelDiscordId: string;
       const name = buildInitialRoomName(transition.activityName, transition.displayName);
+      const userLimit = defaultUserLimitSchema.parse(defaultUserLimit);
       try {
-        ({ channelDiscordId } = await gateway.createTemporaryChannel({ categoryDiscordId: creator.categoryDiscordId, name }));
+        ({ channelDiscordId } = await gateway.createTemporaryChannel({ categoryDiscordId, name, userLimit }));
       } catch (error: unknown) {
         const failedChannelId = error instanceof CallDiscordError ? error.channelDiscordId : undefined;
         this.logFailure('createChannel', transition, failedChannelId ?? transition.newChannelDiscordId, error);
@@ -67,8 +70,8 @@ export class CallService {
         let created: TemporaryRoomRecord;
         try {
           created = await this.rooms.createCreating({
-            guildDiscordId: transition.guildDiscordId, voiceCreatorId: creator.id,
-            channelDiscordId, ownerDiscordId: transition.memberDiscordId, name,
+            guildDiscordId: transition.guildDiscordId, voiceCreatorId,
+            channelDiscordId, ownerDiscordId: transition.memberDiscordId, name, userLimit,
           });
         } catch (error: unknown) {
           this.logFailure('persistCreating', transition, channelDiscordId, error);

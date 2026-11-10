@@ -2,15 +2,53 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { Client } from 'pg';
+import type { Guild } from 'discord.js';
 import { describe, expect, it } from 'vitest';
 
 import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
 import { PrismaVoiceCreatorRepository, VoiceCreatorNotFoundError } from '../../src/modules/setup/setup.repository.js';
+import { SetupCreationService } from '../../src/modules/setup/setup-creation.service.js';
+import { DiscordSetupGateway } from '../../src/modules/setup/setup.discord.js';
+import { createLogger } from '../../src/core/logger/logger.js';
+import { discordFixture } from '../unit/modules/calls/call.discord.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
 
 describe('guided setup persistence', () => {
+  integrationTest.each([0, 1, 4, 99])('creates an unlimited entry through the real gateway while SQL stores default %i', async (defaultUserLimit) => {
+    assertDisposableDatabaseEnvironment();
+    const client = createPrismaClient({ url: process.env.DATABASE_URL!, directUrl: process.env.DIRECT_URL! });
+    const repository = new PrismaVoiceCreatorRepository(client);
+    const d = discordFixture();
+    d.entryChannel.id = String(70000000000000000n + BigInt(`0x${randomUUID().replaceAll('-', '').slice(0, 12)}`));
+    d.entryChannel.userLimit = 77;
+    d.guild.channels.create.mockImplementationOnce(async (input) => {
+      d.entryChannel.name = input.name; d.entryChannel.userLimit = input.userLimit!;
+      d.entryChannel.parentId = typeof input.parent === 'string' ? input.parent : input.parent!.id;
+      return d.entryChannel;
+    });
+    try {
+      const result = await new SetupCreationService(repository, createLogger({ level: 'silent' })).create({
+        id: randomUUID(), revision: 2, status: 'creating', expiresAt: Date.now() + 60_000,
+        context: { guildDiscordId: d.guild.id, administratorDiscordId: d.member.id, messageDiscordId: d.message.id },
+        input: { categoryDiscordId: d.category.id, name: 'Entry only', defaultUserLimit },
+      }, new DiscordSetupGateway(d.guild as unknown as Guild));
+      expect(result.status).toBe('created');
+      expect(d.guild.channels.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'Entry only', userLimit: 0, parent: d.category.id }));
+      expect(d.entryChannel.userLimit).toBe(0);
+      const stored = await repository.findByChannel(d.entryChannel.id);
+      expect(stored).toMatchObject({ defaultUserLimit, categoryDiscordId: d.category.id, roomCommandsEnabled: true });
+      await repository.setDefaultUserLimit(stored!.id, 8);
+      expect(d.entryChannel.userLimit).toBe(0);
+      expect(d.guild.channels.create).toHaveBeenCalledOnce();
+      expect(d.entryChannel.setUserLimit).not.toHaveBeenCalled();
+    } finally {
+      try { await client.voiceCreator.deleteMany({ where: { guildDiscordId: d.guild.id, creatorChannelDiscordId: d.entryChannel.id } }); }
+      finally { await disconnectDatabase(client); }
+    }
+  }, 30_000);
+
   integrationTest('migrates an existing row atomically with default zero, range protection and unchanged RLS', async () => {
     assertDisposableDatabaseEnvironment();
     const migration = await readFile(new URL('../../prisma/migrations/20261110010000_voice_creator_default_limit/migration.sql', import.meta.url), 'utf8');

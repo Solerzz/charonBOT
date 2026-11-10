@@ -1,8 +1,9 @@
 import type { PrismaClient, TemporaryRoom } from '../../generated/prisma/client.js';
+import { defaultUserLimitSchema } from '../setup/setup.schemas.js';
 
 export type TemporaryRoomRecord = TemporaryRoom;
 export type CreateTemporaryRoomInput = Pick<TemporaryRoomRecord,
-  'guildDiscordId' | 'voiceCreatorId' | 'channelDiscordId' | 'ownerDiscordId' | 'name'>;
+  'guildDiscordId' | 'voiceCreatorId' | 'channelDiscordId' | 'ownerDiscordId' | 'name' | 'userLimit'>;
 
 export interface TemporaryRoomRepository {
   findActiveByChannel(channelDiscordId: string): Promise<TemporaryRoomRecord | null>;
@@ -42,8 +43,9 @@ export class PrismaTemporaryRoomRepository implements TemporaryRoomRepository {
   }
 
   createCreating(input: CreateTemporaryRoomInput): Promise<TemporaryRoomRecord> {
+    const userLimit = defaultUserLimitSchema.parse(input.userLimit);
     return this.prisma.temporaryRoom.create({
-      data: { ...input, status: 'CREATING', userLimit: 0, visibility: 'PUBLIC', controlMessageDiscordId: null },
+      data: { ...input, status: 'CREATING', userLimit, visibility: 'PUBLIC', controlMessageDiscordId: null },
     });
   }
 
