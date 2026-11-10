@@ -1,10 +1,106 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { currentOwnedRoom } from '../../../../src/modules/calls/room-mutation.js';
+import { createLogger } from '../../../../src/core/logger/logger.js';
+import { RoomPanelService } from '../../../../src/modules/calls/room-panel.service.js';
 import { OWNER, OTHER } from '../ownership/ownership.fixtures.js';
 import { deferred } from './call.fixtures.js';
 import { roomSettingsFixture } from './room-settings.fixtures.js';
 
 describe('RoomControlsService', () => {
+  it('retries recovery publication after access resynchronization cleared uncertainty, without admitting the old action', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    const panels = new RoomPanelService({ store: f.store, coordinator: f.coordinator, logger: createLogger({ level: 'silent' }) });
+    let published: unknown;
+    f.channel.messages.edit.mockImplementation(async (id, payload) => { published = payload; return { ...f.message, id }; });
+    const publishedVersions = () => [...new Set([...JSON.stringify(published).matchAll(/"custom_id":"call:v3:[^"]+:(\d+)"/g)].map((match) => Number(match[1])))];
+    await f.coordinator.room(f.guild.id, f.channel.id, () => panels.synchronizeLocked(f.state().room.id, f.gateway));
+    expect(publishedVersions()).toEqual([0]);
+    // Preserve the runtime's actual order: mark -> read -> access sync (which
+    // clears the mark) -> real panel service -> stateful Discord message edit.
+    f.onChangedLocked.mockImplementation(async (id) => {
+      f.access.markUncertain(id);
+      const state = (await f.store.read(id))!;
+      await f.access.synchronizeLocked(state, (await f.gateway.snapshot(state.room.channelDiscordId))!, f.gateway);
+      await panels.synchronizeLocked(id, f.gateway);
+    });
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    f.store.settleAccess.mockRejectedValueOnce(new Error('settlement unavailable'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room.controlVersion).toBe(0); expect(f.onChangedLocked).not.toHaveBeenCalled();
+    f.channel.messages.edit.mockRejectedValueOnce(new Error('publication unavailable'));
+    await expect(f.controls.rename(actor, 'Old', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.state().room.controlVersion).toBe(1); expect(publishedVersions()).toEqual([0]);
+    const retryPending = f.access.isUncertain(f.state().room.id);
+    await expect(f.controls.rename(actor, 'Old', f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.onChangedLocked).toHaveBeenCalledTimes(2);
+    expect(retryPending).toBe(true); expect(publishedVersions()).toEqual([1]);
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+    expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.state().room.name).toBe('Game');
+    expect(f.store.updateSettings).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes the fenced control version after an indeterminate SQL failure without reporting setting success', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room).toMatchObject({ controlVersion: 1, isLocked: false });
+    expect(f.refreshes).toHaveLength(1); expect(f.refreshes[0]!.room.controlVersion).toBe(1);
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+  });
+
+  it('publishes the recovered fence before rejecting the old controls when settlement previously failed', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    f.store.settleAccess.mockRejectedValueOnce(new Error('barrier unavailable'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.refreshes).toHaveLength(0);
+    await expect(f.controls.rename(actor, 'Stale', f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.channel.setName).not.toHaveBeenCalled(); expect(f.refreshes).toHaveLength(1);
+    expect(f.refreshes[0]!.room).toMatchObject({ controlVersion: 1, name: 'Game' });
+  });
+
+  it('retries an unconfirmed fenced-control refresh before rejecting another old action', async () => {
+    const f = roomSettingsFixture(); const actor = f.actor();
+    f.store.updateSettings.mockRejectedValueOnce(new Error('indeterminate SQL'));
+    f.onChangedLocked.mockRejectedValueOnce(new Error('refresh unavailable'));
+    await expect(f.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true); expect(f.refreshes).toHaveLength(0);
+    await expect(f.controls.rename(actor, 'Stale', f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.refreshes).toHaveLength(1); expect(f.refreshes[0]!.room.controlVersion).toBe(1);
+    expect(f.channel.setName).not.toHaveBeenCalled();
+  });
+
+  it.each(['PUBLIC', 'PRIVATE'] as const)('keeps visibility %s when toggling the lock and the lock when toggling visibility', async (visibility) => {
+    const f = roomSettingsFixture(); f.state().room.visibility = visibility;
+    await f.controls.toggleLock(f.actor(), f.gateway);
+    expect(f.state().room).toMatchObject({ isLocked: true, visibility });
+    await f.controls.toggleVisibility(f.actor(), f.gateway);
+    expect(f.state().room).toMatchObject({ isLocked: true, visibility: visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC' });
+    await f.controls.toggleLock(f.actor(), f.gateway);
+    expect(f.state().room.isLocked).toBe(false);
+  });
+
+  it.each(['lock', 'visibility'] as const)('serializes two concurrent toggles with %s without lost updates', async (second) => {
+    const f = roomSettingsFixture(); const entered = deferred(); const release = deferred();
+    const write = f.channel.permissionOverwrites.set.getMockImplementation()!;
+    f.channel.permissionOverwrites.set.mockImplementationOnce(async (input) => { await write(input); entered.resolve(); await release.promise; });
+    const first = f.controls.toggleLock(f.actor(), f.gateway); await entered.promise;
+    const next = second === 'lock' ? f.controls.toggleLock(f.actor(), f.gateway) : f.controls.toggleVisibility(f.actor(), f.gateway);
+    release.resolve(); await Promise.all([first, next]);
+    expect(f.state().room).toMatchObject(second === 'lock' ? { isLocked: false, visibility: 'PUBLIC' } : { isLocked: true, visibility: 'PRIVATE' });
+    expect(f.refreshes).toHaveLength(2);
+  });
+
+  it.each([false, true])('rejects lock-only drift from %s without an ownership version change', async (isLocked) => {
+    const f = roomSettingsFixture();
+    f.state().room.isLocked = isLocked;
+    const expected = structuredClone((await currentOwnedRoom(f.store, f.actor(), f.gateway)).state);
+    f.state().room.isLocked = !isLocked;
+    await expect(currentOwnedRoom(f.store, f.actor(), f.gateway, expected)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.state().room).toMatchObject({ visibility: 'PUBLIC', controlVersion: expected.room.controlVersion, isLocked: !isLocked });
+  });
+
   it('trims and commits eleven complex graphemes; callback observes committed state under the room lock', async () => {
     const f = roomSettingsFixture(); const name = '👨‍👩‍👧‍👦'.repeat(11);
     const entered = deferred(); const release = deferred();
@@ -42,7 +138,7 @@ describe('RoomControlsService', () => {
   });
 
   it.each(['guild', 'owner', 'absent', 'bot', 'version', 'disabled', 'closed'] as const)('rejects unauthorized %s for every setting', async (cause) => {
-    for (const action of ['rename', 'limit', 'visibility', 'allow'] as const) {
+    for (const action of ['rename', 'limit', 'visibility', 'allow', 'toggleLock', 'toggleVisibility'] as const) {
       const f = roomSettingsFixture(); const actor = f.actor();
       const errors = { guild: 'ROOM_UNAVAILABLE', owner: 'NOT_OWNER', absent: 'NOT_PRESENT', bot: 'NOT_PRESENT', version: 'STALE_CONTROLS', disabled: 'CONTROLS_DISABLED', closed: 'ROOM_UNAVAILABLE' };
       if (cause === 'guild') actor.guildDiscordId = '82345678901234567';
@@ -55,6 +151,8 @@ describe('RoomControlsService', () => {
       const operation = action === 'rename' ? f.controls.rename(actor, 'New', f.gateway)
         : action === 'limit' ? f.controls.setLimit(actor, 1, f.gateway)
           : action === 'visibility' ? f.controls.setVisibility(actor, 'PRIVATE', f.gateway)
+            : action === 'toggleLock' ? f.controls.toggleLock(actor, f.gateway)
+            : action === 'toggleVisibility' ? f.controls.toggleVisibility(actor, f.gateway)
             : f.controls.setAllowed(actor, OTHER, true, f.gateway);
       await expect(operation).rejects.toMatchObject({ code: errors[cause] });
       expect(f.channel.name).toBe('Game'); expect(f.channel.userLimit).toBe(0); expect(f.projected()).toEqual([]);

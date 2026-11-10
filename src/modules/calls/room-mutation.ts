@@ -18,6 +18,7 @@ export async function currentOwnedRoom(store: RoomStateRepository, actor: RoomAc
     // Settings do not bump the ownership/control version. Detect setting/list
     // drift as well, rather than committing a projection of a stale state.
     if (room.name !== expected.room.name || room.userLimit !== expected.room.userLimit || room.visibility !== expected.room.visibility
+      || room.isLocked !== expected.room.isLocked
       || [...context.state.allowedMemberIds].sort().join(',') !== [...expected.allowedMemberIds].sort().join(',')) {
       throw new RoomActionError('STALE_CONTROLS');
     }

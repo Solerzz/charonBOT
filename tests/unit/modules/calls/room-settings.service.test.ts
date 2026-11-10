@@ -22,7 +22,7 @@ describe('owner limits with creator defaults', () => {
     await runtime.controls.setLimit(actor, 8, d.gateway);
     expect(f.records.get(room.id)).toMatchObject({ userLimit: 8, controlMessageDiscordId: room.controlMessageDiscordId });
     expect(d.channel.userLimit).toBe(8);
-    expect(JSON.stringify(d.message.edit.mock.calls)).toContain('1 / 8');
+    expect(JSON.stringify(d.channel.messages.edit.mock.calls)).toContain('1 / 8');
     d.states.set('72345678901234567', { channelId: d.channel.id });
     d.states.set('82345678901234567', { channelId: d.channel.id });
     await runtime.controls.setLimit(actor, 1, d.gateway);
@@ -30,7 +30,7 @@ describe('owner limits with creator defaults', () => {
     expect(f.records.get(room.id)?.userLimit).toBe(1);
     expect(d.gateway.getChannelMemberCount(d.channel.id)).toBe(3);
     expect(d.member.voice.setChannel).not.toHaveBeenCalled();
-    expect(JSON.stringify(d.message.edit.mock.calls)).toContain('3 / 1');
+    expect(JSON.stringify(d.channel.messages.edit.mock.calls)).toContain('3 / 1');
     expect(f.configuration.defaultUserLimit).toBe(4);
     expect(d.entryChannel.userLimit).toBe(0);
     expect(f.creators.setDefaultUserLimit).not.toHaveBeenCalled();

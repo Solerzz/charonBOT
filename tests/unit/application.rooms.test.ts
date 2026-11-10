@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { createApplication, type DiscordClientPort } from '../../src/application.js';
 import { createPrismaClient } from '../../src/core/database/prisma.js';
 import { createLogger } from '../../src/core/logger/logger.js';
+import { CallPrivateWorkspace } from '../../src/modules/calls/call-workspace.js';
 import type { PendingOwnershipTransfer, RoomPresence } from '../../src/modules/calls/room.types.js';
 import { creator, room, deferred } from './modules/calls/call.fixtures.js';
 import { discordFixture } from './modules/calls/call.discord.fixtures.js';
@@ -17,7 +18,7 @@ function sqlSpy<T extends object, K extends keyof T>(delegate: T, method: K) {
   return vi.spyOn(delegate, method as never) as unknown as Mock<(...args: Parameters<Method>) => Promise<Awaited<ReturnType<Method>>>>;
 }
 
-function fixture(tracked = true) {
+function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
   const native = discordFixture(); native.states.set(OWNER, { channelId: room.channelDiscordId }); native.states.set(OTHER, { channelId: room.channelDiscordId });
   const record = structuredClone(room); const configuration = structuredClone(creator);
   const presences: RoomPresence[] = []; let pending: PendingOwnershipTransfer | null = null;
@@ -75,17 +76,22 @@ function fixture(tracked = true) {
     off: vi.fn((event: string) => { listeners.delete(event); }), isReady: () => ready,
     guilds: { fetch: vi.fn(async () => native.guild as unknown as Guild) }, login: vi.fn(async () => {}), destroy: vi.fn(),
   };
-  const app = createApplication(config, { database, discord: client as unknown as DiscordClientPort, logger: createLogger({ level: 'silent' }) });
+  const app = createApplication(config, { database, discord: client as unknown as DiscordClientPort, logger });
   const emit = (event: string, ...args: unknown[]) => listeners.get(event)?.(...args as never[]);
   const markReady = () => { ready = true; emit(Events.ClientReady); };
   const interaction = (customId: string, kind = 'button') => ({
     id: '72345678901234567', customId, guildId: creator.guildDiscordId, guild: native.guild, channelId: room.channelDiscordId,
+    createdTimestamp: Date.now(), applicationId: '92345678901234567',
     user: { id: OWNER }, inGuild: () => true, isChatInputCommand: () => false,
     isButton: () => kind === 'button', isStringSelectMenu: () => kind === 'string', isUserSelectMenu: () => kind === 'user',
     isAnySelectMenu: () => kind !== 'button', isModalSubmit: () => false, isRepliable: () => true,
-    message: { flags: { has: (flag: number) => flag === MessageFlags.Ephemeral } },
+    message: { id: kind === 'user' || customId.includes(':confirm:') || customId.includes(':undo:') ? '82345678901234567' : record.controlMessageDiscordId,
+      flags: { has: (flag: number) => flag === MessageFlags.Ephemeral && (customId.startsWith('setup:') || kind === 'user' || customId.includes(':confirm:') || customId.includes(':undo:')) },
+      author: { id: '92345678901234567' }, interactionMetadata: { user: { id: OWNER } }, components: [{ components: [{ customId }] }] },
     memberPermissions: new PermissionsBitField(PermissionFlagsBits.Administrator), values: [OTHER],
     deferReply: vi.fn(async () => {}), deferUpdate: vi.fn(async () => {}),
+    followUp: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
+    webhook: { editMessage: vi.fn(async (_id: string, _payload: unknown) => ({ id: '82345678901234567' })) },
     editReply: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })), reply: vi.fn(async () => {}),
   });
   const voice = (memberId = OWNER) => {
@@ -99,6 +105,39 @@ const flush = async () => { await new Promise<void>((resolve) => setImmediate(re
 afterEach(() => vi.useRealTimers());
 
 describe('default room lifecycle at SQL/REST/client boundaries', () => {
+  it('routes call metrics through the application logger rather than a separate default logger', async () => {
+    const lines: string[] = [];
+    const logger = createLogger({ level: 'info', destination: { write: line => { lines.push(line); } } });
+    const f = fixture(false, logger);
+    const starting = f.app.start(); await flush(); f.markReady(); await starting;
+    try {
+      f.emit(Events.InteractionCreate, f.interaction('call:forged-private-sentinel')); await flush();
+      const traces = lines.map(line => JSON.parse(line)).filter(log => log.msg === 'Call action completed');
+      expect(traces).toHaveLength(1); expect(traces[0]).toMatchObject({ action: 'invalid', result: 'error' });
+      expect(lines.join('')).not.toContain('forged-private-sentinel');
+    } finally { await f.app.stop('test'); }
+  });
+  it('drains the application-owned private workspace before destroying Discord or disconnecting SQL', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
+    const reconcile = vi.spyOn(CallPrivateWorkspace.prototype, 'reconcile');
+    const f = fixture(); const starting = f.app.start(); await flush(); f.markReady(); await starting;
+    const workspace = reconcile.mock.contexts.at(-1);
+    if (!(workspace instanceof CallPrivateWorkspace)) throw new Error('Runtime workspace was not reconciled');
+    const entered = deferred(); const release = deferred(); const deactivateEntered = deferred(); const deactivateRelease = deferred();
+    const delivered = { messageId: 'private-workspace', expiresAt: 900_000, edit: async () => ({ id: 'private-workspace' }),
+      deactivate: vi.fn(async () => { deactivateEntered.resolve(); await deactivateRelease.promise; }) };
+    const showing = workspace.show({ roomId: room.id, guildDiscordId: room.guildDiscordId, memberDiscordId: OWNER, controlVersion: f.record.controlVersion },
+      { kind: 'access', payload: { embeds: [], components: [] } }, async () => { entered.resolve(); await release.promise; return delivered; });
+    const rejected = expect(showing).rejects.toMatchObject({ code: 'STALE_CONTROLS' }); await entered.promise;
+    const stopping = f.app.stop('test'); await flush();
+    expect(f.client.destroy).not.toHaveBeenCalled(); expect(f.disconnect).not.toHaveBeenCalled();
+    release.resolve(); await deactivateEntered.promise;
+    expect(f.client.destroy).not.toHaveBeenCalled(); expect(f.disconnect).not.toHaveBeenCalled();
+    deactivateRelease.resolve(); await rejected; await stopping;
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); expect(f.disconnect).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+    reconcile.mockRestore();
+  });
+
   it('drains held setup recovery and the acknowledged form before disposing drafts or disconnecting', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
     const f = fixture(false); const held = deferred();
@@ -198,25 +237,26 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
     expect(f.client.on.mock.calls.map(([event]) => event)).toContain(Events.ClientReady);
     expect(f.client.login).toHaveBeenCalledOnce();
     f.markReady(); await loaded.promise;
-    const open = f.interaction(`call:v2:open:${room.id}:0`);
+    const open = f.interaction(`call:v3:access:${room.id}:0`);
     f.emit(Events.InteractionCreate, open as unknown as Interaction);
     f.voice(OTHER); f.states.delete(OWNER);
-    await flush(); expect(open.deferReply).not.toHaveBeenCalled();
+    await flush(); expect(open.deferUpdate).not.toHaveBeenCalled();
     release.resolve(); await starting; await flush();
     expect(f.record.ownerDiscordId).toBeNull();
     expect(f.presences.map((p) => p.memberDiscordId)).toEqual([OTHER]);
-    expect(open.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
-    expect(JSON.stringify(open.editReply.mock.calls)).not.toContain('Escolher ação');
+    expect(open.deferUpdate).toHaveBeenCalledOnce();
+    expect(open.editReply).not.toHaveBeenCalled();
+    expect(JSON.stringify(open.followUp.mock.calls)).toContain('expirou');
     await f.app.stop('test');
   });
 
   it('stop before ready settles startup and cancels queued work even when login has not resolved', async () => {
     const f = fixture(false); const login = deferred(); f.client.login.mockImplementation(() => login.promise);
     const starting = f.app.start(); await flush();
-    const open = f.interaction(`call:v2:open:${room.id}:0`); f.emit(Events.InteractionCreate, open);
+    const open = f.interaction(`call:v3:access:${room.id}:0`); f.emit(Events.InteractionCreate, open);
     await f.app.stop('test'); await starting;
     expect(f.client.destroy).toHaveBeenCalledOnce(); expect(f.disconnect).toHaveBeenCalledOnce();
-    expect(f.list).not.toHaveBeenCalled(); expect(open.deferReply).not.toHaveBeenCalled();
+    expect(f.list).not.toHaveBeenCalled(); expect(open.deferUpdate).not.toHaveBeenCalled();
     login.resolve(); await flush();
     expect(f.client.guilds.fetch).not.toHaveBeenCalled();
   });
@@ -226,11 +266,11 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
     const list = f.list.getMockImplementation()!;
     f.list.mockImplementationOnce(async (...args) => { entered.resolve(); await release.promise; return list(...args); });
     const starting = f.app.start(); await flush(); f.markReady(); await entered.promise;
-    const open = f.interaction(`call:v2:open:${room.id}:0`); f.emit(Events.InteractionCreate, open); f.voice();
+    const open = f.interaction(`call:v3:access:${room.id}:0`); f.emit(Events.InteractionCreate, open); f.voice();
     const stopping = f.app.stop('test'); await flush();
     expect(f.disconnect).not.toHaveBeenCalled();
     release.resolve(); await Promise.all([starting, stopping]);
-    expect(open.deferReply).not.toHaveBeenCalled();
+    expect(open.deferUpdate).not.toHaveBeenCalled();
     expect(f.record.controlVersion).toBe(0);
     expect(f.client.destroy).toHaveBeenCalledOnce(); expect(f.disconnect).toHaveBeenCalledOnce();
   });
@@ -240,9 +280,9 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
     f.list.mockImplementationOnce(async () => { await gate.promise; throw new Error('SQL unavailable'); });
     const starting = f.app.start(); const failure = expect(starting).rejects.toThrow('SQL unavailable');
     await flush(); f.markReady(); await flush();
-    const open = f.interaction(`call:v2:open:${room.id}:0`); f.emit(Events.InteractionCreate, open);
+    const open = f.interaction(`call:v3:access:${room.id}:0`); f.emit(Events.InteractionCreate, open);
     gate.resolve(); await failure;
-    expect(open.deferReply).not.toHaveBeenCalled(); expect(f.disconnect).toHaveBeenCalledOnce();
+    expect(open.deferUpdate).not.toHaveBeenCalled(); expect(f.disconnect).toHaveBeenCalledOnce();
   });
 
   it('does not admit old private menus if startup control-version invalidation fails', async () => {
@@ -250,21 +290,21 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
     vi.mocked(f.database.temporaryRoom.updateMany).mockRejectedValueOnce(new Error('version invalidation failed'));
     const starting = f.app.start(); const failure = expect(starting).rejects.toThrow('version invalidation failed');
     await flush();
-    const open = f.interaction(`call:v2:open:${room.id}:0`); f.emit(Events.InteractionCreate, open);
+    const open = f.interaction(`call:v3:access:${room.id}:0`); f.emit(Events.InteractionCreate, open);
     f.markReady(); await failure;
-    expect(open.deferReply).not.toHaveBeenCalled();
+    expect(open.deferUpdate).not.toHaveBeenCalled();
     expect(f.disconnect).toHaveBeenCalledOnce();
   });
 
   it('shares serialization between a real owner confirmation and live target departure', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
     const f = fixture(); const starting = f.app.start(); await flush(); f.markReady(); await starting;
-    const transfer = f.interaction(`call:v2:transfer-target:${room.id}:1`, 'user'); f.emit(Events.InteractionCreate, transfer); await flush();
+    const transfer = f.interaction(`call:v3:transfer-target:${room.id}:1`, 'user'); f.emit(Events.InteractionCreate, transfer); await flush();
     const operationId = f.pending()!.id;
     const entered = deferred(); const release = deferred();
     const fetch = f.guild.members.fetch.getMockImplementation()!;
     f.guild.members.fetch.mockImplementationOnce(async (options) => { entered.resolve(); await release.promise; return fetch(options); });
-    const confirm = f.interaction(`call:v2:confirm:${room.id}:${operationId}`); f.emit(Events.InteractionCreate, confirm); await entered.promise;
+    const confirm = f.interaction(`call:v3:confirm:${room.id}:${operationId}`); f.emit(Events.InteractionCreate, confirm); await entered.promise;
     f.states.delete(OTHER); f.voice(OTHER); release.resolve(); await flush();
     expect(f.record.ownerDiscordId).toBe(OWNER);
     expect(f.pending()).toBeNull();
@@ -276,11 +316,11 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
   it('drains an interaction holding the shared room lock plus a queued expiry before disconnect', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
     const f = fixture(); const starting = f.app.start(); await flush(); f.markReady(); await starting;
-    const transfer = f.interaction(`call:v2:transfer-target:${room.id}:1`, 'user'); f.emit(Events.InteractionCreate, transfer); await flush();
+    const transfer = f.interaction(`call:v3:transfer-target:${room.id}:1`, 'user'); f.emit(Events.InteractionCreate, transfer); await flush();
     expect(f.pending()?.expiresAt?.getTime()).toBe(5_000);
     const entered = deferred(); const release = deferred();
     f.channel.permissionOverwrites.set.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
-    const visibility = f.interaction(`call:v2:visibility:${room.id}:1`); f.emit(Events.InteractionCreate, visibility); await entered.promise;
+    const visibility = f.interaction(`call:v3:visibility:${room.id}:1`); f.emit(Events.InteractionCreate, visibility); await entered.promise;
     await vi.advanceTimersByTimeAsync(5_000);
     const stopping = f.app.stop('test'); await flush();
     expect(f.client.destroy).not.toHaveBeenCalled(); expect(f.disconnect).not.toHaveBeenCalled();
@@ -294,7 +334,7 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
   it('injects setup synchronization: saved disable deletes the panel and cancels local transfer/countdown timers', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
     const f = fixture(); const starting = f.app.start(); await flush(); f.markReady(); await starting;
-    const transfer = f.interaction(`call:v2:transfer-target:${room.id}:1`, 'user'); f.emit(Events.InteractionCreate, transfer); await flush();
+    const transfer = f.interaction(`call:v3:transfer-target:${room.id}:1`, 'user'); f.emit(Events.InteractionCreate, transfer); await flush();
     expect(f.pending()).not.toBeNull();
     const fetch = f.guild.channels.fetch.getMockImplementation()!;
     f.guild.channels.fetch.mockImplementation(async (id) => id === creator.creatorChannelDiscordId ? { ...f.channel, id, type: ChannelType.GuildVoice } : fetch(id));
@@ -303,10 +343,10 @@ describe('default room lifecycle at SQL/REST/client boundaries', () => {
     expect(f.configuration.roomCommandsEnabled).toBe(false);
     expect(f.record.controlMessageDiscordId).toBeNull(); expect(f.message.delete).toHaveBeenCalledOnce();
     expect(JSON.stringify(setup.editReply.mock.calls)).toContain('concluída');
-    const edits = transfer.editReply.mock.calls.length;
+    const edits = transfer.webhook.editMessage.mock.calls.length;
     await vi.advanceTimersByTimeAsync(6_000);
-    expect(f.record.ownerDiscordId).toBe(OWNER); expect(transfer.editReply.mock.calls.length).toBe(edits + 1);
-    expect(transfer.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    expect(f.record.ownerDiscordId).toBe(OWNER); expect(transfer.webhook.editMessage.mock.calls.length).toBe(edits);
+    expect(transfer.webhook.editMessage.mock.calls.at(-1)?.[1]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
     await f.app.stop('test');
   });
 });

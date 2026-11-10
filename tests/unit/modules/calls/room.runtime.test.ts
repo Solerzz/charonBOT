@@ -1,4 +1,4 @@
-import { type Guild } from 'discord.js';
+import { MessageFlags, PermissionFlagsBits as P, type Guild } from 'discord.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaClient } from '../../../../src/core/database/prisma.js';
 import { createLogger } from '../../../../src/core/logger/logger.js';
@@ -53,32 +53,276 @@ function runtimeFixture() {
     return runtime.synchronizeCreator(creator.id);
   };
   const handler = new CallInteractions(runtime, () => f.gateway);
-  const interaction = (action: string, kind = 'button') => ({
-    customId: `call:v2:${action}:${f.state().room.id}:${['confirm', 'undo'].includes(action) ? f.state().transfer!.id : f.state().room.controlVersion}`,
-    guild, guildId: guild.id, channelId: f.channel.id, user: { id: OWNER }, values: [OTHER],
-    inGuild: () => true, isButton: () => kind === 'button', isStringSelectMenu: () => false,
-    isUserSelectMenu: () => kind === 'user', isModalSubmit: () => false,
-    deferReply: vi.fn(async () => {}), reply: vi.fn(async (_payload: unknown) => {}),
-    editReply: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
-  });
-  const execute = (input: ReturnType<typeof interaction>) => handler.execute(input as unknown as CallInteraction);
-  const voiceService = new CallService({ findByChannel: async () => null } as never,
-    { findActiveByChannel: async () => structuredClone(f.state().room) } as unknown as TemporaryRoomRepository,
-    runtime, createLogger({ level: 'silent' }));
-  const voice = (member: string, leaving: boolean) => {
-    const gateway = Object.assign(Object.create(f.gateway) as object, {
-      getChannelMemberCount: () => f.states.size,
-      getMemberChannelDiscordId: () => f.states.get(member)?.channelId ?? null,
-    }) as unknown as CallDiscordGateway;
-    return voiceService.handleVoiceTransition({ ...entry, memberDiscordId: member,
-      oldChannelDiscordId: leaving ? f.channel.id : null, newChannelDiscordId: leaving ? null : f.channel.id }, gateway);
+  const privatePayloads: unknown[] = [];
+  const interaction = (action: string, kind = 'button') => {
+    const customId = `call:v3:${action}:${f.state().room.id}:${['confirm', 'undo'].includes(action) ? f.state().transfer!.id : f.state().room.controlVersion}`;
+    return {
+      customId, createdTimestamp: Date.now(), applicationId: '92345678901234567',
+      message: { id: '82345678901234567', flags: { has: (flag: number) => flag === MessageFlags.Ephemeral },
+        author: { id: '92345678901234567' }, interactionMetadata: { user: { id: OWNER } }, components: [{ components: [{ customId }] }] },
+      guild, guildId: guild.id, channelId: f.channel.id, user: { id: OWNER }, values: [OTHER],
+      inGuild: () => true, isButton: () => kind === 'button', isStringSelectMenu: () => false,
+      isUserSelectMenu: () => kind === 'user', isModalSubmit: () => false,
+      deferReply: vi.fn(async () => {}), reply: vi.fn(async (_payload: unknown) => {}),
+      deferUpdate: vi.fn(async () => {}), followUp: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
+      webhook: { editMessage: vi.fn(async (_id: string, payload: unknown) => { privatePayloads.push(payload); return { id: '82345678901234567' }; }) },
+      editReply: vi.fn(async (_payload: unknown) => ({ id: '82345678901234567' })),
+    };
   };
-  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice, timerFailures };
+  const execute = (input: ReturnType<typeof interaction>) => handler.execute(input as unknown as CallInteraction);
+  const roomRepository = {
+    findActiveByChannel: async (id: string) => id === f.channel.id && f.state().room.status !== 'CLOSED' ? structuredClone(f.state().room) : null,
+    findActiveByOwner: async (_guild: string, id: string) => f.state().room.ownerDiscordId === id ? structuredClone(f.state().room) : null,
+    beginClosing: async () => { Object.assign(f.state().room, { status: 'CLOSING', controlVersion: f.state().room.controlVersion + 1 }); return structuredClone(f.state().room); },
+    markClosed: async () => { Object.assign(f.state().room, { status: 'CLOSED', controlVersion: f.state().room.controlVersion + 1, closedAt: new Date() }); return structuredClone(f.state().room); },
+  };
+  const voiceService = new CallService({ findByChannel: async (id: string) => id === creator.creatorChannelDiscordId ? creator : null } as never,
+    roomRepository as unknown as TemporaryRoomRepository,
+    runtime, createLogger({ level: 'silent' }));
+  const lifecycleGateway = (member: string) => Object.assign(Object.create(f.gateway) as object, {
+    getChannelMemberCount: (channelId: string) => [...f.states.values()].filter((s) => s.channelId === channelId).length,
+    getMemberChannelDiscordId: () => f.states.get(member)?.channelId ?? null,
+    moveMember: async () => { f.join(member); },
+    deleteChannel: (_id: string) => f.channel.delete(),
+  }) as unknown as CallDiscordGateway;
+  const voice = (member: string, leaving: boolean) => {
+    return voiceService.handleVoiceTransition({ ...entry, memberDiscordId: member,
+      oldChannelDiscordId: leaving ? f.channel.id : null, newChannelDiscordId: leaving ? null : f.channel.id }, lifecycleGateway(member));
+  };
+  const reuse = async () => {
+    f.states.set(OWNER, { channelId: creator.creatorChannelDiscordId });
+    await voiceService.handleVoiceTransition({ ...entry, memberDiscordId: OWNER, oldChannelDiscordId: null,
+      newChannelDiscordId: creator.creatorChannelDiscordId }, lifecycleGateway(OWNER));
+  };
+  return { ...f, database, runtime, observe, toggle, resolveGuild: async () => guild, interaction, execute, voice, reuse, timerFailures, privatePayloads };
 }
 
 afterEach(() => { vi.useRealTimers(); });
 
 describe('application-owned room runtime', () => {
+  const workspacePayload = { embeds: [{ title: 'Private selection' }], components: [], allowedMentions: { parse: [] } };
+  const workspaceDelivery = () => ({ messageId: 'private-workspace', expiresAt: Date.now() + 900_000,
+    edit: vi.fn(async () => ({ id: 'private-workspace' })), deactivate: vi.fn(async () => {}) });
+
+  it('retains same-generation selections across settings projection without granting anyone management', async () => {
+    const f = runtimeFixture(); const delivered = workspaceDelivery(); const create = vi.fn(async () => delivered);
+    await f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, create);
+    await f.runtime.controls.rename(f.actor(), 'Renamed', f.gateway);
+    await f.runtime.workspaces.show(f.actor(), { kind: 'transfer-target', payload: workspacePayload }, create);
+    expect(create).toHaveBeenCalledOnce(); expect(delivered.deactivate).not.toHaveBeenCalled();
+    f.join(OTHER);
+    await expect(f.runtime.controls.rename(f.actorFor(OTHER), 'Forbidden', f.gateway)).rejects.toMatchObject({ code: 'NOT_OWNER' });
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates before an ownership projection fails after a successful transfer', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const actor = f.actor(); const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway);
+    const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    const finish = f.store.finishTransfer.getMockImplementation()!;
+    vi.mocked(f.runtime.store.finishTransfer).mockImplementationOnce(async (...args) => {
+      const result = await finish(...args); f.guild.channels.fetch.mockRejectedValueOnce(new Error('projection unavailable')); return result;
+    });
+    await expect(f.runtime.transfers.confirm(actor, pending.id, f.gateway)).rejects.toThrow();
+    expect(delivered.deactivate).toHaveBeenCalledOnce();
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([false, true])('invalidates an uncertain access fence even when subsequent projection fails: %s', async (failProjection) => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const actor = f.actor(); const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway);
+    const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    vi.spyOn(f.runtime.store, 'settleAccess').mockImplementation(f.store.settleAccess);
+    vi.mocked(f.runtime.store.updateSettings).mockRejectedValueOnce(new Error('private-lost-sql-reply'));
+    if (failProjection) {
+      const settle = f.store.settleAccess;
+      vi.mocked(f.runtime.store.settleAccess).mockImplementationOnce(async (...args) => {
+        const result = await settle(...args); f.guild.channels.fetch.mockRejectedValueOnce(new Error('private-projection-failure')); return result;
+      });
+    }
+    await expect(f.runtime.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room.controlVersion).toBe(actor.controlVersion + 1);
+    expect(delivered.deactivate).toHaveBeenCalledOnce();
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('retires a workspace when the ownership SQL commit loses its acknowledgement', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe();
+    const actor = f.actor(); const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway);
+    const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    const finish = f.store.finishTransfer.getMockImplementation()!;
+    vi.mocked(f.runtime.store.finishTransfer).mockImplementationOnce(async (...args) => {
+      await finish(...args); throw new Error('private-ownership-acknowledgement-lost');
+    });
+    await expect(f.runtime.transfers.confirm(actor, pending.id, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.state().room.ownerDiscordId).toBe(OTHER);
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    expect(delivered.deactivate).toHaveBeenCalledOnce();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('does not delay the SQL access fence while private deactivation is held', async () => {
+    const f = runtimeFixture(); await f.observe(); const actor = f.actor(); const delivered = workspaceDelivery();
+    const entered = deferred(); const release = deferred();
+    delivered.deactivate.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    vi.spyOn(f.runtime.store, 'settleAccess').mockImplementation(f.store.settleAccess);
+    vi.mocked(f.runtime.store.updateSettings).mockRejectedValueOnce(new Error('private-lost-sql-reply'));
+    const changing = expect(f.runtime.controls.toggleLock(actor, f.gateway)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    await entered.promise;
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.runtime.store.settleAccess).toHaveBeenCalledOnce();
+      expect(f.state().room.controlVersion).toBe(actor.controlVersion + 1);
+    } finally {
+      release.resolve(); await changing; await f.runtime.stop(); await f.database.$disconnect();
+    }
+  });
+
+  it('invalidates an owner departure in departure reconciliation without waiting for panel refresh', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe(); const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    f.runtime.coordinator.recordDeparture(f.guild.id, f.channel.id, OWNER, false);
+    await f.runtime.coordinator.room(f.guild.id, f.channel.id, () => f.runtime.reconcileDeparturesLocked(actor.roomId));
+    expect(f.state().room.ownerDiscordId).toBeNull(); expect(delivered.deactivate).toHaveBeenCalledOnce();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates an owner discovered absent even if the post-CAS state read fails', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.observe(); const actor = f.actor();
+    const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    const change = f.store.changeOwner.getMockImplementation()!;
+    vi.mocked(f.runtime.store.changeOwner).mockImplementationOnce(async (...args) => {
+      const result = await change(...args); vi.mocked(f.runtime.store.read).mockRejectedValueOnce(new Error('private-post-cas-read')); return result;
+    });
+    f.leave(OWNER); await expect(f.observe()).rejects.toThrow();
+    expect(f.state().room.ownerDiscordId).toBeNull();
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates setup handles before a failed guild resolution and never revives them on reenable', async () => {
+    const f = runtimeFixture(); const resolve = vi.fn(f.resolveGuild); await f.runtime.start(resolve);
+    const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    resolve.mockRejectedValueOnce(new Error('private-guild-unavailable'));
+    await f.toggle(false); expect(delivered.deactivate).toHaveBeenCalledOnce();
+    await f.toggle(true);
+    const create = vi.fn(async () => workspaceDelivery());
+    await f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, create);
+    expect(create).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates a committed setup generation even if its first state read fails', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild); const actor = f.actor();
+    const pending = await f.runtime.transfers.begin(actor, OTHER, f.gateway); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'transfer-pending', operationId: pending.id, payload: workspacePayload }, async () => delivered);
+    vi.mocked(f.runtime.store.read).mockRejectedValueOnce(new Error('private-setup-read-failure'));
+    await expect(f.toggle(false)).rejects.toThrow();
+    expect(f.state().room.controlVersion).toBe(actor.controlVersion + 1);
+    expect(await f.runtime.workspaces.editPending(actor, pending.id, workspacePayload)).toBe(false);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each(['closed', 'missing'] as const)('invalidates %s rooms discovered by observe', async (kind) => {
+    const f = runtimeFixture(); const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    if (kind === 'closed') f.state().room.status = 'CLOSED'; else f.roomStates.delete(actor.roomId);
+    await f.runtime.coordinator.room(f.guild.id, f.channel.id, () => f.runtime.observeLocked(actor.roomId, f.gateway));
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates the last-member workspace even when deleting the closing room fails', async () => {
+    const f = runtimeFixture(); const actor = f.actor(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(actor, { kind: 'access', payload: workspacePayload }, async () => delivered);
+    f.leave(OWNER); f.channel.delete.mockRejectedValueOnce(new Error('private-delete-failed'));
+    await f.voice(OWNER, true);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('invalidates startup workspaces before unconfirmed Discord reads', async () => {
+    const f = runtimeFixture(); const delivered = workspaceDelivery();
+    await f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, async () => delivered);
+    f.guild.channels.fetch.mockRejectedValueOnce(new Error('private-startup-unavailable'));
+    await f.runtime.start(f.resolveGuild);
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('closes workspace admission synchronously and drains an in-flight create during runtime stop', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); const entered = deferred(); const release = deferred(); const delivered = workspaceDelivery();
+    const showing = f.runtime.workspaces.show(f.actor(), { kind: 'access', payload: workspacePayload }, async () => {
+      entered.resolve(); await release.promise; return delivered;
+    });
+    const rejected = expect(showing).rejects.toMatchObject({ code: 'STALE_CONTROLS' }); await entered.promise;
+    let stopped = false; const stopping = f.runtime.stop().then(() => { stopped = true; });
+    await Promise.resolve(); expect(stopped).toBe(false);
+    release.resolve(); await rejected; await stopping;
+    expect(delivered.deactivate).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+    await f.database.$disconnect();
+  });
+
+  it('blocks settings when an ownership change cannot confirm the native access projection', async () => {
+    const f = runtimeFixture(); f.join(OTHER); f.state().room.visibility = 'PRIVATE'; await f.observe();
+    const pending = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
+    const finish = f.store.finishTransfer.getMockImplementation()!;
+    vi.mocked(f.runtime.store.finishTransfer).mockImplementationOnce(async (...args) => {
+      const result = await finish(...args); f.guild.channels.fetch.mockRejectedValueOnce(new Error('ownership projection unavailable')); return result;
+    });
+    await expect(f.runtime.transfers.confirm(f.actor(), pending.id, f.gateway)).rejects.toThrow();
+    expect(f.state().room.ownerDiscordId).toBe(OTHER);
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(true);
+    f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('projection unavailable'));
+    await expect(f.runtime.controls.rename(f.actorFor(OTHER), 'Blocked', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.channel.setName).not.toHaveBeenCalled();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('requires successful access reconciliation after an uncertain startup before admitting controls', async () => {
+    const f = runtimeFixture(); f.state().room.isLocked = true;
+    f.guild.channels.fetch.mockRejectedValueOnce(new Error('startup unavailable'));
+    await f.runtime.start(f.resolveGuild);
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(true);
+    f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('access unavailable'));
+    await expect(f.runtime.controls.rename(f.actor(), 'Blocked', f.gateway)).rejects.toMatchObject({ code: 'DISCORD_FAILURE' });
+    expect(f.channel.setName).not.toHaveBeenCalled();
+    await f.runtime.controls.rename(f.actor(), 'Verified', f.gateway);
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(false);
+    expect(f.projected().find((p) => p.id === f.guild.id)!.deny.has(P.Connect, false)).toBe(true);
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it.each([
+    { isLocked: true, visibility: 'PUBLIC' }, { isLocked: false, visibility: 'PRIVATE' }, { isLocked: true, visibility: 'PRIVATE' },
+  ] as const)('keeps $visibility / $isLocked through restart, reuse, setup and ownership lifecycle', async (policy) => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); Object.assign(f.state().room, policy); f.join(OTHER); f.join(OLDEST);
+    await f.runtime.start(f.resolveGuild); await f.reuse();
+    expect(f.states.get(OWNER)?.channelId).toBe(f.channel.id);
+    expect(f.state().room).toMatchObject(policy);
+    const pending = await f.runtime.transfers.begin(f.actor(), OTHER, f.gateway);
+    await f.runtime.transfers.confirm(f.actor(), pending.id, f.gateway);
+    expect(f.state().room.ownerDiscordId).toBe(OTHER);
+    f.leave(OWNER); f.leave(OTHER); await f.voice(OTHER, true);
+    expect(f.state().room).toMatchObject({ ...policy, ownerDiscordId: null, priorityMemberDiscordId: OLDEST, priorityExpiresAt: new Date(300_000) });
+    expect(f.projected().some((p) => p.id === OWNER || p.id === OTHER)).toBe(false);
+    await f.toggle(false); await f.toggle(true);
+    expect(f.state().room).toMatchObject(policy);
+    await f.runtime.ownership.claim(f.actorFor(OLDEST), f.gateway);
+    expect(f.state().room).toMatchObject({ ...policy, ownerDiscordId: OLDEST });
+    f.leave(OLDEST); await f.voice(OLDEST, true);
+    expect(f.channel.delete).toHaveBeenCalledOnce(); expect(f.state().room.status).toBe('CLOSED');
+    expect(f.state().room).toMatchObject(policy);
+    expect(f.member.voice.setChannel).not.toHaveBeenCalled();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
   it('propagates a direct manual refresh discovery error without scheduling recovery', async () => {
     const f = runtimeFixture(); const failure = new Error('private-manual-query');
     vi.mocked(f.runtime.store.read).mockRejectedValueOnce(failure);
@@ -318,7 +562,7 @@ describe('application-owned room runtime', () => {
     await f.runtime.stop(); await f.database.$disconnect();
   });
 
-  it.each(['name', 'visibility', 'allowed'] as const)('does not commit %s when the owner leaves/returns during its native write', async (setting) => {
+  it.each(['name', 'visibility', 'allowed', 'lock'] as const)('does not commit %s when the owner leaves/returns during its native write', async (setting) => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.join(OTHER); await f.observe();
     const entered = deferred(); const release = deferred();
@@ -329,13 +573,14 @@ describe('application-owned room runtime', () => {
     }
     const changing = setting === 'name' ? f.runtime.controls.rename(f.actor(), 'New', f.gateway)
       : setting === 'visibility' ? f.runtime.controls.setVisibility(f.actor(), 'PRIVATE', f.gateway)
+      : setting === 'lock' ? f.runtime.controls.toggleLock(f.actor(), f.gateway)
       : f.runtime.controls.setAllowed(f.actor(), OTHER, true, f.gateway);
     const rejected = expect(changing).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
     await entered.promise;
     f.leave(OWNER); const leaving = f.voice(OWNER, true);
     f.join(OWNER); const returning = f.voice(OWNER, false);
     release.resolve(); await rejected; await Promise.all([leaving, returning]);
-    expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 1, name: 'Game', visibility: setting === 'allowed' ? 'PRIVATE' : 'PUBLIC' });
+    expect(f.state().room).toMatchObject({ ownerDiscordId: null, controlVersion: 1, name: 'Game', isLocked: false, visibility: setting === 'allowed' ? 'PRIVATE' : 'PUBLIC' });
     expect(f.state().allowedMemberIds).toEqual([]); expect(f.channel.name).toBe('Game');
     await f.runtime.stop(); await f.database.$disconnect();
   });
@@ -354,31 +599,58 @@ describe('application-owned room runtime', () => {
     await f.runtime.stop(); await f.database.$disconnect();
   });
 
-  it('keeps exact old/new prompt renderers separate while a terminal edit fails', async () => {
+  it('keeps exact old/new prompt renderers separate after a canceled late render', async () => {
     vi.useFakeTimers(); vi.setSystemTime(0);
     const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
     const original = f.interaction('transfer-target', 'user'); await f.execute(original);
     const oldId = f.state().transfer!.id;
     const entered = deferred(); const release = deferred();
-    original.editReply.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
+    original.webhook.editMessage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
     await vi.advanceTimersByTimeAsync(1_000); await entered.promise;
-    await f.execute(f.interaction('undo'));
-    const next = f.interaction('transfer-target', 'user'); await f.execute(next);
+    const undo = f.interaction('undo'); await f.execute(undo);
+    const next = f.interaction('transfer-target', 'user'); const publishing = f.execute(next);
+    release.resolve(); await publishing;
     expect(f.state().transfer?.id).not.toBe(oldId);
     expect(f.state().transfer?.expiresAt).toEqual(new Date(6_000));
-    original.editReply.mockRejectedValueOnce(new Error('private-terminal-sentinel'));
-    release.resolve(); await vi.advanceTimersByTimeAsync(1_000);
-    expect(original.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
-    expect(next.editReply).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(original.webhook.editMessage).toHaveBeenCalledTimes(2);
+    expect(next.webhook.editMessage).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(f.privatePayloads.at(-1))).toContain(f.state().transfer!.id);
     await f.runtime.transfers.expire(oldId, f.gateway);
     expect(f.state().transfer?.expiresAt).toEqual(new Date(6_000));
     expect(f.state().room.ownerDiscordId).toBe(OWNER);
     await vi.advanceTimersByTimeAsync(4_001);
     expect(f.state().room).toMatchObject({ ownerDiscordId: OTHER, controlVersion: 2 });
-    expect(next.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
-    const edits = original.editReply.mock.calls.length + next.editReply.mock.calls.length;
-    await f.runtime.stop(); await vi.advanceTimersByTimeAsync(600_000);
-    expect(original.editReply.mock.calls.length + next.editReply.mock.calls.length).toBe(edits);
+    expect(f.privatePayloads.at(-1)).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    await f.runtime.stop(); const edits = f.privatePayloads.length;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(f.privatePayloads).toHaveLength(edits);
+    await f.database.$disconnect();
+  });
+
+  it('leaves an undone transfer canceled when the private terminal edit fails, then reuses the area', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    await f.execute(f.interaction('transfer-target', 'user'));
+    const undo = f.interaction('undo'); undo.webhook.editMessage.mockRejectedValueOnce(new Error('private-terminal-sentinel'));
+    await f.execute(undo); await vi.advanceTimersByTimeAsync(1);
+    expect(f.state().transfer).toBeNull(); expect(f.state().room.ownerDiscordId).toBe(OWNER);
+    expect(f.timerFailures).not.toHaveBeenCalled();
+    const next = f.interaction('transfer-target', 'user'); await f.execute(next);
+    expect(f.state().transfer?.expiresAt).toEqual(new Date(5_001));
+    expect(next.webhook.editMessage).toHaveBeenCalledOnce();
+    await f.runtime.stop(); await f.database.$disconnect();
+  });
+
+  it('drains shutdown during handler publication without arming the late private prompt', async () => {
+    const f = runtimeFixture(); f.join(OTHER); await f.runtime.start(f.resolveGuild);
+    const entered = deferred(); const release = deferred();
+    const target = f.interaction('transfer-target', 'user');
+    target.webhook.editMessage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: '82345678901234567' }; });
+    const handling = f.execute(target); await entered.promise;
+    const stopping = f.runtime.stop(); release.resolve(); await Promise.all([handling, stopping]);
+    expect(f.state().transfer).toBeNull(); expect(f.runtime.store.armTransfer).not.toHaveBeenCalled();
+    expect(f.state().room.ownerDiscordId).toBe(OWNER);
     await f.database.$disconnect();
   });
 
@@ -413,11 +685,11 @@ describe('application-owned room runtime', () => {
     if (cause === 'setup') await f.toggle(false);
     if (cause === 'departure') { f.leave(OTHER); await f.observe(); }
     await vi.advanceTimersByTimeAsync(cause === 'timeout' ? 5_001 : 1);
-    expect(original.editReply.mock.calls.at(-1)?.[0]).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
+    expect(f.privatePayloads.at(-1)).toMatchObject({ content: expect.stringContaining('encerrada'), components: [] });
     expect(f.state().room.ownerDiscordId).toBe(cause === 'confirm' || cause === 'timeout' ? OTHER : OWNER);
-    const edits = original.editReply.mock.calls.length;
-    await f.runtime.stop(); await vi.advanceTimersByTimeAsync(600_000);
-    expect(original.editReply).toHaveBeenCalledTimes(edits);
+    await f.runtime.stop(); const edits = f.privatePayloads.length;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(f.privatePayloads).toHaveLength(edits);
     await f.database.$disconnect();
   });
 

@@ -33,6 +33,14 @@ export class RoomControlsService {
     await this.withOwned(actor, gateway, (state) => this.dependencies.access.setVisibilityLocked(actor, state, visibility, gateway));
   }
 
+  async toggleLock(actor: RoomActor, gateway: RoomDiscordGateway): Promise<void> {
+    await this.withOwned(actor, gateway, (state) => this.dependencies.access.applySettingsLocked(actor, state, { isLocked: !state.room.isLocked }, gateway));
+  }
+
+  async toggleVisibility(actor: RoomActor, gateway: RoomDiscordGateway): Promise<void> {
+    await this.withOwned(actor, gateway, (state) => this.dependencies.access.applySettingsLocked(actor, state, { visibility: state.room.visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC' }, gateway));
+  }
+
   async setAllowed(actor: RoomActor, memberId: string, allowed: boolean, gateway: RoomDiscordGateway): Promise<void> {
     await this.withOwned(actor, gateway, (state) => this.dependencies.access.setAllowedLocked(actor, state, memberId, allowed, gateway));
   }
@@ -46,18 +54,36 @@ export class RoomControlsService {
   }
 
   private async withOwned(actor: RoomActor, gateway: RoomDiscordGateway, work: (state: RoomState) => Promise<void>): Promise<void> {
-    const { store, coordinator, onChangedLocked } = this.dependencies;
+    const { store, coordinator, access, onChangedLocked } = this.dependencies;
     await safeRoomAction(() => coordinator.member(actor.guildDiscordId, actor.memberDiscordId, async () => {
       const initial = await store.read(actor.roomId);
       if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
       await coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
+        await access.recoverLocked(actor.roomId, gateway, onChangedLocked);
         const { state } = await currentOwnedRoom(store, actor, gateway);
         if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);
-        await work(state);
+        try { await work(state); } catch (error) {
+          // An indeterminate access writer may have fenced this generation.
+          // Publish the confirmed current controls even though its action fails.
+          if (error instanceof RoomActionError && error.code === 'PERSISTENCE_FAILURE') {
+            try { await this.refreshInvalidatedLocked(state, gateway); }
+            catch { access.markUncertain(actor.roomId); }
+          }
+          throw error;
+        }
         // Committed state only; callback failure is not a failed setting CAS.
         await safeRoomAction(() => onChangedLocked(actor.roomId, gateway), 'DISCORD_FAILURE');
       });
     }));
+  }
+
+  private async refreshInvalidatedLocked(state: RoomState, gateway: RoomDiscordGateway): Promise<void> {
+    const { access, store, onChangedLocked } = this.dependencies;
+    if (access.isUncertain(state.room.id)) return;
+    const current = await safeRoomAction(() => store.read(state.room.id));
+    if (current && current.room.controlVersion !== state.room.controlVersion) {
+      await safeRoomAction(() => onChangedLocked(state.room.id, gateway), 'DISCORD_FAILURE');
+    }
   }
 }

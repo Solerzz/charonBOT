@@ -5,6 +5,7 @@ import { OwnershipService } from '../ownership/ownership.service.js';
 import { OwnershipTimers } from '../ownership/ownership.timers.js';
 import { TransferService } from '../ownership/transfer.service.js';
 import { RoomAccessService } from './room-access.service.js';
+import { CallPrivateWorkspace } from './call-workspace.js';
 import { RoomControlsService } from './room-controls.service.js';
 import { RoomPanelService } from './room-panel.service.js';
 import { PrismaRoomStateRepository } from './room-state.repository.js';
@@ -20,18 +21,35 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
   const store = new PrismaRoomStateRepository(database);
   const coordinator = new RoomCoordinator(new KeyedMutex());
   const timers = new OwnershipTimers(logger);
+  const workspaces = new CallPrivateWorkspace();
+  // Retire delivery generations synchronously before authority-changing SQL,
+  // including lost acknowledgements. Cleanup is tracked/drained by the workspace;
+  // never add an await between a service's final live checks and its CAS/fence.
+  const invalidateWorkspace = (roomId: string): void => { void workspaces.reconcile(roomId, null); };
   const panels = new RoomPanelService({ store, coordinator, logger });
-  const access = new RoomAccessService(store, coordinator);
+  const access = new RoomAccessService(store, coordinator, invalidateWorkspace);
   const lifecycle = new PrismaTemporaryRoomRepository(database);
+  const readState = async (roomId: string) => {
+    const state = await store.read(roomId);
+    access.retireConfirmedLocked(roomId, state?.room.status ?? null);
+    await workspaces.reconcile(roomId, state);
+    return state;
+  };
   const reconcileDeparturesLocked = async (roomId: string): Promise<void> => {
-    let state = await store.read(roomId);
+    let state = await readState(roomId);
     if (!state) return;
     if (state.room.status === 'CLOSED') {
       coordinator.retireRoom(state.room.guildDiscordId, state.room.channelDiscordId);
       return;
     }
     const { guildDiscordId, channelDiscordId } = state.room;
-    for (const departure of coordinator.pendingDepartures(guildDiscordId, channelDiscordId)) {
+    const departures = coordinator.pendingDepartures(guildDiscordId, channelDiscordId);
+    if (departures.length) access.markUncertain(roomId);
+    for (const departure of departures) {
+      if (state.room.ownerDiscordId === departure.memberId
+        && coordinator.isCurrentDeparture(guildDiscordId, channelDiscordId, departure, state.room)) {
+        await workspaces.reconcile(roomId, null);
+      }
       // Break only this member's continuity, retaining a verified online return
       // instant when known. The final live observation still owns the roster.
       await store.syncPresence(roomId, state.presences.filter((p) => p.memberDiscordId !== departure.memberId), new Date(), false);
@@ -62,11 +80,11 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
         if (confirmed) break;
         // Setup writes outside this mutex. A false CAS is not ownership
         // supersession: re-read and retry boundedly, retaining the receipt on failure.
-        state = await store.read(roomId);
+        state = await readState(roomId);
         if (!state) return;
       }
       coordinator.acknowledgeDeparture(guildDiscordId, channelDiscordId, departure);
-      state = await store.read(roomId);
+      state = await readState(roomId);
       if (!state) return;
     }
     transfers.synchronizePrompt(roomId, state.transfer?.id ?? null);
@@ -81,7 +99,8 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
     transfers.synchronizePrompt(roomId, null);
   };
   const onChangedLocked: RoomChanged = async (roomId, gateway) => {
-    const state = await store.read(roomId);
+    access.markUncertain(roomId);
+    const state = await readState(roomId);
     if (!state || state.room.status === 'CLOSED') {
       if (state) coordinator.retireRoom(state.room.guildDiscordId, state.room.channelDiscordId);
       cancelRoomTimers(roomId); return;
@@ -96,12 +115,13 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
     await access.synchronizeLocked(state, snapshot, gateway);
     await panels.synchronizeLocked(roomId, gateway);
   };
-  const ownership = new OwnershipService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked });
-  const transfers = new TransferService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked });
+  const recoverAccessLocked: RoomChanged = (roomId, gateway) => access.recoverLocked(roomId, gateway, onChangedLocked);
+  const ownership = new OwnershipService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked, invalidateWorkspace, recoverAccessLocked });
+  const transfers = new TransferService({ store, coordinator, timers, onChangedLocked, reconcileDeparturesLocked, invalidateWorkspace, recoverAccessLocked });
   const controls = new RoomControlsService({ store, coordinator, access, onChangedLocked });
   const observeLocked: RoomChanged = async (roomId, gateway) => {
     await reconcileDeparturesLocked(roomId);
-    const state = await store.read(roomId);
+    const state = await readState(roomId);
     if (!state || state.room.status === 'CLOSED') { cancelRoomTimers(roomId); return; }
     const snapshot = await gateway.snapshot(state.room.channelDiscordId);
     if (!snapshot || snapshot.guildDiscordId !== state.room.guildDiscordId || snapshot.channelDiscordId !== state.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
@@ -114,7 +134,7 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
     await ownership.observeLocked(roomId, snapshot, gateway);
     await onChangedLocked(roomId, gateway);
   };
-  return { store, coordinator, panels, access, controls, ownership, transfers, timers, observeLocked, reconcileDeparturesLocked,
+  return { store, coordinator, panels, access, controls, ownership, transfers, timers, workspaces, observeLocked, reconcileDeparturesLocked,
     async synchronizeCreator(creatorId: string): Promise<{ synced: number; failed: number }> {
       const resolveGuild = guildResolver;
       if (!resolveGuild) throw new RoomActionError('ROOM_UNAVAILABLE');
@@ -125,7 +145,8 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
       // process-local futures under the same per-room coordinator, even after row deletion.
       for (const room of await store.listForCreator(creatorId)) {
         await coordinator.room(room.guildDiscordId, room.channelDiscordId, async () => {
-          const state = await store.read(room.id);
+          await workspaces.reconcile(room.id, null);
+          const state = await readState(room.id);
           transfers.synchronizePrompt(room.id, state?.controlsEnabled ? state.transfer?.id ?? null : null);
           if (!state?.transfer || !state.controlsEnabled) {
             timers.cancel(`transfer:${room.id}`);
@@ -154,6 +175,10 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
           if (stopped) return;
           await coordinator.room(room.guildDiscordId, room.channelDiscordId, async () => {
             if (stopped) return;
+            // Startup has no confirmed native projection yet. A failed fetch
+            // must not let even non-access controls bypass reconciliation.
+            access.markUncertain(room.id);
+            await workspaces.reconcile(room.id, null);
             // Invalidate before uncertain Discord I/O: old menus never regain authority.
             if (!await store.invalidateControls(room.id, room.controlVersion)) throw new RoomActionError('STALE_CONTROLS');
             // Drop unverifiable offline continuity even if the upcoming fetch fails.
@@ -168,7 +193,8 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
               if (!snapshot) {
                 cancelRoomTimers(room.id);
                 await lifecycle.beginClosing(room.id);
-                await lifecycle.markClosed(room.id);
+                const closed = await lifecycle.markClosed(room.id);
+                access.retireConfirmedLocked(room.id, closed.status);
                 coordinator.retireRoom(room.guildDiscordId, room.channelDiscordId);
                 return;
               }
@@ -186,8 +212,9 @@ export function createRoomRuntime(database: PrismaClient, logger: Logger) {
       stopped = true;
       // Close admission before awaiting start/locks; callers release their locks while this drains.
       const draining = timers.stop();
+      const workspacesDrained = workspaces.stop();
       transfers.stopPrompts();
-      return Promise.all([draining, starting?.catch(() => undefined)]).then(() => undefined);
+      return Promise.all([draining, workspacesDrained, starting?.catch(() => undefined)]).then(() => undefined);
     },
   };
 }

@@ -28,6 +28,13 @@ export function roomSettingsFixture() {
   });
   const eligible = (state: RoomState | undefined, version: number) => state?.room.status === 'ACTIVE' && state.controlsEnabled && state.room.controlVersion === version;
   const store = { ...f.store,
+    settleAccess: vi.fn(async (id: string, version: number) => {
+      const state = f.states.get(id);
+      if (state && state.room.status !== 'CLOSED' && state.room.controlVersion === version) {
+        state.room.controlVersion++; state.transfer = null;
+      }
+      return store.read(id);
+    }),
     updateSettings: vi.fn(async (id: string, version: number, patch: RoomSettingsPatch) => {
       const state = f.states.get(id);
       if (!eligible(state, version)) return false;
@@ -42,7 +49,7 @@ export function roomSettingsFixture() {
     }),
   };
   const gateway = new DiscordRoomGateway(discord.guild as unknown as Guild);
-  const access = new RoomAccessService(store);
+  const access = new RoomAccessService(store, f.coordinator);
   const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: f.onChangedLocked });
   const join = (id: string) => discord.states.set(id, { channelId: f.state().room.channelDiscordId });
   const leave = (id: string) => discord.states.delete(id);

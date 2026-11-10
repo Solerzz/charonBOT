@@ -4,7 +4,7 @@ import type { RoomStateRepository } from '../calls/room-state.repository.js';
 import { RoomActionError, type PendingOwnershipTransfer, type RoomActor, type RoomChanged, type RoomDiscordGateway } from '../calls/room.types.js';
 import type { OwnershipTimers } from './ownership.timers.js';
 
-type TransferDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged; reconcileDeparturesLocked?: (roomId: string) => Promise<void> };
+type TransferDependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; timers: OwnershipTimers; onChangedLocked: RoomChanged; reconcileDeparturesLocked?: (roomId: string) => Promise<void>; invalidateWorkspace?: (roomId: string) => void; recoverAccessLocked?: RoomChanged };
 
 async function safe<T>(work: () => Promise<T>, code: 'PERSISTENCE_FAILURE' | 'DISCORD_FAILURE' = 'PERSISTENCE_FAILURE'): Promise<T> {
   try { return await work(); } catch (error) {
@@ -44,6 +44,7 @@ export class TransferService {
         if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         return coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
           await this.dependencies.reconcileDeparturesLocked?.(actor.roomId);
+          await this.dependencies.recoverAccessLocked?.(actor.roomId, gateway);
           await this.eligible(actor, targetId, gateway);
           const { state } = await this.liveOwned(actor, targetId, initial.room.channelDiscordId, gateway);
           if (state.transfer) throw new RoomActionError('TRANSFER_PENDING');
@@ -58,6 +59,7 @@ export class TransferService {
     return safe(() => this.withTransfer(transferId, 'owner', actor, async (transfer, channelId) => {
       try {
         if (this.dependencies.timers.isStopped) throw new RoomActionError('ROOM_UNAVAILABLE');
+        await this.dependencies.recoverAccessLocked?.(transfer.roomId, gateway);
         await this.validate(actor, transfer, channelId, gateway);
         if (transfer.expiresAt !== null) return transfer;
         const expiresAt = new Date(Date.now() + 5_000);
@@ -144,9 +146,11 @@ export class TransferService {
   private async finishLocked(transfer: PendingOwnershipTransfer, actor: RoomActor, channelId: string, gateway: RoomDiscordGateway, cause: 'confirm' | 'timeout'): Promise<void> {
     const { store, timers, onChangedLocked } = this.dependencies;
     try {
+      await this.dependencies.recoverAccessLocked?.(transfer.roomId, gateway);
       await this.validate(actor, transfer, channelId, gateway);
       if (cause === 'confirm' && transfer.expiresAt !== null && transfer.expiresAt <= new Date()) throw new RoomActionError('TRANSFER_EXPIRED');
       this.dependencies.coordinator.assertContinuous(actor.guildDiscordId, channelId, [transfer.ownerDiscordId, transfer.targetDiscordId]);
+      this.dependencies.invalidateWorkspace?.(transfer.roomId);
       if (!await this.dependencies.coordinator.changeOwnership(actor.guildDiscordId, channelId, transfer.controlVersion, transfer.targetDiscordId,
         () => store.finishTransfer(transfer.id, transfer.controlVersion, new Date(), cause))) {
         // Confirmation may cross the deadline during SQL I/O; leave its timeout intact.

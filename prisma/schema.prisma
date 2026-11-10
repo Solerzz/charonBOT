@@ -45,6 +45,7 @@ model TemporaryRoom {
   name                    String
   userLimit               Int                 @default(0)
   visibility              RoomVisibility      @default(PUBLIC)
+  isLocked                Boolean             @default(false)
   status                  TemporaryRoomStatus @default(CREATING)
   createdAt               DateTime            @default(now()) @db.Timestamptz(3)
   updatedAt               DateTime            @updatedAt @db.Timestamptz(3)

@@ -1,6 +1,6 @@
 import type { Guild, OverwriteData } from 'discord.js';
 
-import type { PendingOwnershipTransfer, RoomPresence } from '../../generated/prisma/client.js';
+import type { PendingOwnershipTransfer, RoomPresence, RoomVisibility } from '../../generated/prisma/client.js';
 import type { CallPanelPayload } from './call-panel.view.js';
 import type { TemporaryRoomRecord } from './call.repository.js';
 
@@ -9,7 +9,8 @@ export type RoomActor = { roomId: string; guildDiscordId: string; memberDiscordI
 export type RoomMember = { memberDiscordId: string; isBot: boolean };
 export type RoomSnapshot = { guildDiscordId: string; channelDiscordId: string; members: RoomMember[]; name: string; userLimit: number };
 export type RoomState = { room: TemporaryRoomRecord; controlsEnabled: boolean; presences: RoomPresence[]; allowedMemberIds: string[]; transfer: PendingOwnershipTransfer | null };
-export type RoomSettingsPatch = Partial<Pick<TemporaryRoomRecord, 'name' | 'userLimit' | 'visibility'>>;
+export type RoomSettingsPatch = Partial<Pick<TemporaryRoomRecord, 'name' | 'userLimit' | 'visibility' | 'isLocked'>>;
+export type RoomAccessPolicy = { isLocked: boolean; visibility: RoomVisibility };
 export type RoomChanged = (roomId: string, gateway: RoomDiscordGateway) => Promise<void>;
 export type RoomGuildResolver = (guildId: string) => Promise<Guild | null>;
 
@@ -21,8 +22,7 @@ export interface RoomDiscordGateway {
   restoreName(channelId: string, previousName: string): Promise<void>;
   setLimit(channelId: string, limit: number): Promise<void>;
   readAccess(channelId: string): Promise<OverwriteData[]>;
-  setPrivateAccess(channelId: string, allowedIds: string[]): Promise<void>;
-  setPublicAccess(channelId: string): Promise<void>;
+  setRoomAccess(channelId: string, policy: RoomAccessPolicy, allowedIds: string[]): Promise<void>;
   restoreAccess(channelId: string, previous: OverwriteData[]): Promise<void>;
   sendControlPanel(channelId: string, payload: CallPanelPayload): Promise<string>;
   updateControlPanel(channelId: string, messageId: string, payload: CallPanelPayload): Promise<void>;

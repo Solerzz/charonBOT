@@ -71,8 +71,7 @@ export class DiscordCallGateway implements CallDiscordGateway {
   restoreName(channelId: string, previousName: string) { return this.rooms.restoreName(channelId, previousName); }
   setLimit(channelId: string, limit: number) { return this.rooms.setLimit(channelId, limit); }
   readAccess(channelId: string) { return this.rooms.readAccess(channelId); }
-  setPrivateAccess(channelId: string, allowedIds: string[]) { return this.rooms.setPrivateAccess(channelId, allowedIds); }
-  setPublicAccess(channelId: string) { return this.rooms.setPublicAccess(channelId); }
+  setRoomAccess(channelId: string, policy: Parameters<RoomDiscordGateway['setRoomAccess']>[1], allowedIds: string[]) { return this.rooms.setRoomAccess(channelId, policy, allowedIds); }
   restoreAccess(channelId: string, previous: Parameters<RoomDiscordGateway['restoreAccess']>[1]) { return this.rooms.restoreAccess(channelId, previous); }
   deleteControlPanel(channelId: string, messageId: string) { return this.rooms.deleteControlPanel(channelId, messageId); }
 

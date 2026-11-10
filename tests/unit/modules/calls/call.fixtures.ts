@@ -18,7 +18,7 @@ export const room: TemporaryRoom = {
   id: '223e4567-e89b-42d3-a456-426614174000', guildDiscordId: creator.guildDiscordId,
   voiceCreatorId: creator.id, channelDiscordId: '42345678901234567',
   ownerDiscordId: '52345678901234567', controlMessageDiscordId: '62345678901234567',
-  name: 'Game', userLimit: 0, visibility: 'PUBLIC', status: 'ACTIVE',
+  name: 'Game', userLimit: 0, visibility: 'PUBLIC', isLocked: false, status: 'ACTIVE',
   createdAt: new Date(0), updatedAt: new Date(0), closedAt: null,
   controlVersion: 0, priorityMemberDiscordId: null, priorityExpiresAt: null,
 };
@@ -87,8 +87,7 @@ export function lifecycleFixture() {
     restoreName: vi.fn(async (_id: string, _previousName: string) => {}),
     setLimit: vi.fn(async (_id: string, _limit: number) => {}),
     readAccess: vi.fn(async (_id: string) => []),
-    setPrivateAccess: vi.fn(async (_id: string, _allowed: string[]) => {}),
-    setPublicAccess: vi.fn(async (_id: string) => {}),
+    setRoomAccess: vi.fn(async (_id: string, _policy: { isLocked: boolean; visibility: 'PUBLIC' | 'PRIVATE' }, _allowed: string[]) => {}),
     restoreAccess: vi.fn(async (_id: string, _previous: OverwriteData[]) => {}),
     deleteControlPanel: vi.fn(async (_id: string, _message: string) => {}),
     createTemporaryChannel: vi.fn(async () => ({ channelDiscordId: room.channelDiscordId })),

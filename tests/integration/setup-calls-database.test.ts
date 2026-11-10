@@ -88,7 +88,7 @@ describe('setup and calls database round trips', () => {
       await f.runtime.controls.setLimit(actor, 1, f.d.gateway);
       expect(f.d.gateway.getChannelMemberCount(f.d.channel.id)).toBe(3);
       expect(f.d.member.voice.setChannel).not.toHaveBeenCalled();
-      expect(JSON.stringify(f.d.message.edit.mock.calls)).toContain('3 / 1');
+      expect(JSON.stringify(f.d.channel.messages.edit.mock.calls)).toContain('3 / 1');
       await f.close();
       f.next(); await f.create();
       const second = (await f.rooms.findActiveByChannel(f.d.channel.id))!;
@@ -102,7 +102,7 @@ describe('setup and calls database round trips', () => {
       expect(f.d.channel).toMatchObject({ userLimit: 8, name: 'Owner name' });
       expect(f.d.guild.channels.create).toHaveBeenCalledTimes(2);
       expect(f.d.channel.send).toHaveBeenCalledTimes(2);
-      expect(JSON.stringify(f.d.message.edit.mock.calls)).toContain('1 / 8');
+      expect(JSON.stringify(f.d.channel.messages.edit.mock.calls)).toContain('1 / 8');
       await f.close(); f.next(); await f.create();
       expect(await f.rooms.findActiveByChannel(f.d.channel.id)).toMatchObject({ userLimit: 99, name: 'Game' });
       expect(f.d.channel.userLimit).toBe(99);

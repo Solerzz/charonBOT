@@ -99,6 +99,7 @@ export const TemporaryRoomScalarFieldEnum = {
   name: 'name',
   userLimit: 'userLimit',
   visibility: 'visibility',
+  isLocked: 'isLocked',
   status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',

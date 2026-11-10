@@ -300,7 +300,7 @@ export function createDefaultDispatcher(
   );
   registry.register(new SetupCreationInteractions(drafts, new SetupCreationService(setupRepository, logger),
     (interaction) => new DiscordSetupGateway(interaction.guild)));
-  registry.register(new CallInteractions(runtime, (guild) => new DiscordRoomGateway(guild)));
+  registry.register(new CallInteractions({ ...runtime, logger }, (guild) => new DiscordRoomGateway(guild)));
   return registry;
 }
 
