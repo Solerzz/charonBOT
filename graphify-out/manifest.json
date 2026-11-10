@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "src/application.ts": {
-    "mtime": 1794202241.3480124,
-    "seen": 1794219711.335604,
-    "ast_hash": "c70c2dad7e4062d6f51de460d6236e44",
+    "mtime": 1794281790.370953,
+    "seen": 1794282253.353259,
+    "ast_hash": "19e5e3f2875160dcb0edf9b447b08525",
     "semantic_hash": ""
   },
   "src/core/config/env.ts": {
@@ -138,9 +138,9 @@
     "semantic_hash": ""
   },
   "tests/unit/application.test.ts": {
-    "mtime": 1794202287.3371344,
-    "seen": 1794219711.3554392,
-    "ast_hash": "ed913f4ff9405e8ea732e9f192a988e7",
+    "mtime": 1794281692.866244,
+    "seen": 1794282253.3656244,
+    "ast_hash": "b4b8593ef2b9420d812f15191cd383a0",
     "semantic_hash": ""
   },
   "tests/unit/bootstrap.test.ts": {
@@ -270,9 +270,9 @@
     "semantic_hash": ""
   },
   "src/modules/setup/setup.schemas.ts": {
-    "mtime": 1794279200.3149915,
-    "seen": 1794279285.3962321,
-    "ast_hash": "156db0501054713d7379c52d7d743dbf",
+    "mtime": 1794281746.5011535,
+    "seen": 1794282253.3630092,
+    "ast_hash": "65d26c4d2493e711270cb0c696ca1ee5",
     "semantic_hash": ""
   },
   "src/modules/setup/setup.service.ts": {
@@ -294,9 +294,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.schemas.test.ts": {
-    "mtime": 1794279064.6961977,
-    "seen": 1794279285.4121654,
-    "ast_hash": "b0637c3dca1b53e0c3a543f41bf42b19",
+    "mtime": 1794281496.7334747,
+    "seen": 1794282253.3745186,
+    "ast_hash": "aa37faa3d6c9ddf006efb601345ae784",
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.service.test.ts": {
@@ -330,15 +330,15 @@
     "semantic_hash": ""
   },
   "src/modules/setup/setup.views.ts": {
-    "mtime": 1794191252.9592361,
-    "seen": 1794192269.0415382,
-    "ast_hash": "49c9a85ea1e55b27be04f29684848f87",
+    "mtime": 1794281746.5011535,
+    "seen": 1794282253.3630092,
+    "ast_hash": "7a1779a6d2ddfaf3558b0c58cc4e55fd",
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.command.test.ts": {
-    "mtime": 1794279230.7375062,
-    "seen": 1794279285.4121654,
-    "ast_hash": "191233c240a0684c37a36c839631a4be",
+    "mtime": 1794281496.7381277,
+    "seen": 1794282253.3729966,
+    "ast_hash": "0207f60690501eb9a64343617d647727",
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.discord.test.ts": {
@@ -348,21 +348,21 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.views.test.ts": {
-    "mtime": 1794279230.7375062,
-    "seen": 1794279285.4121654,
-    "ast_hash": "28662d7b55963dd07cc30cf347b48213",
+    "mtime": 1794281496.7381277,
+    "seen": 1794282253.3745186,
+    "ast_hash": "4a4bc24076a4df3a469e6d341be9a1ef",
     "semantic_hash": ""
   },
   "src/modules/setup/setup.interactions.ts": {
-    "mtime": 1794201093.7258897,
-    "seen": 1794201118.3859658,
-    "ast_hash": "f191f32f2187de637201ecec1a59e8d7",
+    "mtime": 1794282158.7999992,
+    "seen": 1794282253.3630092,
+    "ast_hash": "6dec6d720fbda02ebf3c46310a0115d4",
     "semantic_hash": ""
   },
   "tests/unit/modules/setup/setup.interactions.test.ts": {
-    "mtime": 1794280770.5216446,
-    "seen": 1794280977.550823,
-    "ast_hash": "bccaf94fd6fbc3caad8572aad790355a",
+    "mtime": 1794281548.355976,
+    "seen": 1794282253.3729966,
+    "ast_hash": "e07a0ce480af4f8c3169678a070b67e8",
     "semantic_hash": ""
   },
   "src/modules/calls/call-panel.view.ts": {
@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "tests/unit/application.rooms.test.ts": {
-    "mtime": 1794263570.189064,
-    "seen": 1794264158.3850734,
-    "ast_hash": "bc99cb10fda2d5236ead447a0f4183c8",
+    "mtime": 1794281962.2393913,
+    "seen": 1794282253.3656244,
+    "ast_hash": "8651768b9282bf47f658c079f04c0fd1",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/call.interactions.test.ts": {
@@ -780,9 +780,9 @@
     "semantic_hash": ""
   },
   "src/modules/setup/setup-creation.service.ts": {
-    "mtime": 1794280876.0246081,
-    "seen": 1794280977.5396128,
-    "ast_hash": "a1b494426bbdd5e44a40018d615c8fec",
+    "mtime": 1794282080.3552408,
+    "seen": 1794282253.3630092,
+    "ast_hash": "2cddeaee2d98ca80f7c7d2e91735f8a2",
     "semantic_hash": ""
   },
   "tests/unit/core/discord/client.test.ts": {
@@ -795,6 +795,18 @@
     "mtime": 1794280852.5364769,
     "seen": 1794280977.550823,
     "ast_hash": "b2370810da335eafaf3e59281e3831d1",
+    "semantic_hash": ""
+  },
+  "src/modules/setup/setup-creation.interactions.ts": {
+    "mtime": 1794282228.613093,
+    "seen": 1794282253.3630092,
+    "ast_hash": "8fae935a4cc7646a62509f9b8a838d42",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/setup/setup-creation.interactions.test.ts": {
+    "mtime": 1794282158.7986476,
+    "seen": 1794282253.3729966,
+    "ast_hash": "74746f334fe7c5e733e24685d001155f",
     "semantic_hash": ""
   },
   "package-lock.json": {

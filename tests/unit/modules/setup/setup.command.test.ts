@@ -141,7 +141,7 @@ describe('SetupCommand', () => {
     ]));
     expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:delete:${configuration.id}` }));
     expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:change-category:${configuration.id}` }));
-    expect(controls).toContainEqual(expect.objectContaining({ custom_id: 'setup:v1:add' }));
+    expect(controls).toContainEqual(expect.objectContaining({ custom_id: 'setup:v2:create:start' }));
     expect(send).not.toHaveBeenCalled();
   });
 

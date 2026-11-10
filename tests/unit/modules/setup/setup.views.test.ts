@@ -2,7 +2,8 @@ import { ButtonStyle, ChannelType, ComponentType } from 'discord.js';
 import { describe, expect, it } from 'vitest';
 
 import type { VoiceCreatorConfiguration } from '../../../../src/modules/setup/setup.repository.js';
-import { buildSetupDashboard } from '../../../../src/modules/setup/setup.views.js';
+import { buildSetupDashboard, buildSetupCreationCategory, buildSetupCreationReview } from '../../../../src/modules/setup/setup.views.js';
+import type { ReadySetupDraft } from '../../../../src/modules/setup/setup-creation.types.js';
 
 const first: VoiceCreatorConfiguration = {
   id: '123e4567-e89b-42d3-a456-426614174000', guildDiscordId: '12345678901234567',
@@ -16,19 +17,18 @@ function json(input: Parameters<typeof buildSetupDashboard>[0]) {
 }
 
 describe('buildSetupDashboard', () => {
-  it('renders an empty monochrome dashboard with a native existing voice-channel selector', () => {
+  it('offers guided creation rather than adopting an existing voice channel', () => {
     const payload = json({ configurations: [] });
     expect(payload.flags).toBeUndefined();
     expect(payload.allowedMentions).toEqual({ parse: [] });
     expect(payload.embeds[0]).toMatchObject({
       title: 'Configuração do Charon', color: 0x2b2d31,
-      description: 'Nenhum Voice Creator configurado. Adicione um canal de voz existente para começar.',
+      description: 'Nenhum Voice Creator configurado. Crie um canal de entrada para começar.',
     });
     expect(payload.components).toEqual([{
       type: ComponentType.ActionRow, components: [{
-        type: ComponentType.ChannelSelect, custom_id: 'setup:v1:add',
-        placeholder: 'Adicionar Voice Creator', channel_types: [ChannelType.GuildVoice],
-        min_values: 1, max_values: 1,
+         type: ComponentType.Button, custom_id: 'setup:v2:create:start',
+         label: 'Criar canal de entrada', style: ButtonStyle.Primary,
       }],
     }]);
   });
@@ -40,7 +40,8 @@ describe('buildSetupDashboard', () => {
       { name: 'Voice Creator', value: '<#22345678901234567>' },
       { name: 'Categoria das salas', value: '<#32345678901234567>' },
       { name: 'Nome do canal', value: 'Criar sala' },
-      { name: 'Comandos da sala', value: 'Habilitados · disponíveis em versões futuras' },
+      { name: 'Comandos da sala', value: 'Habilitados' },
+      { name: 'Limite padrão das novas calls', value: '0 · sem limite' },
       { name: 'Zona de perigo', value: 'Excluir remove apenas a configuração. O canal e as salas ativas são preservados.' },
     ]);
     const controls = payload.components.flatMap((row: { components: unknown[] }) => row.components);
@@ -50,6 +51,7 @@ describe('buildSetupDashboard', () => {
     ] });
     expect(controls).toContainEqual(expect.objectContaining({ type: ComponentType.ChannelSelect, custom_id: `setup:v1:change-category:${first.id}`, placeholder: 'Alterar categoria', channel_types: [ChannelType.GuildCategory] }));
     expect(controls).toContainEqual(expect.objectContaining({ type: ComponentType.Button, custom_id: `setup:v1:rename:${first.id}`, label: 'Renomear', style: ButtonStyle.Secondary }));
+    expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:default-limit:${first.id}`, label: 'Limite padrão' }));
     expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:toggle-commands:${first.id}`, label: 'Comandos: habilitados', style: ButtonStyle.Secondary }));
     expect(controls).toContainEqual(expect.objectContaining({ custom_id: `setup:v1:delete:${first.id}`, label: 'Excluir configuração', style: ButtonStyle.Danger }));
     expect(controls.every((control: { emoji?: unknown }) => control.emoji === undefined)).toBe(true);
@@ -59,7 +61,7 @@ describe('buildSetupDashboard', () => {
   it('renders the explicitly selected creator rather than another creator settings', () => {
     const payload = json({ configurations: [first, second], selectedVoiceCreatorId: second.id });
     expect(payload.embeds[0].fields[0].value).toBe('<#42345678901234567>');
-    expect(payload.embeds[0].fields[3].value).toBe('Desabilitados · disponíveis em versões futuras');
+    expect(payload.embeds[0].fields[3].value).toBe('Desabilitados');
     expect(payload.components[0].components[0].options[1].default).toBe(true);
   });
 
@@ -83,7 +85,7 @@ describe('buildSetupDashboard', () => {
     expect(category.default_values).toBeUndefined();
     expect(category.disabled).not.toBe(true);
     expect(controls.find((control: { custom_id: string }) => control.custom_id === `setup:v1:delete:${first.id}`).disabled).not.toBe(true);
-    expect(controls.find((control: { custom_id: string }) => control.custom_id === 'setup:v1:add').disabled).not.toBe(true);
+    expect(controls.find((control: { custom_id: string }) => control.custom_id === 'setup:v2:create:start').disabled).not.toBe(true);
   });
 
   it('does not carry another creator unavailable warning onto the selected healthy creator', () => {
@@ -117,5 +119,33 @@ describe('buildSetupDashboard', () => {
     expect(options[0]).toEqual({ label: 'Voice Creators anteriores', value: configurations[0]!.id, default: false });
     expect(options[24]).toEqual({ label: 'Próximos Voice Creators', value: configurations[46]!.id, default: false });
     expect(options[2]).toMatchObject({ value: configurations[24]!.id, default: true });
+  });
+});
+
+describe('guided creation views', () => {
+  const draft: ReadySetupDraft = { id: first.id, revision: 2, context: { guildDiscordId: first.guildDiscordId, administratorDiscordId: '42345678901234567', messageDiscordId: '52345678901234567' }, expiresAt: 600000, status: 'review', input: { categoryDiscordId: first.categoryDiscordId, name: 'Entrada @everyone', defaultUserLimit: 4 } };
+
+  it('uses a category-only selector and revision-bound cancel', () => {
+    const payload = JSON.parse(JSON.stringify(buildSetupCreationCategory({ ...draft, status: 'editing' })));
+    expect(payload.allowedMentions).toEqual({ parse: [] });
+    expect(payload.components[0].components[0]).toMatchObject({ type: ComponentType.ChannelSelect, channel_types: [ChannelType.GuildCategory], custom_id: `setup:v2:create:category:${first.id}:2` });
+    expect(JSON.stringify(payload.components)).toContain(`setup:v2:create:cancel:${first.id}:2`);
+  });
+
+  it.each([0, 1, 99])('shows independent entry/call naming and limit %i in a non-pinging review', (limit) => {
+    const payload = JSON.parse(JSON.stringify(buildSetupCreationReview({ ...draft, input: { ...draft.input, defaultUserLimit: limit } })));
+    expect(payload.allowedMentions).toEqual({ parse: [] });
+    expect(payload.flags).toBeUndefined();
+    const content = JSON.stringify(payload.embeds);
+    expect(content).toContain('Entrada @everyone');
+    expect(content).toContain('<#32345678901234567>');
+    expect(content).toContain(String(limit));
+    expect(content).toContain('sem limite');
+    expect(content).toContain('automático');
+    expect(payload.components[0].components).toEqual([
+      expect.objectContaining({ custom_id: `setup:v2:create:confirm:${first.id}:2`, label: 'Confirmar criação' }),
+      expect.objectContaining({ custom_id: `setup:v2:create:back:${first.id}:2`, label: 'Voltar' }),
+      expect.objectContaining({ custom_id: `setup:v2:create:cancel:${first.id}:2`, label: 'Cancelar' }),
+    ]);
   });
 });

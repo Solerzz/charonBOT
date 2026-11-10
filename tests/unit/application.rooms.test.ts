@@ -99,6 +99,63 @@ const flush = async () => { await new Promise<void>((resolve) => setImmediate(re
 afterEach(() => vi.useRealTimers());
 
 describe('default room lifecycle at SQL/REST/client boundaries', () => {
+  it('shares one application draft through native wizard events and drains SQL creation before store/timer disposal and disconnect', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(0);
+    const f = fixture(false); const entered = deferred(); const held = deferred();
+    const entryId = '82345678901234567';
+    const saved = { ...structuredClone(f.configuration), id: '223e4567-e89b-42d3-a456-426614174000', creatorChannelDiscordId: entryId, defaultUserLimit: 7 };
+    const persist = sqlSpy(f.database.voiceCreator, 'create').mockImplementation(async () => { entered.resolve(); await held.promise; return saved; });
+    const entry = { ...f.channel, id: entryId, parentId: creator.categoryDiscordId, name: 'Entrada nativa', userLimit: 0 };
+    f.guild.channels.create.mockResolvedValue(entry);
+    const fetch = f.guild.channels.fetch.getMockImplementation()!;
+    f.guild.channels.fetch.mockImplementation(async (id) => id === entryId ? entry : fetch(id));
+    const starting = f.app.start(); await flush(); f.markReady(); await starting;
+    const event = (id: string, kind = 'button') => ({
+      ...f.interaction(id), isButton: () => kind === 'button', isAnySelectMenu: () => kind === 'category',
+      isChannelSelectMenu: () => kind === 'category', isModalSubmit: () => kind === 'form', isFromMessage: () => true,
+      message: { id: '72345678901234567', guildId: creator.guildDiscordId, flags: { has: (flag: number) => flag === MessageFlags.Ephemeral } },
+      values: [creator.categoryDiscordId], fields: { getTextInputValue: (field: string) => field === 'name' ? 'Entrada nativa' : '7' },
+      showModal: vi.fn(async (_payload: unknown) => {}),
+    });
+    const start = event('setup:v2:create:start'); f.emit(Events.InteractionCreate, start); await flush();
+    const startPayload = JSON.parse(JSON.stringify(start.editReply.mock.calls[0]![0]));
+    const categoryId: string = startPayload.components[0].components[0].custom_id;
+    const draftId = categoryId.split(':')[4]!;
+    const category = event(categoryId, 'category'); f.emit(Events.InteractionCreate, category); await flush();
+    expect(category.showModal).toHaveBeenCalledOnce();
+    const formId: string = JSON.parse(JSON.stringify(category.showModal.mock.calls[0]![0])).custom_id;
+    const form = event(formId, 'form'); f.emit(Events.InteractionCreate, form); await flush();
+    expect(form.deferUpdate).toHaveBeenCalledOnce(); expect(persist).not.toHaveBeenCalled();
+    const review = JSON.parse(JSON.stringify(form.editReply.mock.calls[0]![0]));
+    const confirmId: string = review.components[0].components[0].custom_id;
+    expect(confirmId).toBe(`setup:v2:create:confirm:${draftId}:2`);
+    const confirm = event(confirmId); f.emit(Events.InteractionCreate, confirm); await entered.promise;
+    expect(f.guild.channels.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'Entrada nativa', parent: creator.categoryDiscordId, userLimit: 0, type: ChannelType.GuildVoice }));
+    expect(persist).toHaveBeenCalledExactlyOnceWith({ data: { guildDiscordId: creator.guildDiscordId, creatorChannelDiscordId: entryId, categoryDiscordId: creator.categoryDiscordId, defaultUserLimit: 7 } });
+    const duplicate = event(confirmId); f.emit(Events.InteractionCreate, duplicate); await flush();
+    const stopping = f.app.stop('test');
+    try { await flush(); expect(f.disconnect).not.toHaveBeenCalled(); expect(persist).toHaveBeenCalledOnce(); }
+    finally { held.resolve(); await stopping; }
+    expect(f.disconnect).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+    expect(JSON.stringify(confirm.editReply.mock.calls)).toContain('Configuração salva');
+    expect(JSON.stringify(duplicate.editReply.mock.calls)).toContain('Configuração salva');
+    expect(f.guild.channels.create).toHaveBeenCalledOnce();
+  });
+
+  it('default editing changes only the creator model, not active room/entry settings or panel preference', async () => {
+    const f = fixture(); const starting = f.app.start(); await flush(); f.markReady(); await starting;
+    const before = structuredClone(f.record); const preference = f.configuration.roomCommandsEnabled;
+    const input = { ...f.interaction(`setup:v1:default-limit:${creator.id}`), isButton: () => false,
+      isAnySelectMenu: () => false, isModalSubmit: () => true, isFromMessage: () => true,
+      fields: { getTextInputValue: () => '8' } };
+    f.emit(Events.InteractionCreate, input); await flush();
+    expect(f.configuration.defaultUserLimit).toBe(8);
+    expect(f.configuration.roomCommandsEnabled).toBe(preference);
+    expect(f.record).toEqual(before);
+    expect(f.channel.setUserLimit).not.toHaveBeenCalled(); expect(f.channel.setName).not.toHaveBeenCalled();
+    expect(input.deferUpdate).toHaveBeenCalledOnce();
+    await f.app.stop('test');
+  });
   it('attaches ready before login, holds queued controls and voice behind reconciliation, then reads current live presence', async () => {
     const f = fixture(); const loaded = deferred(); const release = deferred();
     const original = f.list.getMockImplementation()!;

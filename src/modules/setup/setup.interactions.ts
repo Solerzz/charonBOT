@@ -2,8 +2,6 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ChannelSelectMenuBuilder,
-  ChannelType,
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
@@ -28,6 +26,7 @@ import {
   encodeSetupCustomId,
   setupChannelNameSchema,
   setupCustomIdSchema,
+  setupDefaultLimitInputSchema,
   voiceCreatorIdSchema,
   type SetupCustomId,
 } from './setup.schemas.js';
@@ -61,7 +60,7 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
 
   public async execute(interaction: SetupInteraction): Promise<void> {
     if (!isGuildBased(interaction)) {
-      await interaction.reply({ content: 'Use esta ação em um servidor.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: 'Use esta ação em um servidor.', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
     const permissions = interaction.memberPermissions;
@@ -70,24 +69,29 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
       await interaction.reply({
         content: 'Você precisa de Administrador ou Gerenciar Servidor e Gerenciar Canais.',
         flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [] },
       });
       return;
     }
     // Never turn a forged/public component or unrelated modal into a public edit.
     if ((interaction.isModalSubmit() && !interaction.isFromMessage())
       || !interaction.message?.flags.has(MessageFlags.Ephemeral)) {
-      await interaction.reply({ content: invalidMessage, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: invalidMessage, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
     const decoded = setupCustomIdSchema.safeParse(interaction.customId);
     if (!decoded.success) {
-      await interaction.reply({ content: invalidMessage, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: invalidMessage, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
 
     let acknowledged = false;
     try {
       const customId = decoded.data;
+      if (customId.action === 'add' || customId.action === 'add-category') {
+        await interaction.reply({ content: 'Abra /setup init novamente', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+        return;
+      }
       const value = this.validateInput(interaction, customId);
       // An empty form reads no private configuration. Show it before any
       // external work; the submit independently validates every mutation target.
@@ -102,6 +106,15 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
           )));
         return;
       }
+      if (customId.action === 'default-limit' && interaction.isButton()) {
+        await interaction.showModal(new ModalBuilder()
+          .setCustomId(encodeSetupCustomId(customId)).setTitle('Limite padrão das novas calls')
+          .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('default-limit').setLabel('Limite inicial (0 = sem limite)')
+              .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2).setValue('0'),
+          )));
+        return;
+      }
       await interaction.deferUpdate();
       acknowledged = true;
       const gateway = this.gatewayFactory(interaction);
@@ -110,34 +123,6 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
       const selected = 'voiceCreatorId' in customId
         ? this.requireConfiguration(configurations, interaction.guildId, customId.voiceCreatorId)
         : undefined;
-
-      switch (customId.action) {
-        case 'add': {
-          await this.requireVoice(gateway, value);
-          const category = new ChannelSelectMenuBuilder()
-            .setCustomId(encodeSetupCustomId({ version: 'v1', action: 'add-category', discordId: value }))
-            .setPlaceholder('Categoria das novas salas')
-            .setChannelTypes(ChannelType.GuildCategory)
-            .setMinValues(1).setMaxValues(1);
-          await interaction.editReply({
-            content: 'Escolha a categoria das salas deste Voice Creator.',
-            embeds: [], components: [new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(category)],
-            allowedMentions: { parse: [] },
-          });
-          return;
-        }
-        case 'add-category': {
-          await this.requireVoice(gateway, customId.discordId);
-          await this.requireCategory(gateway, value);
-          const created = await this.service.add({
-            guildDiscordId: interaction.guildId,
-            creatorChannelDiscordId: customId.discordId,
-            categoryDiscordId: value,
-          });
-          await this.refresh(interaction, gateway, created.id);
-          return;
-        }
-      }
 
       if (selected === undefined) throw new SetupDiscordError(expiredMessage);
       switch (customId.action) {
@@ -171,6 +156,11 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
           await this.requireVoice(gateway, selected.creatorChannelDiscordId);
           await this.requireCategory(gateway, value);
           await this.service.changeCategory(selected.id, value);
+          break;
+        case 'default-limit':
+          // Only the model changes. Missing destinations remain repairable;
+          // never move or reconfigure an entry channel or an existing call.
+          await this.service.setDefaultUserLimit(selected.id, Number(value));
           break;
         case 'toggle-commands': {
           await this.requireVoice(gateway, selected.creatorChannelDiscordId);
@@ -216,8 +206,6 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
 
   private validateInput(interaction: SetupInteraction, customId: SetupCustomId): string {
     switch (customId.action) {
-      case 'add':
-      case 'add-category':
       case 'change-category': {
         if (!interaction.isChannelSelectMenu() || interaction.values.length !== 1) break;
         const parsed = discordIdSchema.safeParse(interaction.values[0]);
@@ -242,6 +230,17 @@ export class SetupInteractions implements InteractionHandler<SetupInteraction> {
           const parsed = setupChannelNameSchema.safeParse(name);
           if (parsed.success) return parsed.data;
           throw new SetupDiscordError('O nome do canal deve ter entre 1 e 100 caracteres.');
+        }
+        break;
+      case 'default-limit':
+        if (interaction.isButton()) return '';
+        if (interaction.isModalSubmit()) {
+          let limit: string;
+          try { limit = interaction.fields.getTextInputValue('default-limit'); }
+          catch { throw new SetupDiscordError(invalidMessage); }
+          const parsed = setupDefaultLimitInputSchema.safeParse(limit);
+          if (parsed.success) return String(parsed.data);
+          throw new SetupDiscordError('O limite deve ser um inteiro de 0 a 99. 0 significa sem limite.');
         }
         break;
       default:

@@ -11,6 +11,10 @@ export class SetupCreationService {
     private readonly logger: Logger,
   ) {}
 
+  public async list(guildDiscordId: string): Promise<VoiceCreatorConfiguration[]> {
+    return this.repository.listByGuild(discordIdSchema.parse(guildDiscordId));
+  }
+
   public async create(draft: ReadySetupDraft, gateway: SetupDiscordGateway): Promise<SetupCreationResult> {
     let name: string;
     try {

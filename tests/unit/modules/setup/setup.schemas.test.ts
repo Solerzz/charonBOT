@@ -4,6 +4,8 @@ import {
   defaultUserLimitSchema,
   discordIdSchema,
   encodeSetupCustomId,
+  encodeSetupCreationCustomId,
+  setupCreationCustomIdSchema,
   setupChannelNameSchema,
   setupCustomIdSchema,
   setupDefaultLimitInputSchema,
@@ -13,6 +15,32 @@ import {
 const voiceCreatorId = '123e4567-e89b-42d3-a456-426614174000';
 
 describe('setup schemas', () => {
+  it('isolates creation from editing and encodes the default editor', () => {
+    expect(setupCreationCustomIdSchema.parse('setup:v2:create:start')).toEqual({ version: 'v2', action: 'start' });
+    expect(encodeSetupCreationCustomId({ version: 'v2', action: 'start' })).toBe('setup:v2:create:start');
+    expect(setupCustomIdSchema.parse(`setup:v1:default-limit:${voiceCreatorId}`)).toEqual({ version: 'v1', action: 'default-limit', voiceCreatorId });
+  });
+
+  it.each(['category', 'form', 'back', 'cancel', 'confirm'] as const)('roundtrips creation action %s with a safe revision', (action) => {
+    const value = { version: 'v2' as const, action, id: voiceCreatorId, revision: Number.MAX_SAFE_INTEGER };
+    const encoded = encodeSetupCreationCustomId(value);
+    expect(encoded).toBe(`setup:v2:create:${action}:${voiceCreatorId}:9007199254740991`);
+    expect(encoded.length).toBeLessThanOrEqual(100);
+    expect(setupCreationCustomIdSchema.parse(encoded)).toEqual(value);
+    expect(setupCustomIdSchema.safeParse(encoded).success).toBe(false);
+  });
+
+  it.each(['-1', '1.5', '01', '1e1', '', '9007199254740992', 'Infinity'])('rejects unsafe/noncanonical creation revision %s', (revision) => {
+    expect(setupCreationCustomIdSchema.safeParse(`setup:v2:create:confirm:${voiceCreatorId}:${revision}`).success).toBe(false);
+  });
+
+  it.each(['setup:v2:create:start:extra', 'setup:v2:create', 'setup:v2:create:unknown', `setup:v2:create:confirm:${voiceCreatorId}:0:extra`, 'setup:v2:create:form:invalid:0', 'x'.repeat(101)])('rejects malformed creation IDs: %s', (id) => {
+    expect(setupCreationCustomIdSchema.safeParse(id).success).toBe(false);
+  });
+
+  it('refuses to encode invalid creation references', () => {
+    expect(() => encodeSetupCreationCustomId({ version: 'v2', action: 'confirm', id: voiceCreatorId, revision: -1 })).toThrow();
+  });
   it.each([0, 1, 4, 99])('accepts default room limit %s', (limit) => {
     expect(defaultUserLimitSchema.parse(limit)).toBe(limit);
   });
