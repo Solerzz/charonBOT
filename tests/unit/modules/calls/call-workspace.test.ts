@@ -194,6 +194,32 @@ describe('CallPrivateWorkspace delivery lifecycle (not room authorization)', () 
     expect(create).toHaveBeenCalledOnce(); await workspaces.stop();
   });
 
+  it('preserves an adopted handle when the original create response arrives expired', async () => {
+    const workspaces = new CallPrivateWorkspace(); const original = delivery('same-message', 100);
+    const refreshed = delivery('same-message', 1_000); const entered = deferred(); const release = deferred();
+    const create = vi.fn(async () => { entered.resolve(); await release.promise; return original; });
+    const showing = workspaces.show(actor, pending('current'), create);
+    const outcome = showing.then((delivered) => delivered, (error: unknown) => error);
+    await entered.promise; await vi.advanceTimersByTimeAsync(90);
+    workspaces.adopt(actor, refreshed);
+    const editing = workspaces.editPending(actor, 'current', payload('countdown'));
+    await vi.advanceTimersByTimeAsync(11);
+    expect(refreshed.edit).not.toHaveBeenCalled();
+    release.resolve();
+    expect(await outcome).toBe(refreshed); expect(await editing).toBe(true);
+    expect(refreshed.edit).toHaveBeenCalledExactlyOnceWith(payload('countdown'));
+    expect(await workspaces.editPending(actor, 'current', payload('done'), true)).toBe(true);
+    expect(await workspaces.show(actor, target, create)).toBe(refreshed);
+    expect(refreshed.edit).toHaveBeenLastCalledWith(target.payload);
+    expect(create).toHaveBeenCalledOnce(); expect(original.edit).not.toHaveBeenCalled();
+    expect(original.deactivate).not.toHaveBeenCalled(); expect(refreshed.deactivate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(898);
+    expect(refreshed.deactivate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refreshed.deactivate).toHaveBeenCalledOnce(); expect(original.deactivate).not.toHaveBeenCalled();
+    await workspaces.stop(); expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('only adopt extends a known delivery, and old edits cannot replace the refreshed handle', async () => {
     const workspaces = new CallPrivateWorkspace(); const first = delivery();
     await workspaces.show(actor, pending('pending'), async () => first);

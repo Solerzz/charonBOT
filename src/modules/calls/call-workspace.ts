@@ -51,16 +51,21 @@ export class CallPrivateWorkspace {
         try { delivered = await create(selected.payload); }
         catch { throw new RoomActionError('DISCORD_FAILURE'); }
         if (!validDelivery(delivered)) throw new RoomActionError('DISCORD_FAILURE');
-        if (!this.current(entry) || delivered.expiresAt <= this.now()) {
-          if (this.current(entry)) this.retire(entry);
+        if (!this.current(entry)) {
           await this.deactivate(delivered);
           throw new RoomActionError('STALE_CONTROLS');
         }
         // A validated private click may have refreshed the handle during create.
+        // Its current deadline takes precedence over this older response's expiry.
         if (entry.delivery) {
           await this.deactivate(delivered);
           this.assertCurrent(entry);
           return entry.delivery;
+        }
+        if (delivered.expiresAt <= this.now()) {
+          this.retire(entry);
+          await this.deactivate(delivered);
+          throw new RoomActionError('STALE_CONTROLS');
         }
         entry.delivery = delivered;
         entry.expiresAt = delivered.expiresAt;
