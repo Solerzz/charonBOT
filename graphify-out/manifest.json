@@ -761,6 +761,24 @@
     "ast_hash": "63424014802defe2b347c152edc5f6ca",
     "semantic_hash": ""
   },
+  "src/modules/setup/setup-creation.types.ts": {
+    "mtime": 1794279970.8975573,
+    "seen": 1794280099.1056914,
+    "ast_hash": "b38d4b21a13d5c24f37b7fc165c4798e",
+    "semantic_hash": ""
+  },
+  "src/modules/setup/setup-drafts.ts": {
+    "mtime": 1794280011.9406784,
+    "seen": 1794280099.1056914,
+    "ast_hash": "e8bc0d563d09bcff6cf15bf6ee0dab42",
+    "semantic_hash": ""
+  },
+  "tests/unit/modules/setup/setup-drafts.test.ts": {
+    "mtime": 1794280001.6505752,
+    "seen": 1794280099.1174471,
+    "ast_hash": "5ae1102ae837293ebf5e3b3fc7058d46",
+    "semantic_hash": ""
+  },
   "package-lock.json": {
     "mtime": 1794220656.8724687,
     "seen": 1794220975.8541348,
