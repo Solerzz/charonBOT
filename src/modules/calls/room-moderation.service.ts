@@ -95,11 +95,13 @@ export class RoomModerationService {
         const durable = await safeRoomAction(() => store.read(actor.roomId));
         if (!durable?.memberBlocks.some(block => block.id === write.block.id && block.memberDiscordId === targetId && block.state === write.block.state)) throw new RoomActionError('MODERATION_INCOMPLETE');
         const nextActor = { ...actor, controlVersion: write.controlVersion };
+        const receipts = this.departures(durable);
         const removed = await this.reconcileIntentLocked(actor.roomId, gateway);
         const confirmed = await this.ownedLocked(nextActor, channelId, gateway);
         published = true;
         await safeRoomAction(() => publishLocked(actor.roomId, gateway), 'DISCORD_FAILURE');
         const final = await this.ownedLocked(nextActor, channelId, gateway);
+        this.assertRosterCurrent(final.state, receipts);
         if (!sameState(confirmed.state, final.state) || accessMembers(durable, snapshot) !== accessMembers(final.state, final.snapshot)) throw new RoomActionError('MODERATION_INCOMPLETE');
         if (kind === 'blocked'
           ? !final.state.memberBlocks.some(block => block.id === write.block.id && block.state === 'BLOCKED') || final.snapshot.members.some(member => member.memberDiscordId === targetId)
@@ -131,6 +133,7 @@ export class RoomModerationService {
       const state = await access.settleLocked(roomId);
       if (access.retireConfirmedLocked(roomId, state?.room.status ?? null)) return removed;
       if (!state || state.room.status !== 'ACTIVE') throw new RoomActionError('ROOM_UNAVAILABLE');
+      const receipts = this.departures(state);
       const snapshot = await safeRoomAction(() => gateway.snapshot(state.room.channelDiscordId), 'DISCORD_FAILURE');
       assertSnapshot(state, snapshot);
       await access.synchronizeLocked(state, snapshot, gateway);
@@ -171,6 +174,7 @@ export class RoomModerationService {
       const final = await safeRoomAction(() => gateway.snapshot(state.room.channelDiscordId), 'DISCORD_FAILURE');
       assertSnapshot(projected, final);
       await this.confirmLocked(projected);
+      this.assertRosterCurrent(projected, receipts);
       if (projected.memberBlocks.some(block => final.members.some(member => member.memberDiscordId === block.memberDiscordId))) throw new RoomActionError('MODERATION_INCOMPLETE');
       // SQL finalization/removal/publication can yield after access confirmation.
       // Do not acknowledge temporary grants whose occupants have since left.
@@ -191,6 +195,21 @@ export class RoomModerationService {
   private async confirmLocked(expected: RoomState): Promise<void> {
     const current = await safeRoomAction(() => this.dependencies.store.read(expected.room.id));
     if (!current || !sameState(expected, current)) throw new RoomActionError('STALE_CONTROLS');
+  }
+
+  private departures(state: RoomState) {
+    return this.dependencies.coordinator.pendingDepartures(state.room.guildDiscordId, state.room.channelDiscordId);
+  }
+
+  private assertRosterCurrent(state: RoomState, before: ReturnType<RoomModerationService['departures']>): void {
+    // Keep evidence across the whole projection and its later SQL/publication
+    // awaits. A return does not erase a new departure; old receipts can already
+    // be reflected by this attempt's fresh observation. BLOCKED removals do not
+    // invalidate occupant grants because those members were never granted.
+    if (this.departures(state).some(receipt => !before.includes(receipt)
+      && !state.memberBlocks.some(block => block.memberDiscordId === receipt.memberId && block.state === 'BLOCKED'))) {
+      throw new RoomActionError('MODERATION_INCOMPLETE');
+    }
   }
 
   private async ownedLocked(actor: RoomActor, channelId: string, gateway: RoomDiscordGateway) {

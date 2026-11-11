@@ -337,4 +337,110 @@ describe('durable owner moderation', () => {
     expect(f.access.isUncertain(f.state().room.id)).toBe(true); expect(f.store.completeRoomUnblock).toHaveBeenCalledTimes(1);
     await f.reconcile(); expect(f.overwrite()).toBeUndefined();
   });
+
+  describe('I1 departure receipts across final SQL', () => {
+    const occupant = '32345678901234567';
+    const depart = (f: ReturnType<typeof roomModerationFixture>, memberId: string, returns: boolean) => {
+      f.leave(memberId); f.coordinator.recordDeparture(f.guild.id, f.channel.id, memberId, false);
+      if (returns) { f.join(memberId); f.coordinator.recordArrival(f.guild.id, f.channel.id, memberId); }
+    };
+
+    it.each([
+      { kind: 'block', returns: false }, { kind: 'block', returns: true },
+      { kind: 'unblock', returns: false }, { kind: 'unblock', returns: true },
+    ] as const)('quarantines $kind result on departure in the final owner SQL read (return=$returns)', async ({ kind, returns }) => {
+      const f = roomModerationFixture(); f.state().room.isLocked = true;
+      const block = kind === 'unblock' ? f.seedBlock() : undefined;
+      const memberId = kind === 'unblock' ? OTHER : occupant;
+      if (kind === 'block') f.join(occupant);
+      let published = false; let confirmation = false; let injected = false;
+      f.publishLocked.mockImplementationOnce(async () => { published = true; });
+      const snapshot = f.gateway.snapshot.bind(f.gateway);
+      vi.spyOn(f.gateway, 'snapshot').mockImplementation(async id => {
+        const live = await snapshot(id);
+        // Arm only AFTER the final owned snapshot was captured, not before it.
+        if (published && !injected) { expect(live!.members.some(member => member.memberDiscordId === memberId)).toBe(true); confirmation = true; }
+        return live;
+      });
+      const read = f.store.read.getMockImplementation()!;
+      f.store.read.mockImplementation(async id => {
+        const state = await read(id);
+        if (confirmation && !injected) {
+          expect(f.overwrite(memberId)!.allow.has(P.Connect)).toBe(true);
+          injected = true; depart(f, memberId, returns);
+        }
+        return state;
+      });
+      const action = kind === 'unblock' ? f.service.unblock(f.actor(), block!.id, f.gateway) : f.service.block(f.actor(), OTHER, f.gateway);
+      await expect(action).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+      expect(injected).toBe(true); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+      expect(f.publishLocked).toHaveBeenCalledTimes(1); expect(f.http).toHaveBeenCalledTimes(kind === 'block' ? 1 : 0);
+      expect(f.state()).toMatchObject({ room: { ownerDiscordId: OWNER, controlVersion: 1 }, allowedMemberIds: [] });
+      expect(f.state().memberBlocks).toHaveLength(kind === 'block' ? 1 : 0);
+      expect(f.states.has(memberId)).toBe(returns);
+      expect(f.coordinator.pendingDepartures(f.guild.id, f.channel.id)).toMatchObject([
+        { memberId, ...(returns ? { returnedAt: expect.any(Date) } : {}) },
+      ]);
+      f.leave(memberId);
+      await f.reconcile();
+      expect(f.overwrite(memberId)).toBeUndefined(); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+      expect(f.publishLocked).toHaveBeenCalledTimes(1); expect(f.http).toHaveBeenCalledTimes(kind === 'block' ? 1 : 0);
+    });
+
+    it.each([
+      { window: 'final-confirmation', returns: false }, { window: 'final-confirmation', returns: true },
+      { window: 'post-finalize', returns: false }, { window: 'post-finalize', returns: true },
+    ] as const)('quarantines locked recovery on departure in $window SQL (return=$returns)', async ({ window, returns }) => {
+      const f = roomModerationFixture(); f.state().room.isLocked = true; f.seedBlock(OTHER, 'UNBLOCK_PENDING');
+      let confirmation = false; let injected = false;
+      const snapshot = f.gateway.snapshot.bind(f.gateway);
+      vi.spyOn(f.gateway, 'snapshot').mockImplementation(async id => {
+        const live = await snapshot(id);
+        if (f.events.includes('complete') && !injected) {
+          expect(live!.members.some(member => member.memberDiscordId === OTHER)).toBe(true); confirmation = true;
+        }
+        return live;
+      });
+      const read = f.store.read.getMockImplementation()!;
+      f.store.read.mockImplementation(async id => {
+        const state = await read(id);
+        if (!injected && (window === 'final-confirmation' ? confirmation : f.events.includes('complete'))) {
+          expect(f.overwrite()!.allow.has(P.Connect)).toBe(true);
+          injected = true; depart(f, OTHER, returns);
+        }
+        return state;
+      });
+      await expect(f.reconcile()).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+      expect(injected).toBe(true); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+      expect(f.state()).toMatchObject({ room: { ownerDiscordId: OWNER, controlVersion: 0 }, memberBlocks: [], allowedMemberIds: [] });
+      expect(f.store.completeRoomUnblock).toHaveBeenCalledTimes(1);
+      expect(f.publishLocked).not.toHaveBeenCalled(); expect(f.http).not.toHaveBeenCalled();
+      expect(f.states.has(OTHER)).toBe(returns);
+      f.leave(OTHER); await f.reconcile();
+      expect(f.overwrite()).toBeUndefined(); expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+      expect(f.store.completeRoomUnblock).toHaveBeenCalledTimes(1);
+      expect(f.publishLocked).not.toHaveBeenCalled(); expect(f.http).not.toHaveBeenCalled();
+    });
+
+    it('allows the blocked target removal receipt without invalidating other projected occupants', async () => {
+      const f = roomModerationFixture(); f.state().room.isLocked = true; f.join(occupant);
+      f.http.mockImplementationOnce(async id => { depart(f, id, false); });
+      await expect(f.service.block(f.actor(), OTHER, f.gateway)).resolves.toMatchObject({ kind: 'blocked', removedFromRoom: true });
+      expect(f.access.isUncertain(f.state().room.id)).toBe(false); expect(f.http).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the quarantined read-only list independent of other occupant continuity', async () => {
+      const f = roomModerationFixture(); const block = f.seedBlock(); f.access.markUncertain(f.state().room.id);
+      let confirmation = false;
+      const snapshot = f.gateway.snapshot.bind(f.gateway);
+      vi.spyOn(f.gateway, 'snapshot').mockImplementationOnce(async id => { const live = await snapshot(id); confirmation = true; return live; });
+      const read = f.store.read.getMockImplementation()!;
+      f.store.read.mockImplementation(async id => {
+        const state = await read(id); if (confirmation) { confirmation = false; depart(f, OTHER, false); } return state;
+      });
+      await expect(f.service.list(f.actor(), f.gateway)).resolves.toEqual([block]);
+      expect(f.access.isUncertain(f.state().room.id)).toBe(true); expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
+      expect(f.publishLocked).not.toHaveBeenCalled(); expect(f.http).not.toHaveBeenCalled();
+    });
+  });
 });
