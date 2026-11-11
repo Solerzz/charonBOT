@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CallPrivateWorkspace, type CallWorkspaceDelivery, type CallWorkspaceView } from '../../../../src/modules/calls/call-workspace.js';
 import type { CallPanelPayload } from '../../../../src/modules/calls/call-panel.view.js';
 import type { RoomActor, RoomState } from '../../../../src/modules/calls/room.types.js';
+import type { ModerationSelection } from '../../../../src/modules/calls/call-moderation.view.js';
 import { deferred, room } from './call.fixtures.js';
 
 const actor: RoomActor = { roomId: room.id, guildDiscordId: room.guildDiscordId, memberDiscordId: room.ownerDiscordId!, controlVersion: 0 };
@@ -17,6 +18,217 @@ function delivery(messageId = 'private-1', expiresAt = 900_000) {
 
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(0); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+
+const selectionA: ModerationSelection = { id: '123e4567-e89b-42d3-a456-426614174000', kind: 'block', memberId: '72345678901234567' };
+const selectionB: ModerationSelection = { id: '323e4567-e89b-42d3-a456-426614174000', kind: 'unblock', blockId: '423e4567-e89b-42d3-a456-426614174000' };
+const confirmation = (selection: ModerationSelection = selectionA): CallWorkspaceView => ({ kind: 'moderation-confirm', selection, payload: payload(selection.id) });
+const moderation: CallWorkspaceView = { kind: 'moderation', payload: payload('moderation') };
+const read = (workspace: CallPrivateWorkspace, messageId = 'private-1', id = selectionA.id) => workspace.readModerationSelection(actor.roomId, actor.guildDiscordId, actor.memberDiscordId, messageId, id);
+
+describe('moderation selection delivery binding (not authorization)', () => {
+  it('requires current UUID, exact message, guild, room, member and active lifetime; consumes once synchronously', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    expect(read(workspace)).toEqual({ actor, selection: selectionA });
+    expect(read(workspace, 'wrong')).toBeNull(); expect(read(workspace, first.messageId, selectionB.id)).toBeNull();
+    for (const [roomId, guildId, memberId] of [['wrong', actor.guildDiscordId, actor.memberDiscordId], [actor.roomId, 'wrong', actor.memberDiscordId], [actor.roomId, actor.guildDiscordId, 'wrong']]) {
+      expect(workspace.readModerationSelection(roomId!, guildId!, memberId!, first.messageId, selectionA.id)).toBeNull();
+    }
+    expect(workspace.consumeModerationSelection({ ...actor, controlVersion: 1 }, first.messageId, selectionA.id)).toBeNull();
+    expect(workspace.consumeModerationSelection(actor, first.messageId, selectionA.id)).toEqual(selectionA);
+    expect(workspace.consumeModerationSelection(actor, first.messageId, selectionA.id)).toBeNull(); expect(read(workspace)).toBeNull();
+    await workspace.stop();
+  });
+
+  it.each([moderation, access, target, pending('transfer'), confirmation(selectionB)])('invalidates replaced confirmation before any queued edit ($kind)', async next => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    const showing = workspace.show(actor, next, async () => first);
+    expect(read(workspace)).toBeNull(); await showing;
+    await workspace.stop();
+  });
+
+  it('keeps pending transfer priority over moderation and fences late private errors', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    await workspace.show(actor, pending('new-transfer'), async () => first);
+    await workspace.show(actor, confirmation(selectionB), async () => first);
+    expect(read(workspace, first.messageId, selectionB.id)).toBeNull();
+    expect(await workspace.editFailure(actor, first.messageId, { ...payload('old-error'), content: 'error' }, null)).toBe(false);
+    expect(first.edit).toHaveBeenLastCalledWith(payload('new-transfer'));
+    await workspace.stop();
+  });
+
+  it('cancel/page and reopening the same target with a new UUID never revive the old confirmation', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery(); const create = vi.fn(async () => first);
+    await workspace.show(actor, confirmation(), create);
+    await workspace.show(actor, moderation, create);
+    expect(read(workspace)).toBeNull();
+    const reopened = { ...selectionA, id: selectionB.id };
+    await workspace.show(actor, confirmation(reopened), create);
+    expect(read(workspace)).toBeNull();
+    expect(read(workspace, first.messageId, selectionB.id)?.selection).toEqual(reopened);
+    await workspace.show(actor, { kind: 'moderation', payload: payload('page-1') }, create);
+    expect(read(workspace, first.messageId, selectionB.id)).toBeNull(); expect(create).toHaveBeenCalledOnce();
+    await workspace.stop();
+  });
+
+  it('does not expose pending create and expires exactly at the native handle deadline without public-click refresh', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery(); const entered = deferred(); const release = deferred();
+    const showing = workspace.show(actor, confirmation(), async () => { entered.resolve(); await release.promise; return first; });
+    await entered.promise; expect(read(workspace)).toBeNull(); release.resolve(); await showing;
+    await vi.advanceTimersByTimeAsync(899_999); await workspace.show(actor, confirmation(), async () => first);
+    expect(read(workspace)).not.toBeNull(); await vi.advanceTimersByTimeAsync(1);
+    expect(read(workspace)).toBeNull(); expect(workspace.consumeModerationSelection(actor, first.messageId, selectionA.id)).toBeNull();
+    await workspace.stop();
+  });
+
+  it('returns defensive snapshots and cannot restore a selection after owner A to B to A', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery(); const input = { ...selectionA };
+    await workspace.show(actor, confirmation(input), async () => first);
+    input.id = selectionB.id;
+    const selected = read(workspace)!; selected.actor.controlVersion = 99; selected.selection.id = selectionB.id;
+    expect(read(workspace)).toEqual({ actor, selection: selectionA });
+    const next = state(); next.room.ownerDiscordId = 'B'; next.room.controlVersion = 1;
+    await workspace.reconcile(actor.roomId, next);
+    next.room.ownerDiscordId = actor.memberDiscordId; next.room.controlVersion = 2;
+    await workspace.reconcile(actor.roomId, next);
+    await workspace.show({ ...actor, controlVersion: 2 }, moderation, async () => delivery('private-2'));
+    expect(read(workspace)).toBeNull(); await workspace.stop();
+  });
+});
+
+describe('moderation mutation generation replacement', () => {
+  const after = { ...actor, controlVersion: 1 };
+  it('reuses a consumed selection for a confirmed idempotent result in the same epoch, without replaying it', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    expect(workspace.consumeModerationSelection(actor, first.messageId, selectionA.id)).toEqual(selectionA);
+    expect(await workspace.replaceAfterMutation(actor, actor, first, moderation)).toBe(true);
+    expect(first.edit).toHaveBeenCalledExactlyOnceWith(moderation.payload);
+    expect(await workspace.replaceAfterMutation(actor, actor, first, moderation)).toBe(false);
+    expect(first.deactivate).toHaveBeenCalledOnce();
+    await workspace.show(actor, access, async () => delivery('unexpected'));
+    expect(first.edit).toHaveBeenLastCalledWith(access.payload); await workspace.stop();
+  });
+
+  it('keeps expiry scheduled while rebind waits for suspended retirement', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    const entered = deferred(); const release = deferred();
+    first.deactivate.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    const replacing = workspace.replaceAfterMutation(actor, after, first, moderation); await entered.promise;
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(900_000);
+    release.resolve(); expect(await replacing).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled(); await workspace.stop();
+  });
+
+  it('expires retained retirement lineage on the existing single timer, even without another click', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    await workspace.reconcile(actor.roomId, null);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(900_000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(await workspace.replaceAfterMutation(actor, after, { ...first, expiresAt: 1_800_000 }, moderation)).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled(); await workspace.stop();
+  });
+
+  it('rebinds after reconciliation on the same message and retains its native expiry', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    workspace.consumeModerationSelection(actor, first.messageId, selectionA.id);
+    const next = state(); next.room.controlVersion = 1;
+    await workspace.reconcile(actor.roomId, next);
+    await vi.advanceTimersByTimeAsync(800_000);
+    expect(await workspace.replaceAfterMutation(actor, after, { ...first, expiresAt: 1_700_000 }, moderation)).toBe(true);
+    expect(first.edit).toHaveBeenLastCalledWith(moderation.payload);
+    expect(read(workspace)).toBeNull();
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(await workspace.replaceAfterMutation(after, { ...after, controlVersion: 2 }, first, moderation)).toBe(false);
+    await workspace.stop();
+  });
+
+  it('drains old edits and retirement before writing the result', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery(); const events: string[] = [];
+    await workspace.show(actor, confirmation(), async () => first);
+    const entered = deferred(); const release = deferred();
+    first.edit.mockImplementationOnce(async () => { entered.resolve(); await release.promise; events.push('old-edit'); return { id: first.messageId }; });
+    first.deactivate.mockImplementationOnce(async () => { events.push('retire'); });
+    const editing = workspace.show(actor, moderation, async () => first); const rejected = expect(editing).rejects.toMatchObject({ code: 'STALE_CONTROLS' }); await entered.promise;
+    const reconciling = workspace.reconcile(actor.roomId, null);
+    first.edit.mockImplementationOnce(async () => { events.push('result'); return { id: first.messageId }; });
+    const replacing = workspace.replaceAfterMutation(actor, after, first, moderation);
+    await Promise.resolve(); expect(events).toEqual([]);
+    release.resolve(); await rejected; await reconciling; expect(await replacing).toBe(true);
+    expect(events).toEqual(['old-edit', 'retire', 'result']); await workspace.stop();
+  });
+
+  it.each(['owner', 'guild', 'room', 'version', 'message', 'unknown'] as const)('rejects unsafe %s rebind without another delivery', async change => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    if (change !== 'unknown') await workspace.show(actor, confirmation(), async () => first);
+    const changed = { ...after };
+    if (change === 'owner') changed.memberDiscordId = 'another';
+    if (change === 'guild') changed.guildDiscordId = 'another';
+    if (change === 'room') changed.roomId = 'another';
+    if (change === 'version') changed.controlVersion = 0;
+    expect(await workspace.replaceAfterMutation(actor, changed, change === 'message' ? delivery('wrong') : first, moderation)).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled(); await workspace.stop();
+  });
+
+  it('never overwrites a newer session opened while retirement is suspended', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    const entered = deferred(); const release = deferred();
+    first.deactivate.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    const replacing = workspace.replaceAfterMutation(actor, after, first, moderation); await entered.promise;
+    const second = delivery('new-private'); await workspace.show(after, pending('new-transfer'), async () => second);
+    release.resolve(); expect(await replacing).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled(); expect(second.edit).not.toHaveBeenCalled(); expect(second.deactivate).not.toHaveBeenCalled();
+    expect(await workspace.editPending(after, 'new-transfer', payload('current'))).toBe(true); await workspace.stop();
+  });
+
+  it('does not resurrect an older generation even after a newer session has itself retired', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    await workspace.reconcile(actor.roomId, null);
+    const second = delivery('new-private'); await workspace.show(after, moderation, async () => second);
+    await workspace.reconcile(actor.roomId, null);
+    expect(await workspace.replaceAfterMutation(actor, { ...after, controlVersion: 2 }, first, moderation)).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled(); await workspace.stop();
+  });
+
+  it('refuses replacement during stop and never replaces an active transfer', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, pending('transfer'), async () => first);
+    expect(await workspace.replaceAfterMutation(actor, after, first, moderation)).toBe(false);
+    expect(first.deactivate).not.toHaveBeenCalled(); await workspace.stop();
+    expect(await workspace.replaceAfterMutation(actor, after, first, moderation)).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled();
+  });
+
+  it('fences concurrent replacements and retirement after a suspended result edit', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    const entered = deferred(); const release = deferred();
+    first.edit.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { id: first.messageId }; });
+    const replacing = workspace.replaceAfterMutation(actor, after, first, moderation); await entered.promise;
+    expect(await workspace.replaceAfterMutation(actor, after, first, moderation)).toBe(false);
+    const reconciling = workspace.reconcile(actor.roomId, null);
+    const second = delivery('private-new'); await workspace.show({ ...after, controlVersion: 2 }, moderation, async () => second);
+    release.resolve(); expect(await replacing).toBe(false); await reconciling;
+    expect(second.deactivate).not.toHaveBeenCalled(); await workspace.stop();
+  });
+
+  it('returns false on uncertain result edit without creating a follow-up', async () => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    first.edit.mockRejectedValueOnce(new Error('private-token-sentinel'));
+    expect(await workspace.replaceAfterMutation(actor, after, first, moderation)).toBe(false);
+    expect(read(workspace)).toBeNull(); await workspace.stop();
+  });
+});
 
 describe('CallPrivateWorkspace delivery lifecycle (not room authorization)', () => {
   it('reuses selections until the original delivery expires, not the last public click', async () => {

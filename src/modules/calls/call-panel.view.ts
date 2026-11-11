@@ -52,7 +52,7 @@ export function buildCallPanel(input: CallPanelInput): CallPanelPayload {
   const actions = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(button('lock', room.isLocked ? 'Destrancar' : 'Trancar'), button('visibility', room.visibility === 'PRIVATE' ? 'Mostrar' : 'Ocultar'), button('rename', 'Renomear')),
     new ActionRowBuilder<ButtonBuilder>().addComponents(button('limit', 'Alterar limite'), button('access', 'Autorizados'), button('transfer', 'Transferir posse')),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(button('claim', 'Assumir sala')),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(button('claim', 'Assumir sala'), button('moderation', 'Moderação')),
   ];
   return {
     embeds: [embed], components: actions,
