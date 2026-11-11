@@ -7,7 +7,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
 import { PrismaRoomStateRepository } from '../../src/modules/calls/room-state.repository.js';
 import { PrismaTemporaryRoomRepository } from '../../src/modules/calls/call.repository.js';
+import { RoomAccessService } from '../../src/modules/calls/room-access.service.js';
+import { RoomModerationService } from '../../src/modules/calls/room-moderation.service.js';
 import { deferred } from '../unit/modules/calls/call.fixtures.js';
+import { OWNER, OTHER, roomModerationFixture } from '../unit/modules/calls/room-moderation.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
@@ -28,6 +31,94 @@ async function fixture() {
 }
 
 describe('durable room moderation', () => {
+  integrationTest('service recovers lost SQL stage and finalize replies without replaying removal', async () => {
+    const f = await fixture(); const native = roomModerationFixture();
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: {
+        guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER,
+      } });
+      const actor = { ...f.actor, guildDiscordId: native.guild.id, memberDiscordId: OWNER };
+      const access = new RoomAccessService(f.store, native.coordinator);
+      const service = new RoomModerationService({ store: f.store, coordinator: native.coordinator, access,
+        invalidateWorkspace: native.invalidateWorkspace, publishLocked: native.publishLocked,
+        afterRemovalLocked: async () => {
+          const snapshot = (await native.gateway.snapshot(native.channel.id))!;
+          await f.store.syncPresence(f.roomId, snapshot.members, new Date(), false);
+        },
+      });
+      await f.store.setAllowed(f.roomId, 0, OTHER, true);
+      const stage = f.store.stageRoomBlock.bind(f.store);
+      vi.spyOn(f.store, 'stageRoomBlock').mockImplementationOnce(async (...args) => { await stage(...args); throw new Error('lost stage reply'); });
+      await service.block(actor, OTHER, native.gateway).catch(error => { expect(error).toMatchObject({ code: 'MODERATION_INCOMPLETE' }); });
+      const blocked = (await f.store.read(f.roomId))!;
+      expect(blocked).toMatchObject({ allowedMemberIds: [], memberBlocks: [expect.objectContaining({ memberDiscordId: OTHER, state: 'BLOCKED' })] });
+      expect(native.http).toHaveBeenCalledTimes(1); expect(native.states.has(OTHER)).toBe(false);
+      const unblock = f.store.stageRoomUnblock.bind(f.store);
+      vi.spyOn(f.store, 'stageRoomUnblock').mockImplementationOnce(async (...args) => { await unblock(...args); throw new Error('lost unblock stage reply'); });
+      const complete = f.store.completeRoomUnblock.bind(f.store);
+      vi.spyOn(f.store, 'completeRoomUnblock').mockImplementationOnce(async (...args) => { await complete(...args); throw new Error('lost finalize reply'); });
+      await expect(service.unblock({ ...actor, controlVersion: blocked.room.controlVersion }, blocked.memberBlocks[0]!.id, native.gateway)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+      expect(access.isUncertain(f.roomId)).toBe(true);
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [], allowedMemberIds: [] });
+      await native.coordinator.room(native.guild.id, native.channel.id, () => service.reconcileLocked(f.roomId, native.gateway));
+      expect(access.isUncertain(f.roomId)).toBe(false); expect(native.http).toHaveBeenCalledTimes(1);
+      expect((await f.store.read(f.roomId))!.room.controlVersion).toBeGreaterThan(blocked.room.controlVersion);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('service performs no REST until an admitted late stage writer is fenced', async () => {
+    const f = await fixture(); const native = roomModerationFixture(); const observer = new Client({ connectionString: process.env.DIRECT_URL });
+    const locked = deferred<number>(); const admitted = deferred<number>(); const release = deferred();
+    let writer: Promise<unknown> | undefined; let action: Promise<unknown> | undefined;
+    try {
+      await observer.connect();
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER } });
+      const actor = { ...f.actor, guildDiscordId: native.guild.id, memberDiscordId: OWNER };
+      const access = new RoomAccessService(f.store, native.coordinator);
+      const service = new RoomModerationService({ store: f.store, coordinator: native.coordinator, access,
+        invalidateWorkspace: native.invalidateWorkspace, publishLocked: native.publishLocked, afterRemovalLocked: async () => {},
+      });
+      const transaction = f.client.$transaction.bind(f.client);
+      vi.spyOn(f.client, '$transaction')
+        .mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+          const result = await work(tx as unknown as typeof f.client);
+          locked.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+          await release.promise; return result;
+        })) as never)
+        .mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+          admitted.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+          return work(tx as unknown as typeof f.client);
+        })) as never);
+      const stage = f.store.stageRoomBlock.bind(f.store);
+      vi.spyOn(f.store, 'stageRoomBlock').mockImplementationOnce(async (...args) => {
+        writer = stage(...args); await locked.promise; throw new Error('transport failed while SQL still owns the row');
+      });
+      action = service.block(actor, OTHER, native.gateway);
+      // Attach rejection handling immediately while inspecting the blocked SQL.
+      const observed = action.then(result => ({ result }), error => ({ error }));
+      const writerPid = await locked.promise;
+      let timer: ReturnType<typeof setTimeout> | undefined; let fencePid: number;
+      try {
+        fencePid = await Promise.race([admitted.promise, new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('Fence was not admitted within 2000ms')), 2_000);
+        })]);
+      } finally { clearTimeout(timer); }
+      const deadline = performance.now() + 2_000;
+      let waiting = false;
+      do {
+        const row = (await observer.query<{ waiting: boolean }>(`SELECT wait_event_type='Lock' AND $2=ANY(pg_blocking_pids(pid)) AS waiting FROM pg_stat_activity WHERE pid=$1`, [fencePid, writerPid])).rows[0];
+        waiting = row?.waiting === true;
+      } while (!waiting && performance.now() < deadline);
+      expect(waiting).toBe(true);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toEqual([]);
+      expect(native.channel.permissionOverwrites.set).not.toHaveBeenCalled(); expect(native.http).not.toHaveBeenCalled();
+      release.resolve(); await writer;
+      expect(await observed).toMatchObject({ result: { kind: 'blocked', removedFromRoom: true } });
+      expect(native.http).toHaveBeenCalledTimes(1);
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [expect.objectContaining({ memberDiscordId: OTHER, state: 'BLOCKED' })], room: { controlVersion: 1 } });
+    } finally { release.resolve(); await writer?.catch(() => {}); await action?.catch(() => {}); await observer.end(); await f.cleanup(); }
+  }, 30_000);
+
   integrationTest('persists intent and removes allowlist atomically', async () => {
     const f = await fixture();
     try {
