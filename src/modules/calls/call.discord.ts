@@ -59,11 +59,8 @@ const botRoomPermissions = [
 ];
 
 export class DiscordCallGateway implements CallDiscordGateway {
-  private readonly rooms: DiscordRoomGateway;
-
-  constructor(private readonly guild: Guild, private readonly member: GuildMember) {
-    this.rooms = new DiscordRoomGateway(guild);
-  }
+  constructor(private readonly guild: Guild, private readonly member: GuildMember,
+    private readonly rooms: RoomDiscordGateway = new DiscordRoomGateway(guild)) {}
 
   snapshot(channelId: string) { return this.rooms.snapshot(channelId); }
   resolveMember(memberId: string) { return this.rooms.resolveMember(memberId); }

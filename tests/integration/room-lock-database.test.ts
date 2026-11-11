@@ -24,7 +24,8 @@ describe('independent room lock persistence', () => {
     const store = new PrismaRoomStateRepository(client); const f = roomSettingsFixture();
     const creatorId = randomUUID(); const roomId = randomUUID();
     const access = new RoomAccessService(store, f.coordinator);
-    const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: async () => {} });
+    const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: async () => {},
+      recoverRoomLocked: (id, gateway) => access.recoverLocked(id, gateway, async () => {}) });
     const actor = { ...f.actor(), roomId };
     try {
       await client.voiceCreator.create({ data: { id: creatorId, guildDiscordId: f.guild.id, creatorChannelDiscordId: randomUUID(), categoryDiscordId: randomUUID() } });
@@ -150,7 +151,8 @@ describe('independent room lock persistence', () => {
     const store = new PrismaRoomStateRepository(client); const f = roomSettingsFixture();
     const creatorId = randomUUID(); const roomId = randomUUID();
     const access = new RoomAccessService(store, f.coordinator);
-    const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: async () => {} });
+    const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: async () => {},
+      recoverRoomLocked: (id, gateway) => access.recoverLocked(id, gateway, async () => {}) });
     const actor = { ...f.actor(), roomId };
     try {
       await client.voiceCreator.create({ data: { id: creatorId, guildDiscordId: f.guild.id, creatorChannelDiscordId: randomUUID(), categoryDiscordId: randomUUID() } });

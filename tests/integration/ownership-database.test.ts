@@ -451,8 +451,9 @@ describe('room ownership database', () => {
     } });
     const access = new RoomAccessService(store, boundaries.coordinator);
     const changed: RoomState[] = [];
+    const onChangedLocked = async (id: string) => { changed.push((await f.store.read(id))!); };
     const controls = new RoomControlsService({ store, coordinator: boundaries.coordinator, access,
-      onChangedLocked: async (id) => { changed.push((await f.store.read(id))!); } });
+      onChangedLocked, recoverRoomLocked: (id, gateway) => access.recoverLocked(id, gateway, onChangedLocked) });
     return { ...boundaries, access, controls, changed,
       actor: (): RoomActor => ({ ...boundaries.actor(), roomId: f.first }) };
   }

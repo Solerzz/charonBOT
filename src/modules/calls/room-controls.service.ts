@@ -6,7 +6,7 @@ import { commitRoomMutation, currentOwnedRoom, safeRoomAction } from './room-mut
 import type { RoomStateRepository } from './room-state.repository.js';
 import { RoomActionError, type RoomActor, type RoomChanged, type RoomDiscordGateway, type RoomSettingsPatch, type RoomState } from './room.types.js';
 
-type Dependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; access: RoomAccessService; onChangedLocked: RoomChanged };
+type Dependencies = { store: RoomStateRepository; coordinator: RoomCoordinator; access: RoomAccessService; onChangedLocked: RoomChanged; recoverRoomLocked: RoomChanged };
 
 export class RoomControlsService {
   constructor(private readonly dependencies: Dependencies) {}
@@ -59,7 +59,7 @@ export class RoomControlsService {
       const initial = await store.read(actor.roomId);
       if (!initial || initial.room.guildDiscordId !== actor.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
       await coordinator.room(actor.guildDiscordId, initial.room.channelDiscordId, async () => {
-        await access.recoverLocked(actor.roomId, gateway, onChangedLocked);
+        await this.dependencies.recoverRoomLocked(actor.roomId, gateway);
         const { state } = await currentOwnedRoom(store, actor, gateway);
         if (state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         coordinator.assertContinuous(actor.guildDiscordId, state.room.channelDiscordId, [actor.memberDiscordId]);

@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { Client } from 'pg';
+import { Client as DiscordClient, DefaultRestOptions, type Guild } from 'discord.js';
+import { Response } from 'undici';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
@@ -9,7 +11,13 @@ import { PrismaRoomStateRepository } from '../../src/modules/calls/room-state.re
 import { PrismaTemporaryRoomRepository } from '../../src/modules/calls/call.repository.js';
 import { RoomAccessService } from '../../src/modules/calls/room-access.service.js';
 import { RoomModerationService } from '../../src/modules/calls/room-moderation.service.js';
-import { deferred } from '../unit/modules/calls/call.fixtures.js';
+import { createRoomRuntime } from '../../src/modules/calls/room.runtime.js';
+import { createLogger } from '../../src/core/logger/logger.js';
+import { CallService } from '../../src/modules/calls/call.service.js';
+import { DiscordCallGateway } from '../../src/modules/calls/call.discord.js';
+import type { GuildMember } from 'discord.js';
+import type { VoiceCreatorRepository } from '../../src/modules/setup/setup.repository.js';
+import { deferred, entry } from '../unit/modules/calls/call.fixtures.js';
 import { OWNER, OTHER, roomModerationFixture } from '../unit/modules/calls/room-moderation.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 
@@ -31,6 +39,97 @@ async function fixture() {
 }
 
 describe('durable room moderation', () => {
+  integrationTest.each([false, true])('empty close bypasses SQL quarantine and purges only confirmed CLOSED intent, initial deletion failure: %s', async failDeletion => {
+    const f = await fixture(); const native = roomModerationFixture();
+    const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));
+    const lifecycle = new PrismaTemporaryRoomRepository(f.client);
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER } });
+      await f.store.stageRoomBlock({ ...f.actor, guildDiscordId: native.guild.id, memberDiscordId: OWNER }, OTHER, 0n);
+      runtime.access.markUnsettled(f.roomId, 1);
+      const fence = vi.spyOn(runtime.store, 'settleAccess').mockRejectedValue(new Error('SQL fence unavailable'));
+      native.leave(OWNER); native.leave(OTHER);
+      if (failDeletion) native.channel.delete.mockRejectedValueOnce(new Error('native deletion unavailable'));
+      const service = new CallService({ findByChannel: async () => null } as unknown as VoiceCreatorRepository, lifecycle, runtime, createLogger({ level: 'silent' }));
+      const guild = native.guild as unknown as Guild;
+      const gateway = new DiscordCallGateway(guild, native.member as unknown as GuildMember, runtime.gatewayFor(guild));
+      const leave = () => service.handleVoiceTransition({ ...entry, oldChannelDiscordId: native.channel.id, newChannelDiscordId: null }, gateway);
+      await leave();
+      if (failDeletion) {
+        expect(await f.store.read(f.roomId)).toMatchObject({ room: { status: 'CLOSING' }, memberBlocks: [expect.objectContaining({ state: 'BLOCKED' })] });
+        expect(runtime.access.isUncertain(f.roomId)).toBe(true);
+        await leave();
+      }
+      expect(await f.store.read(f.roomId)).toMatchObject({ room: { status: 'CLOSED', ownerDiscordId: null }, memberBlocks: [] });
+      expect(runtime.access.isUncertain(f.roomId)).toBe(false); expect(fence).not.toHaveBeenCalled();
+      const deletions = native.channel.delete.mock.calls.length; await leave();
+      expect(native.channel.delete).toHaveBeenCalledTimes(deletions);
+      expect((await f.store.read(f.otherId))!.room.status).toBe('ACTIVE');
+    } finally { await runtime.stop(); await f.cleanup(); }
+  });
+
+  integrationTest('fresh runtimes recover durable intent with setup off and a new room never inherits the closed room restriction', async () => {
+    const f = await fixture(); const native = roomModerationFixture();
+    const discord = new DiscordClient({ intents: [] }); discord.token = 'test-only';
+    Object.assign(native.guild, { client: discord });
+    const guild = native.guild as unknown as Guild;
+    const http = vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(async url => {
+      native.leave(String(url).split('/').at(-1)!);
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    const logger = createLogger({ level: 'silent' });
+    const first = createRoomRuntime(f.client, logger); const second = createRoomRuntime(f.client, logger);
+    const fresh = createRoomRuntime(f.client, logger); const newRoomId = randomUUID();
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER } });
+      const actor = { ...f.actor, guildDiscordId: guild.id, memberDiscordId: OWNER };
+      await f.store.setAllowed(f.roomId, 0, OTHER, true);
+      await f.store.stageRoomBlock(actor, OTHER, 0n);
+      const pending = (await f.store.stageRoomBlock({ ...actor, controlVersion: 1 }, '10000000000000001', 0n))!.block;
+      await f.store.stageRoomUnblock({ ...actor, controlVersion: 2 }, pending.id);
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      await f.client.temporaryRoom.update({ where: { id: f.otherId }, data: { status: 'CLOSED' } });
+      await f.client.roomMemberBlock.create({ data: { roomId: f.otherId, memberDiscordId: OTHER } });
+      await first.start(async () => guild); await first.stop();
+      expect(await f.store.read(f.roomId)).toMatchObject({ controlsEnabled: false, allowedMemberIds: [], memberBlocks: [expect.objectContaining({ memberDiscordId: OTHER, state: 'BLOCKED' })] });
+      expect((await f.store.read(f.otherId))!.memberBlocks).toEqual([]);
+      expect(native.states.has(OTHER)).toBe(false); expect(http).toHaveBeenCalledOnce();
+      native.join(OTHER);
+      await second.start(async () => guild); await second.stop();
+      expect(http).toHaveBeenCalledTimes(2); expect(native.states.has(OTHER)).toBe(false);
+      const lifecycle = new PrismaTemporaryRoomRepository(f.client);
+      await lifecycle.beginClosing(f.roomId); await lifecycle.markClosed(f.roomId);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toEqual([]);
+      const newChannelId = '73345678901234567';
+      native.channel.id = newChannelId; native.state().room.channelDiscordId = newChannelId;
+      native.join(OWNER);
+      await f.client.temporaryRoom.create({ data: { id: newRoomId, voiceCreatorId: f.creatorId, guildDiscordId: guild.id,
+        channelDiscordId: newChannelId, name: 'New room', ownerDiscordId: OWNER, status: 'ACTIVE' } });
+      native.join(OTHER); await fresh.start(async () => guild);
+      expect((await f.store.read(newRoomId))!.memberBlocks).toEqual([]);
+      expect(native.states.has(OTHER)).toBe(true); expect(http).toHaveBeenCalledTimes(2);
+      // Repeated terminalization remains safe and cannot touch the replacement.
+      await lifecycle.markClosed(f.roomId);
+      expect((await f.store.read(newRoomId))!.room.status).toBe('ACTIVE');
+    } finally {
+      await Promise.all([first.stop(), second.stop(), fresh.stop()]); http.mockRestore();
+      await f.client.temporaryRoom.deleteMany({ where: { id: newRoomId } }); await f.cleanup();
+    }
+  });
+
+  integrationTest.each(['BLOCKED', 'UNBLOCK_PENDING'] as const)('SQL priority excludes %s members without preventing safe revocation', async state => {
+    const f = await fixture();
+    try {
+      const block = (await f.store.stageRoomBlock(f.actor, 'guest', 0n))!.block;
+      if (state === 'UNBLOCK_PENDING') await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, block.id);
+      const version = state === 'BLOCKED' ? 1 : 2;
+      await f.store.changeOwner(f.roomId, version, 'owner', null);
+      expect(await f.store.savePriority(f.roomId, version + 1, 'guest', new Date(Date.now() + 300_000))).toBe(false);
+      expect(await f.store.savePriority(f.roomId, version + 1, null, null)).toBe(true);
+      expect(await f.store.savePriority(f.roomId, version + 1, 'next', new Date(Date.now() + 300_000))).toBe(true);
+    } finally { await f.cleanup(); }
+  });
+
   integrationTest('service recovers lost SQL stage and finalize replies without replaying removal', async () => {
     const f = await fixture(); const native = roomModerationFixture();
     try {

@@ -103,7 +103,8 @@ export class PrismaRoomStateRepository implements RoomStateRepository {
 
   async savePriority(roomId: string, version: number, memberId: string | null, expiresAt: Date | null): Promise<boolean> {
     const result = await measureCallStage('persist', () => this.prisma.temporaryRoom.updateMany({
-      where: { id: roomId, controlVersion: version, status: 'ACTIVE', ownerDiscordId: null },
+      where: { id: roomId, controlVersion: version, status: 'ACTIVE', ownerDiscordId: null,
+        ...(memberId === null ? {} : { memberBlocks: { none: { memberDiscordId: memberId } } }) },
       data: { priorityMemberDiscordId: memberId, priorityExpiresAt: expiresAt },
     }));
     return result.count === 1;

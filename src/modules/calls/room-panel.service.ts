@@ -1,4 +1,5 @@
 import type { Logger } from 'pino';
+import type { Guild } from 'discord.js';
 
 import { createLogger } from '../../core/logger/logger.js';
 import { buildCallPanel } from './call-panel.view.js';
@@ -82,7 +83,9 @@ export class RoomPanelService {
     }
   }
 
-  async synchronizeCreator(creatorId: string, resolveGuild: RoomGuildResolver): Promise<{ synced: number; failed: number }> {
+  async synchronizeCreator(creatorId: string, resolveGuild: RoomGuildResolver,
+    synchronizeRoom: (roomId: string, guild: Guild) => Promise<void> = (roomId, guild) => this.synchronizeLocked(roomId, new DiscordRoomGateway(guild)),
+  ): Promise<{ synced: number; failed: number }> {
     const { store, coordinator } = this.dependencies;
     const counts = { synced: 0, failed: 0 };
     const rooms = await store.listForCreator(creatorId).catch(() => {
@@ -94,7 +97,7 @@ export class RoomPanelService {
         await coordinator.room(room.guildDiscordId, room.channelDiscordId, async () => {
           const guild = await resolveGuild(room.guildDiscordId);
           if (!guild || guild.id !== room.guildDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
-          await this.synchronizeLocked(room.id, new DiscordRoomGateway(guild));
+          await synchronizeRoom(room.id, guild);
         });
         counts.synced++;
       } catch (error) {
