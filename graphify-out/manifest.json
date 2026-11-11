@@ -936,9 +936,9 @@
     "semantic_hash": ""
   },
   "src/modules/calls/room-moderation.service.ts": {
-    "mtime": 1794424275.2997582,
-    "seen": 1794424296.1392572,
-    "ast_hash": "9b21a81daffbf1a4e98c4d59755cef59",
+    "mtime": 1794426039.328076,
+    "seen": 1794426067.57517,
+    "ast_hash": "178ee5be7e90d56f92cf4b794d4f4912",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-moderation.fixtures.ts": {
@@ -948,9 +948,9 @@
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-moderation.service.test.ts": {
-    "mtime": 1794424264.4742396,
-    "seen": 1794424296.152357,
-    "ast_hash": "c94fb242986ade8512b4284858a7bf98",
+    "mtime": 1794426019.5393462,
+    "seen": 1794426067.5910196,
+    "ast_hash": "486a8638ee0bf371449ade56fb0a1afb",
     "semantic_hash": ""
   },
   "tests/unit/modules/calls/room-moderation.runtime.test.ts": {
@@ -978,15 +978,15 @@
     "semantic_hash": ""
   },
   "docs/releases/v0.4.0.md": {
-    "mtime": 1794424486.2821412,
-    "seen": 1794424871.7870646,
-    "ast_hash": "c021a77135ca2046615ac3fe1cf8b7e5",
+    "mtime": 1794426522.9059217,
+    "seen": 1794426562.9218175,
+    "ast_hash": "e2b4972d5bfcb3756725830a404b9a22",
     "semantic_hash": ""
   },
   "docs/validation/2026-11-10-moderacao-dono.md": {
-    "mtime": 1794424486.2811255,
-    "seen": 1794424871.79057,
-    "ast_hash": "f42d8b7aab9c397ddf6beefc461593c2",
+    "mtime": 1794426522.9059217,
+    "seen": 1794426562.9248195,
+    "ast_hash": "b740cc28cce5a8b5a0c0bc13f88d83fb",
     "semantic_hash": ""
   },
   "package-lock.json": {

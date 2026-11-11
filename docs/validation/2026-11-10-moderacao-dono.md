@@ -59,11 +59,14 @@ ficaram RED com `633318698653696` bits restantes; após a correção deixam some
 **0** ou **4096** (`SendTTSMessages` externo original), sem registro de bloqueio,
 sem quarentena e sem restaurar allowlist. O alvo permanece fora da call.
 
-Gates NB1 reexecutados: **125/125** no foco serviço/runtime/handler, **1.520 comuns**
-(71 opt-in ignorados), typecheck/build e whitespace aprovados. PostgreSQL está
-parado e **não foi usado nesta correção**; as 71 integrações e os checks de
-migration/RLS abaixo são da onda anterior, não evidência SQL pós-NB1. Integrações
-finais e revisão independente ficam a cargo do controller. Sem schema/deploy novo.
+Gates NB1 do implementador: **125/125** no foco serviço/runtime/handler,
+**1.520 comuns** (71 opt-in ignorados), typecheck/build e whitespace aprovados.
+Revisão independente: **NB1 resolvido, nenhuma nova quebra identificada**.
+O controller repetiu os gates sobre `f0dd86d`: **1.520 comuns**, **71/71 integrações
+PostgreSQL seriais**, typecheck/build e whitespace aprovados. Migrate status
+confirmou seis migrations atualizadas; deploy local idempotente, sem pendências.
+Não houve alteração de schema nem migration nova. As contagens da seção seguinte
+permanecem históricas da onda anterior, não substituem esta execução pós-NB1.
 
 ## Gates observados — onda I1–I4/M1 anterior a NB1
 
