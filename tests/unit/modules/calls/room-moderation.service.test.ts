@@ -5,6 +5,32 @@ import { deferred } from './call.fixtures.js';
 import { OWNER, OTHER, roomModerationFixture } from './room-moderation.fixtures.js';
 
 describe('durable owner moderation', () => {
+  it.each([0n, P.SendTTSMessages])('NB1 preserves only original external denies through pending → reblock → unblock (%s)', async externalDeny => {
+    const f = roomModerationFixture(); f.leave(OTHER);
+    f.state().room.isLocked = false; f.state().room.visibility = 'PUBLIC'; f.state().allowedMemberIds = [OTHER];
+    if (externalDeny) f.channel.permissionOverwrites.cache.set(OTHER, {
+      id: OTHER, type: OverwriteType.Member, allow: new PermissionsBitField(), deny: new PermissionsBitField(externalDeny),
+    });
+    await f.service.block(f.actor(), OTHER, f.gateway);
+    const original = structuredClone(f.state().memberBlocks[0]!);
+    expect(original.deniedBefore).toBe(externalDeny);
+    expect(f.overwrite()!.deny.has([P.Connect, P.SendMessages, P.SendTTSMessages, P.SendVoiceMessages, P.SendPolls])).toBe(true);
+    // Persist UNBLOCK_PENDING, but fail before the native overwrite is changed.
+    f.channel.permissionOverwrites.set.mockRejectedValueOnce(new Error('unblock projection unavailable'));
+    await expect(f.service.unblock(f.actor(), original.id, f.gateway)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.state().memberBlocks).toMatchObject([{ id: original.id, state: 'UNBLOCK_PENDING', deniedBefore: externalDeny }]);
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+    expect(f.overwrite()!.deny.has([P.Connect, P.SendMessages, P.SendTTSMessages, P.SendVoiceMessages, P.SendPolls])).toBe(true);
+    await expect(f.service.block(f.actor(), OTHER, f.gateway)).resolves.toMatchObject({ kind: 'blocked', removedFromRoom: false, actor: { controlVersion: 3 } });
+    const rebound = structuredClone(f.state().memberBlocks[0]!);
+    expect(rebound.id).not.toBe(original.id);
+    await expect(f.service.unblock(f.actor(), rebound.id, f.gateway)).resolves.toMatchObject({ kind: 'unblocked', removedFromRoom: false, actor: { controlVersion: 4 } });
+    expect(f.overwrite()?.deny.bitfield ?? 0n).toBe(externalDeny);
+    expect(rebound.deniedBefore).toBe(externalDeny);
+    expect(f.state().memberBlocks).toEqual([]); expect(f.state().allowedMemberIds).toEqual([]);
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false); expect(f.http).not.toHaveBeenCalled();
+  });
+
   it('reports the removal already confirmed during pre-stage duplicate recovery', async () => {
     const f = roomModerationFixture(); const block = structuredClone(f.seedBlock());
     await expect(f.service.block(f.actor(), OTHER, f.gateway)).resolves.toMatchObject({ kind: 'blocked', removedFromRoom: true, actor: { controlVersion: 0 } });

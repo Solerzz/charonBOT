@@ -46,7 +46,26 @@ retém estado durável, quarentena e uma única requisição, sem falso sucesso.
 As integrações existentes de finalização, fence de writer tardio, recuperação,
 reinício/setup off, RLS e isolamento entre salas também passaram.
 
-## Gates observados
+## Correção restrita NB1 — 2026-11-11
+
+`deniedBefore` agora é capturado **depois** da recuperação composta e antes das
+últimas verificações de alvo/permissões/ator/epoch. A recuperação pode concluir
+UNBLOCK_PENDING e remover denies do bot; sua máscara anterior não pode virar
+proveniência externa do novo bloqueio. Nenhuma negação externa é zerada à força.
+
+Dois testes compostos com serviços/projeção reais e SQL/HTTP stateful exercitam
+block → falha nativa de unblock já persistido → reblock → unblock final. Ambos
+ficaram RED com `633318698653696` bits restantes; após a correção deixam somente
+**0** ou **4096** (`SendTTSMessages` externo original), sem registro de bloqueio,
+sem quarentena e sem restaurar allowlist. O alvo permanece fora da call.
+
+Gates NB1 reexecutados: **125/125** no foco serviço/runtime/handler, **1.520 comuns**
+(71 opt-in ignorados), typecheck/build e whitespace aprovados. PostgreSQL está
+parado e **não foi usado nesta correção**; as 71 integrações e os checks de
+migration/RLS abaixo são da onda anterior, não evidência SQL pós-NB1. Integrações
+finais e revisão independente ficam a cargo do controller. Sem schema/deploy novo.
+
+## Gates observados — onda I1–I4/M1 anterior a NB1
 
 Onda final I1–I4/M1, retomada em 2026-11-11: resultados abaixo reexecutados
 sobre as correções, não reutilizados dos gates Task 6 (1.494 comuns/71 SQL).

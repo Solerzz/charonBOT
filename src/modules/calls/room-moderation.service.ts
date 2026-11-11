@@ -60,7 +60,6 @@ export class RoomModerationService {
         if (kind === 'blocked') {
           this.assertTarget(state, targetId, await safeRoomAction(() => gateway.resolveModerationTarget(targetId), 'DISCORD_FAILURE'));
           await safeRoomAction(() => gateway.assertModerationPermissions(channelId, targetId), 'DISCORD_FAILURE');
-          deniedBefore = moderationDeniedBefore(await safeRoomAction(() => gateway.readAccess(channelId), 'DISCORD_FAILURE'), targetId);
         }
         // Never infer a rollback from absence while a SQL writer can still run.
         await access.settleLocked(actor.roomId);
@@ -74,6 +73,9 @@ export class RoomModerationService {
           if (state.transfer) throw new RoomActionError('TRANSFER_PENDING');
         }
         if (kind === 'blocked') {
+          // Recovery may finish an unblock and replace the bot's old denies.
+          // Capture current provenance before the final target/actor checks.
+          deniedBefore = moderationDeniedBefore(await safeRoomAction(() => gateway.readAccess(channelId), 'DISCORD_FAILURE'), targetId);
           this.assertTarget(state, targetId, await safeRoomAction(() => gateway.resolveModerationTarget(targetId), 'DISCORD_FAILURE'));
           await safeRoomAction(() => gateway.assertModerationPermissions(channelId, targetId), 'DISCORD_FAILURE');
         }
