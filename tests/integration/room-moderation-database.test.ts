@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { Client } from 'pg';
-import { Client as DiscordClient, DefaultRestOptions, type Guild } from 'discord.js';
+import { Client as DiscordClient, DefaultRestOptions, MessageFlags, MessageFlagsBitField, PermissionFlagsBits as P, type Guild } from 'discord.js';
 import { Response } from 'undici';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -20,6 +20,8 @@ import type { VoiceCreatorRepository } from '../../src/modules/setup/setup.repos
 import { deferred, entry } from '../unit/modules/calls/call.fixtures.js';
 import { OWNER, OTHER, roomModerationFixture } from '../unit/modules/calls/room-moderation.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
+import { CallInteractions, type CallInteraction } from '../../src/modules/calls/call.interactions.js';
+import { callComponentSchema, type CallComponent } from '../../src/modules/calls/call.schemas.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
 
@@ -39,6 +41,71 @@ async function fixture() {
 }
 
 describe('durable room moderation', () => {
+  integrationTest.each([false, true])('real handler → runtime → Prisma commits before native deny/removal and keeps one private area (uncertain HTTP: %s)', async uncertain => {
+    const f = await fixture(); const native = roomModerationFixture();
+    const discord = new DiscordClient({ intents: [] }); discord.token = 'test-only'; Object.assign(native.guild, { client: discord });
+    const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));
+    const handler = new CallInteractions(runtime, runtime.gatewayFor); const events: string[] = [];
+    const http = vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(async () => {
+      events.push('disconnect');
+      expect((await f.store.read(f.roomId))!.allowedMemberIds).toEqual([]);
+      expect(native.overwrite()?.deny.has(P.Connect | P.SendMessages)).toBe(true);
+      if (uncertain) throw new Error('unconfirmed private-token');
+      native.leave(OTHER); return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    let visible: unknown; const privateId = '82345678901234567'; let follows = 0;
+    const render = (payload: unknown) => { visible = JSON.parse(JSON.stringify(payload)); return { id: privateId }; };
+    const interaction = (action: CallComponent['action'], selectionId?: string) => {
+      const customId = `call:v3:${action}:${f.roomId}:${selectionId ?? 0}${action === 'mod-page' ? ':0' : ''}`;
+      return {
+        customId, guild: native.guild, guildId: native.guild.id, channelId: native.channel.id, user: { id: OWNER },
+        createdTimestamp: Date.now(), applicationId: '92345678901234567',
+        message: { id: action === 'moderation' ? native.message.id : privateId,
+          flags: new MessageFlagsBitField(action === 'moderation' ? 0 : MessageFlags.Ephemeral),
+          author: { id: '92345678901234567' }, interactionMetadata: { user: { id: OWNER } }, components: [{ components: [{ customId }] }] },
+        values: [OTHER], inGuild: () => true, isButton: () => action !== 'mod-target', isUserSelectMenu: () => action === 'mod-target', isStringSelectMenu: () => false, isModalSubmit: () => false,
+        deferUpdate: vi.fn(async () => {}), reply: vi.fn(async () => {}), editReply: vi.fn(async () => {}),
+        followUp: vi.fn(async (payload: unknown) => { follows++; return render(payload); }),
+        webhook: { editMessage: vi.fn(async (_id: string, payload: unknown) => render(payload)) },
+      };
+    };
+    const execute = (i: ReturnType<typeof interaction>) => handler.execute(i as unknown as CallInteraction);
+    const select = async () => {
+      await execute(interaction('mod-target'));
+      const customId = JSON.stringify(visible).match(/call:v3:mod-confirm:[^"\\]+/)?.[0]; expect(customId).toBeDefined();
+      const component = callComponentSchema.parse(customId!); if (!('selectionId' in component)) throw new Error('Missing selection');
+      return component.selectionId;
+    };
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER, controlMessageDiscordId: native.message.id } });
+      await f.store.setAllowed(f.roomId, 0, OTHER, true);
+      const open = interaction('moderation'); await execute(open); expect(open.deferUpdate).toHaveBeenCalledOnce();
+      const canceled = await select(); await execute(interaction('mod-cancel', canceled)); await execute(interaction('mod-page'));
+      expect((await f.store.read(f.roomId))!).toMatchObject({ allowedMemberIds: [OTHER], memberBlocks: [], room: { controlVersion: 0 } });
+      expect(native.projected()).toEqual([]); expect(http).not.toHaveBeenCalled();
+      const selectionId = await select();
+      const set = native.channel.permissionOverwrites.set.getMockImplementation()!;
+      native.channel.permissionOverwrites.set.mockImplementation(async input => {
+        const state = (await f.store.read(f.roomId))!;
+        expect(state).toMatchObject({ allowedMemberIds: [], memberBlocks: [expect.objectContaining({ state: 'BLOCKED', memberDiscordId: OTHER })], room: { controlVersion: 1 } });
+        events.push('durable-before-deny'); await set(input);
+      });
+      const confirm = interaction('mod-confirm', selectionId); await execute(confirm);
+      expect(events).toEqual(['durable-before-deny', 'disconnect']); expect(http).toHaveBeenCalledOnce(); expect(follows).toBe(1);
+      expect((await f.store.read(f.roomId))!).toMatchObject({ allowedMemberIds: [], memberBlocks: [expect.objectContaining({ state: 'BLOCKED' })] });
+      expect(native.states.has(OTHER)).toBe(uncertain); expect(runtime.access.isUncertain(f.roomId)).toBe(uncertain);
+      if (uncertain) {
+        expect(JSON.stringify(visible)).toContain('salva'); expect(JSON.stringify(visible)).not.toContain('Membro bloqueado');
+      } else {
+        expect(JSON.stringify(visible)).toContain('Membro bloqueado');
+        expect((await f.store.read(f.roomId))!.presences.map(p => p.memberDiscordId)).toEqual([OWNER]);
+      }
+      expect(confirm.webhook.editMessage).toHaveBeenLastCalledWith(privateId, expect.anything());
+      await execute(interaction('mod-confirm', selectionId)); expect(http).toHaveBeenCalledOnce();
+      expect(native.channel.messages.edit.mock.calls.every(call => !JSON.stringify(call).includes('Membro bloqueado'))).toBe(true);
+    } finally { await runtime.stop(); http.mockRestore(); await f.cleanup(); }
+  });
+
   integrationTest.each([false, true])('empty close bypasses SQL quarantine and purges only confirmed CLOSED intent, initial deletion failure: %s', async failDeletion => {
     const f = await fixture(); const native = roomModerationFixture();
     const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));

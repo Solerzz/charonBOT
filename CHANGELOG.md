@@ -4,6 +4,22 @@ Todas as mudanças relevantes serão documentadas neste arquivo.
 
 ## [Unreleased]
 
+### 0.4.0 — implementação e validação locais em 2026-11-11; rollout pendente
+
+- Moderação privada do dono pela última linha **Assumir sala · Moderação**,
+  confirmação single-use e reuso da mesma área após mutação/epoch novo.
+  Bloquear remove autorização e impede voz/chat sem ocultar a sala; desbloquear
+  não restaura autorização. Proteções de dono/bots/administradores e recuperação
+  de intenções duráveis, sem replay da desconexão incerta na mesma tentativa.
+- Gates locais: **1.494 testes comuns + 71 integrações PostgreSQL**, typecheck e
+  build aprovados; **6 migrations / 7 tabelas RLS** no banco descartável local.
+  Provas compostas handler/runtime/Prisma com Discord simulado, não aceite real.
+- `charon-dev` continua no estado remoto conhecido de cinco migrations anteriores.
+  Sexta migration/RLS da sétima tabela remota, backup novo, restart e aceitação
+  Discord real pendem de nova autorização. Sem publicação ou bump de package.
+  [Notas v0.4.0](docs/releases/v0.4.0.md) e
+  [validação local](docs/validation/2026-11-10-moderacao-dono.md).
+
 ### 0.3.0 — integrada e validada no servidor de testes em 2026-11-10
 
 - Painel público nativo com botões em linhas 3+3+1, nome mostrado uma vez e

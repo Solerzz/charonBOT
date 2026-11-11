@@ -14,6 +14,12 @@ function fixture() {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('call action metrics', () => {
+  it.each(['moderation', 'mod-home', 'mod-block', 'mod-list', 'mod-target', 'mod-unblock', 'mod-page', 'mod-confirm', 'mod-cancel'] as const)('allowlists %s without including private context', async action => {
+    const f = fixture();
+    await runCallActionTrace(f.logger, action, async () => {});
+    expect(f.logs()[0]).toMatchObject({ action, result: 'success' });
+    expect(Object.keys(f.logs()[0]).sort()).toEqual(['action', 'durationMs', 'hostname', 'level', 'msg', 'pid', 'result', 'stages', 'time', 'traceId']);
+  });
   it('does not log an untrusted action even when a caller bypasses TypeScript', async () => {
     const f = fixture();
     await runCallActionTrace(f.logger, 'call:private-forged-token' as CallTraceAction, async () => {});
