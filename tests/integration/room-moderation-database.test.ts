@@ -243,23 +243,49 @@ describe('durable room moderation', () => {
 
   integrationTest.each(['block', 'unblock', 'complete'] as const)('fences a queued old-version %s through the shared room row lock', async operation => {
     const f = await fixture(); const observer = new Client({ connectionString: process.env.DIRECT_URL });
-    const locked = deferred(); const release = deferred();
+    const locked = deferred<number>(); const admitted = deferred<number>(); const release = deferred();
     let fence: Promise<unknown> | undefined; let writer: Promise<unknown> | undefined;
     try {
       await observer.connect();
       const block = (await f.store.stageRoomBlock(f.actor, 'guest', 16n))!.block;
       await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, block.id);
       const transaction = f.client.$transaction.bind(f.client);
-      vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
-        const result = await work(tx as unknown as typeof f.client); locked.resolve(); await release.promise; return result;
+      const transactions = vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        const result = await work(tx as unknown as typeof f.client);
+        locked.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        await release.promise; return result;
       })) as never);
-      fence = f.store.settleAccess(f.roomId, 2); await locked.promise;
+      fence = f.store.settleAccess(f.roomId, 2); const fencePid = await locked.promise;
+      transactions.mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        admitted.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        return work(tx as unknown as typeof f.client);
+      })) as never);
+      // A started JS promise is not an admitted DB transaction: pool admission
+      // can outlast 100 observer queries. Wait for its actual backend first.
+      // Bound admission + lock observation to 2s, leaving headroom inside the
+      // interactive fence transaction; no sleep or fixed query-count budget.
+      const deadline = performance.now() + 2_000;
       writer = operation === 'block' ? f.store.stageRoomBlock({ ...f.actor, controlVersion: 2 }, 'guest', 99n)
         : operation === 'unblock' ? f.store.stageRoomUnblock({ ...f.actor, controlVersion: 2 }, block.id)
           : f.store.completeRoomUnblock(f.roomId, 2, block.id);
-      let waiting = false;
-      for (let attempt = 0; attempt < 100 && !waiting; attempt++) waiting = (await observer.query<{ waiting: boolean }>(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%TemporaryRoom%') AS waiting`)).rows[0]!.waiting;
-      expect(waiting).toBe(true); release.resolve(); await fence;
+      let timer: ReturnType<typeof setTimeout> | undefined; let writerPid: number;
+      try {
+        writerPid = await Promise.race([admitted.promise,
+          writer.then((): never => { throw new Error('Writer completed without transaction admission'); }),
+          new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Writer transaction was not admitted within 2000ms')), Math.max(1, deadline - performance.now())); }),
+        ]);
+      } finally { clearTimeout(timer); }
+      type LockObservation = { state: string; wait_event_type: string | null; blockers: number[]; room_lock: boolean };
+      let row: LockObservation | undefined;
+      do {
+        row = (await observer.query<LockObservation>(`SELECT state, wait_event_type, pg_blocking_pids(pid) AS blockers,
+          query LIKE '%TemporaryRoom%' AND query ILIKE '%FOR UPDATE%' AS room_lock
+          FROM pg_stat_activity WHERE datname=current_database() AND pid=$1`, [writerPid])).rows[0];
+        if (row?.wait_event_type === 'Lock' && row.room_lock && row.blockers.includes(fencePid)) break;
+      } while (performance.now() < deadline);
+      expect(row).toMatchObject({ state: 'active', wait_event_type: 'Lock', room_lock: true });
+      expect(row!.blockers).toContain(fencePid);
+      release.resolve(); await fence;
       expect(await writer).toBe(operation === 'complete' ? false : null);
       expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [expect.objectContaining({ id: block.id, state: 'UNBLOCK_PENDING', deniedBefore: 16n })], room: { controlVersion: 3 } });
     } finally { release.resolve(); await fence?.catch(() => {}); await writer?.catch(() => {}); await observer.end(); await f.cleanup(); }
