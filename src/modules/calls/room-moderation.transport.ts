@@ -36,8 +36,22 @@ export function createRoomModerationTransport(client: Client): RoomModerationTra
       if (init.signal?.aborted) throw new RoomActionError('MODERATION_INCOMPLETE');
       context.sent = true;
       const response = await DefaultRestOptions.makeRequest(url, { ...init, redirect: 'error' });
+      // The SDK clears its abort timer when makeRequest returns, BEFORE parsing
+      // 2xx/4xx bodies. Consume every native body while that timer/signal still
+      // owns the attempt; abort rejects this awaited read, so stop drains it.
+      let bytes: ArrayBuffer;
+      try { bytes = await response.arrayBuffer(); }
+      catch (error) {
+        // A rejected 429 body leaves its duration unknown, not permission to
+        // bypass the observed limit on a later invocation.
+        if (response.status === 429) cooldownUntil = Infinity;
+        throw error;
+      }
+      const text = () => Buffer.from(bytes).toString('utf8');
+      const buffered = { status: response.status, statusText: response.statusText, ok: response.ok,
+        headers: response.headers, body: null, bodyUsed: false,
+        arrayBuffer: async () => bytes, text: async () => text(), json: async (): Promise<unknown> => JSON.parse(text()) };
       if (response.status < 200 || (response.status >= 300 && response.status < 400)) {
-        await response.arrayBuffer();
         throw new RoomActionError('DISCORD_FAILURE');
       }
       if (response.status === 429) {
@@ -45,13 +59,13 @@ export function createRoomModerationTransport(client: Client): RoomModerationTra
         // Consume the rejected response; the SDK will reject this 429, not
         // parse it or replay it. Unknown cooldowns fail closed until shutdown.
         let bodySeconds = 0;
-        try { bodySeconds = Number(((await response.json()) as { retry_after?: unknown }).retry_after); } catch { /* Unknown duration below. */ }
+        try { bodySeconds = Number(((await buffered.json()) as { retry_after?: unknown }).retry_after); } catch { /* Unknown duration below. */ }
         const headerSeconds = Number(response.headers.get('retry-after'));
         const seconds = Math.max(Number.isFinite(headerSeconds) && headerSeconds > 0 ? headerSeconds : 0,
           Number.isFinite(bodySeconds) && bodySeconds > 0 ? bodySeconds : 0);
         cooldownUntil = Math.max(cooldownUntil, seconds > 0 ? Date.now() + seconds * 1_000 + 50 : Infinity);
-      } else if (response.status >= 500) await response.arrayBuffer();
-      return response;
+      }
+      return buffered;
     },
   });
   client.rest.on(RESTEvents.RateLimited, limited);

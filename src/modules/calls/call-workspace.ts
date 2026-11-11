@@ -37,7 +37,7 @@ export class CallPrivateWorkspace {
   private readonly inFlight = new Set<Promise<void>>();
   private readonly retiringMessages = new Map<string, Promise<void>>();
   // Bounded by the original handle deadline; no token or new timer is stored.
-  private readonly retired = new Map<string, { entry: Workspace; delivery: CallWorkspaceDelivery }>();
+  private readonly retired = new Map<string, { entry: Workspace; delivery: CallWorkspaceDelivery; authority?: RoomActor }>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
   private stopping: Promise<void> | undefined;
@@ -126,6 +126,10 @@ export class CallPrivateWorkspace {
     const retired = this.retired.get(keyOf(before));
     if (!retired || retired.delivery.messageId !== delivery.messageId
       || (after.controlVersion === before.controlVersion && !retired.entry.consumedModeration)) return false;
+    if (retired.authority && keyOf(retired.authority) !== keyOf(after)) return false;
+    // Reserve the exact validated successor synchronously. Reconciliation can
+    // revoke this reservation while delivery drains outside the coordinator.
+    retired.authority = { ...after };
     const deadline = Math.min(retired.entry.expiresAt, delivery.expiresAt);
     await retired.entry.tail;
     this.prune();
@@ -201,6 +205,20 @@ export class CallPrivateWorkspace {
   reconcile(roomId: string, state: RoomState | null): Promise<void> {
     this.prune();
     const cleanup: Promise<void>[] = [];
+    // Visit existing lineage BEFORE retiring active entries. The initial
+    // retirement may belong to this mutation; a later invalidation must revoke
+    // it, including when there is no longer an active entry to walk.
+    for (const [key, record] of this.retired) {
+      const before = record.entry.actor;
+      if (before.roomId !== roomId) continue;
+      const version = record.authority?.controlVersion;
+      if (!state || state.room.id !== roomId || state.room.status !== 'ACTIVE' || !state.controlsEnabled
+        || state.room.guildDiscordId !== before.guildDiscordId || state.room.ownerDiscordId !== before.memberDiscordId
+        || (version !== undefined ? state.room.controlVersion !== version
+          : state.room.controlVersion < before.controlVersion || state.room.controlVersion > before.controlVersion + 1)) {
+        this.retired.delete(key);
+      } else record.authority = { ...before, controlVersion: state.room.controlVersion };
+    }
     for (const entry of this.entries.values()) {
       if (entry.actor.roomId !== roomId) continue;
       if (!state || state.room.id !== roomId || state.room.status !== 'ACTIVE' || !state.controlsEnabled

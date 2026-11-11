@@ -258,6 +258,33 @@ describe('owner moderation handler composed with runtime and stateful SQL/REST b
     } finally { release.resolve(); await running; }
   });
 
+  it.each(['owner', 'disabled', 'closed'] as const)('does not revive a result after %s invalidation while deactivation drains', async change => {
+    const f = fixture(); await f.execute(f.interaction('moderation')); const selectionId = await f.select();
+    const entered = deferred(); const release = deferred(); const replacing = deferred();
+    const replace = f.runtime.workspaces.replaceAfterMutation.bind(f.runtime.workspaces);
+    const outcomes: boolean[] = [];
+    vi.spyOn(f.runtime.workspaces, 'replaceAfterMutation').mockImplementation(async (...args) => {
+      const result = replace(...args); replacing.resolve(); const value = await result; outcomes.push(value); return value;
+    });
+    const i = f.interaction('mod-confirm', { selectionId });
+    i.webhook.editMessage.mockImplementation(async (_id, payload) => {
+      if (JSON.stringify(payload).includes('Área encerrada')) { entered.resolve(); await release.promise; }
+      return { id: '82345678901234567' };
+    });
+    const running = f.execute(i); await entered.promise; await replacing.promise;
+    try {
+      await f.runtime.coordinator.room(f.guild.id, f.channel.id, async () => {
+        if (change === 'owner') { f.state().room.ownerDiscordId = OLDEST; f.state().room.controlVersion++; }
+        if (change === 'disabled') { f.state().controlsEnabled = false; f.state().room.controlVersion++; }
+        if (change === 'closed') f.state().room.status = 'CLOSED';
+        await f.runtime.workspaces.reconcile(f.state().room.id, await f.runtime.store.read(f.state().room.id));
+      });
+      release.resolve(); await running;
+      expect(outcomes).toEqual([false]); expect(JSON.stringify(i.webhook.editMessage.mock.calls)).not.toContain('Membro bloqueado');
+      expect(i.followUp).not.toHaveBeenCalled(); expect(f.http).toHaveBeenCalledOnce();
+    } finally { release.resolve(); await running; }
+  });
+
   it.each(['success', 'failure'] as const)('never lets late %s delivery replace a newer workspace flow', async outcome => {
     const f = fixture(); await f.execute(f.interaction('moderation')); const selectionId = await f.select();
     const entered = deferred(); const release = deferred();

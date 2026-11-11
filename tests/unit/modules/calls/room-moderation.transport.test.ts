@@ -20,6 +20,55 @@ function fixture(send: RESTOptions['makeRequest']) {
 const response = (status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(status === 200 ? {} : { message: 'test failure', retry_after: 1 }), { status, headers: { 'content-type': 'application/json', ...headers } });
 
 describe('room moderation HTTP transport', () => {
+  it('fails closed on an unknown 429 cooldown when its body aborts at the deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); const entered = deferred();
+    let first = true;
+    const f = fixture(async (_url, init) => {
+      if (!first) return response(); first = false;
+      const stream = new ReadableStream<Uint8Array>({ start(controller) {
+        init.signal!.addEventListener('abort', () => controller.error(Object.assign(new Error('timeout'), { name: 'AbortError' })), { once: true });
+      } });
+      entered.resolve(); return new Response(stream, { status: 429, headers: { 'content-type': 'application/json' } });
+    });
+    const result = f.transport.disconnectOnce(f.guild, memberId, async () => true).catch((error: unknown) => error);
+    await entered.promise; await vi.advanceTimersByTimeAsync(15_000);
+    expect(await result).toMatchObject({ code: 'DISCORD_FAILURE' });
+    await expect(f.transport.disconnectOnce(f.guild, memberId, async () => true)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.http).toHaveBeenCalledOnce();
+  });
+
+  it.each([200, 403, 500])('keeps the abortable deadline through a pending %s response body and drains stop', async status => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const reading = deferred(); let body: ReadableStreamDefaultController<Uint8Array>;
+    let aborted = false; let readSettled = false;
+    const f = fixture(async (_url, init) => {
+      const stream = new ReadableStream<Uint8Array>({ start(controller) { body = controller; } });
+      init.signal!.addEventListener('abort', () => { aborted = true; body.error(Object.assign(new Error('body timeout'), { name: 'AbortError' })); }, { once: true });
+      const result = new Response(stream, { status, headers: { 'content-type': 'application/json' } });
+      for (const method of ['json', 'arrayBuffer'] as const) {
+        const consume = result[method].bind(result);
+        vi.spyOn(result, method).mockImplementation((async () => {
+          reading.resolve(); try { return await consume(); } finally { readSettled = true; }
+        }) as never);
+      }
+      return result;
+    });
+    let finished = false;
+    const operation = f.transport.disconnectOnce(f.guild, memberId, async () => true).then(value => { finished = true; return value; }, (error: unknown) => { finished = true; return error; });
+    await reading.promise;
+    let stopped = false; const stopping = f.transport.stop().then(() => { stopped = true; });
+    try {
+      await vi.advanceTimersByTimeAsync(14_999); expect(finished).toBe(false); expect(stopped).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(aborted).toBe(true); expect(readSettled).toBe(true); expect(finished).toBe(true);
+      expect(await operation).toMatchObject({ code: 'DISCORD_FAILURE' }); await stopping;
+      expect(stopped).toBe(true); expect(f.http).toHaveBeenCalledOnce();
+    } finally {
+      if (!readSettled) body!.error(new Error('test cleanup'));
+      await operation; await stopping;
+    }
+  });
+
   it.each([500, 429])('sends exactly one real undici HTTP dispatch for %s, with network access disabled', async statusCode => {
     const original = getGlobalDispatcher(); const agent = new MockAgent(); agent.disableNetConnect();
     let requests = 0;

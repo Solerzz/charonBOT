@@ -48,17 +48,49 @@ reinício/setup off, RLS e isolamento entre salas também passaram.
 
 ## Gates observados
 
+Onda final I1–I4/M1, retomada em 2026-11-11: resultados abaixo reexecutados
+sobre as correções, não reutilizados dos gates Task 6 (1.494 comuns/71 SQL).
+
 | Gate | Resultado |
 | --- | --- |
-| Foco handler antigo + moderação + métricas | **123/123** |
+| Foco serviço/runtime/transporte/workspace/handler de moderação | **210/210** |
 | `npm run typecheck` | exit 0 |
-| `npm run test:run -- --silent=false` | **1.494 passaram**, 71 opt-in ignorados; 52 arquivos passaram, 7 ignorados |
+| `npm run test:run -- --silent=false` | **1.518 passaram**, 71 opt-in ignorados; 52 arquivos passaram, 7 ignorados |
 | `npm run build` | exit 0 |
 | PostgreSQL local, integrações seriais | **71/71**, 7 arquivos |
-| Prisma generate 7.10.1 guardado | exit 0; whitespace regenerado normalizado sem diff semântico |
-| migrate deploy/status/deploy idempotente | **6 migrations**, schema atualizado; nenhum deploy aplicou migration pendente |
+| migrate status/deploy/deploy idempotente | **6 migrations**, schema atualizado; ambos os deploys sem migrations pendentes |
 | RLS local | **7 tabelas protegidas**, incluindo `RoomMemberBlock` e `_prisma_migrations`; papéis API sem acesso às linhas |
-| `git diff --check` | aprovado após normalização focal do whitespace gerado |
+| `git diff --check` | aprovado; avisos CRLF apenas nos outputs do grafo |
+
+Prisma generate e preparação inicial do banco são evidências históricas da Task 6,
+não foram repetidos nesta onda: nenhum schema/migration/cliente gerado mudou.
+Após um ajuste final de cooldown 429, as suítes completas, typecheck e build foram
+reexecutados: os resultados finais acima substituem a passagem intermediária de
+1.517 comuns/71 SQL. O banco foi usado somente pelo launcher local já existente.
+
+## Correções da revisão final
+
+- **I1:** novo block recupera a obrigação composta antes do stage, sob o mesmo
+  coordenador, e revalida ator/epoch. Recuperação impossível deixa zero stage,
+  nenhum novo registro e epoch intacta; a tentativa não repete desconexão. O
+  resultado idempotente preserva a remoção confirmada durante essa recuperação.
+- **I2:** proteção atual de todos os BLOCKED, inclusive fora da call, é consultada
+  antes da projeção e novamente antes de confirmar ausência/remoção. Promoção a
+  administrador durante stage mantém intenção/quarentena e erro seguro. Membro
+  comprovadamente fora do guild continua recuperável e desbloqueável.
+- **I3:** rebind reserva sincronicamente o sucessor validado. Invalidação posterior
+  revoga também a linhagem aposentada durante a drenagem; null, troca de dono,
+  setup off, CLOSED ou outra epoch impedem edição tardia. Mantidos reuso legítimo,
+  prazo original e proteção de sessão nova, sem aguardar delivery com coordenador.
+- **I4:** todo corpo HTTP é consumido dentro de `makeRequest`, antes de o SDK
+  limpar seu timer/sinal de 15 s. Parsing posterior usa bytes já drenados e os
+  headers originais. Testes com REST real/HTTP simulado e relógio controlado
+  confirmam abort da leitura 200/403/500, uma tentativa e shutdown drenável; o
+  runtime mantém quarentena. Corpo 429 abortado conserva cooldown desconhecido
+  fail-closed. Sem Promise.race abandonando leitura, replay ou mudança do REST compartilhado.
+- **M1:** os dois testes SQL usam admissão/PIDs e `pg_blocking_pids` do par exato,
+  com deadline de 2 s, não orçamento de 100 queries. Mantidos estado, fence e
+  prova de liberação do row lock antes de REST; nenhum código produto mudou por M1.
 
 Suite comum executada com `RUN_DATABASE_TESTS=false`,
 `RUN_DATABASE_SECURITY_TESTS=false` e `DOTENV_CONFIG_PATH` inexistente.
@@ -66,14 +98,12 @@ Os números históricos de 1.447 comuns/69 integrações não foram reutilizados
 como evidência desta execução. Os logs informativos dos testes representam
 cenários simulados, inclusive falhas tratadas, não incidentes reais.
 
-Todos os comandos que envolvem Prisma/banco foram filhos deste launcher local:
+Comandos de banco da onda final (os de generate/prepare anteriores são históricos):
 
 ```powershell
-node --import tsx .superpowers/sdd/2026-11-10-charon-v0.4.0-moderacao-dono/local-postgres.mjs run node_modules/prisma/build/index.js generate
-node --import tsx .superpowers/sdd/2026-11-10-charon-v0.4.0-moderacao-dono/local-postgres.mjs run node_modules/prisma/build/index.js migrate deploy
-node --import tsx .superpowers/sdd/2026-11-10-charon-v0.4.0-moderacao-dono/local-postgres.mjs run --import tsx tests/integration/prepare-database.ts
 node --import tsx .superpowers/sdd/2026-11-10-charon-v0.4.0-moderacao-dono/local-postgres.mjs run node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=1
 node --import tsx .superpowers/sdd/2026-11-10-charon-v0.4.0-moderacao-dono/local-postgres.mjs run node_modules/prisma/build/index.js migrate status
+node --import tsx .superpowers/sdd/2026-11-10-charon-v0.4.0-moderacao-dono/local-postgres.mjs run node_modules/prisma/build/index.js migrate deploy
 node --import tsx .superpowers/sdd/2026-11-10-charon-v0.4.0-moderacao-dono/local-postgres.mjs run node_modules/prisma/build/index.js migrate deploy
 ```
 

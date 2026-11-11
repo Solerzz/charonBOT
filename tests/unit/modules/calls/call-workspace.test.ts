@@ -100,6 +100,27 @@ describe('moderation selection delivery binding (not authorization)', () => {
 
 describe('moderation mutation generation replacement', () => {
   const after = { ...actor, controlVersion: 1 };
+  it.each(['missing', 'owner', 'disabled', 'closed', 'epoch'] as const)('revokes pending rebind synchronously on %s during retirement drain', async change => {
+    const workspace = new CallPrivateWorkspace(); const first = delivery();
+    await workspace.show(actor, confirmation(), async () => first);
+    workspace.consumeModerationSelection(actor, first.messageId, selectionA.id);
+    const entered = deferred(); const release = deferred();
+    first.deactivate.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    const replacing = workspace.replaceAfterMutation(actor, after, first, moderation); await entered.promise;
+    const next = state(); next.room.controlVersion = 1;
+    if (change === 'owner') next.room.ownerDiscordId = 'another';
+    if (change === 'disabled') next.controlsEnabled = false;
+    if (change === 'closed') next.room.status = 'CLOSED';
+    if (change === 'epoch') next.room.controlVersion = 2;
+    await workspace.reconcile(actor.roomId, change === 'missing' ? null : next);
+    release.resolve(); expect(await replacing).toBe(false);
+    expect(first.edit).not.toHaveBeenCalled();
+    // Returning to the former authority does not restore revoked lineage.
+    await workspace.reconcile(actor.roomId, state());
+    expect(await workspace.replaceAfterMutation(actor, after, first, moderation)).toBe(false);
+    await workspace.stop();
+  });
+
   it('reuses a consumed selection for a confirmed idempotent result in the same epoch, without replaying it', async () => {
     const workspace = new CallPrivateWorkspace(); const first = delivery();
     await workspace.show(actor, confirmation(), async () => first);

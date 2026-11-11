@@ -1,4 +1,4 @@
-import { Client, DefaultRestOptions, PermissionFlagsBits as P, RESTEvents, type Guild } from 'discord.js';
+import { Client, DefaultRestOptions, PermissionFlagsBits as P, PermissionsBitField, RESTEvents, type Guild } from 'discord.js';
 import type { Logger } from 'pino';
 import { Response } from 'undici';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -57,6 +57,55 @@ function fixture() {
 }
 
 describe('moderation composed with the application room runtime', () => {
+  it.each([200, 403])('quarantines a stalled %s disconnect body at the deadline and drains accepted shutdown', async status => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = fixture(); const reading = deferred(); let body: ReadableStreamDefaultController<Uint8Array>; let settled = false;
+    f.http.mockImplementationOnce(async (_url, init) => {
+      const stream = new ReadableStream<Uint8Array>({ start(controller) { body = controller; } });
+      init.signal!.addEventListener('abort', () => body.error(Object.assign(new Error('timeout'), { name: 'AbortError' })), { once: true });
+      const result = new Response(stream, { status, headers: { 'content-type': 'application/json' } });
+      for (const method of ['json', 'arrayBuffer'] as const) {
+        const consume = result[method].bind(result);
+        vi.spyOn(result, method).mockImplementation((async () => { reading.resolve(); try { return await consume(); } finally { settled = true; } }) as never);
+      }
+      return result;
+    });
+    const operation = f.runtime.moderation.block(f.actor(), OTHER, f.gateway()).catch((error: unknown) => error);
+    await reading.promise; let stopped = false;
+    const stopping = f.runtime.stop(operation).then(() => { stopped = true; });
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(settled).toBe(true);
+      expect(await operation).toMatchObject({ code: 'MODERATION_INCOMPLETE' }); await stopping;
+      expect(stopped).toBe(true); expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(true);
+      expect(f.state().memberBlocks).toHaveLength(1); expect(f.http).toHaveBeenCalledOnce();
+      expect(f.states.has(OTHER)).toBe(true);
+    } finally { if (!settled) body!.error(new Error('test cleanup')); await operation; await stopping; }
+  });
+
+  it('does not stage a new block through an impossible existing moderation quarantine', async () => {
+    const f = fixture(); const block = f.seedBlock(); const fetch = f.guild.members.fetch.getMockImplementation()!;
+    f.guild.members.fetch.mockImplementation(async options => {
+      const member = await fetch(options);
+      if (member.id === OTHER) return { ...member, permissions: new PermissionsBitField(P.Administrator) };
+      return member;
+    });
+    f.runtime.access.markUncertain(f.state().room.id);
+    await expect(f.runtime.moderation.block(f.actor(), OLDEST, f.gateway())).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.store.stageRoomBlock).not.toHaveBeenCalled(); expect(f.state().memberBlocks).toEqual([block]);
+    expect(f.state().room.controlVersion).toBe(0); expect(f.http).not.toHaveBeenCalled();
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(true);
+  });
+
+  it('does not clear quarantine for an absent BLOCKED administrator during runtime recovery', async () => {
+    const f = fixture(); f.seedBlock(); f.leave(OTHER); f.member.permissions.add(P.Administrator);
+    f.runtime.access.markUncertain(f.state().room.id);
+    await expect(f.observe()).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.runtime.access.isUncertain(f.state().room.id)).toBe(true); expect(f.http).not.toHaveBeenCalled();
+    await expect(f.runtime.moderation.unblock(f.actor(), f.state().memberBlocks[0]!.id, f.gateway())).resolves.toMatchObject({ kind: 'unblocked' });
+    expect(f.state().memberBlocks).toEqual([]);
+  });
+
   it('removes a blocked occupant through the real shared transport before publishing, without reentering room locks', async () => {
     const f = fixture();
     const roomLock = vi.spyOn(f.runtime.coordinator, 'room');

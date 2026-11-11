@@ -5,6 +5,88 @@ import { deferred } from './call.fixtures.js';
 import { OWNER, OTHER, roomModerationFixture } from './room-moderation.fixtures.js';
 
 describe('durable owner moderation', () => {
+  it('reports the removal already confirmed during pre-stage duplicate recovery', async () => {
+    const f = roomModerationFixture(); const block = structuredClone(f.seedBlock());
+    await expect(f.service.block(f.actor(), OTHER, f.gateway)).resolves.toMatchObject({ kind: 'blocked', removedFromRoom: true, actor: { controlVersion: 0 } });
+    expect(f.state().memberBlocks).toEqual([block]); expect(f.http).toHaveBeenCalledOnce();
+  });
+
+  it('does not disconnect the same blocked member twice across recovery and new intent', async () => {
+    const f = roomModerationFixture(); f.seedBlock(); const check = f.gateway.assertModerationPermissions.bind(f.gateway);
+    let returned = false;
+    vi.spyOn(f.gateway, 'assertModerationPermissions').mockImplementation(async (...args) => {
+      await check(...args);
+      if (!returned && f.events.includes('disconnect')) { returned = true; f.join(OTHER); }
+    });
+    await expect(f.service.block(f.actor(), '32345678901234567', f.gateway)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(returned).toBe(true); expect(f.http).toHaveBeenCalledOnce();
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+  });
+
+  it('does not confirm an absent target promoted during the durable stage', async () => {
+    const f = roomModerationFixture(); f.leave(OTHER);
+    const stage = f.store.stageRoomBlock.getMockImplementation()!;
+    f.store.stageRoomBlock.mockImplementationOnce(async (...args) => {
+      const write = await stage(...args); f.member.permissions.add(P.Administrator); return write;
+    });
+    await expect(f.service.block(f.actor(), OTHER, f.gateway)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.state().memberBlocks).toMatchObject([{ memberDiscordId: OTHER, state: 'BLOCKED' }]);
+    expect(f.state().room.controlVersion).toBe(1); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+    expect(f.http).not.toHaveBeenCalled(); expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
+    await expect(f.service.unblock(f.actor(), f.state().memberBlocks[0]!.id, f.gateway)).resolves.toMatchObject({ kind: 'unblocked' });
+  });
+
+  it('keeps an absent protected existing guild member quarantined during recovery', async () => {
+    const f = roomModerationFixture(); const block = f.seedBlock(); f.leave(OTHER);
+    f.member.permissions.add(P.Administrator); f.access.markUncertain(f.state().room.id);
+    await expect(f.reconcile()).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.state().memberBlocks).toEqual([block]); expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+    expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled(); expect(f.http).not.toHaveBeenCalled();
+  });
+
+  it('recovers a confirmed guild departure and still permits corrective unblock', async () => {
+    const f = roomModerationFixture(); const block = f.seedBlock(); f.leave(OTHER);
+    const fetch = f.guild.members.fetch.getMockImplementation()!;
+    f.guild.members.fetch.mockImplementation(async options => {
+      if ((options as { user: string }).user === OTHER) throw Object.assign(new Error('gone'), { code: 10007 });
+      return fetch(options);
+    });
+    f.access.markUncertain(f.state().room.id); await f.reconcile();
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false); expect(f.http).not.toHaveBeenCalled();
+    await expect(f.service.unblock(f.actor(), block.id, f.gateway)).resolves.toMatchObject({ kind: 'unblocked' });
+    expect(f.state().memberBlocks).toEqual([]);
+  });
+
+  it('recovers impossible existing moderation before admitting another block', async () => {
+    const f = roomModerationFixture(); const block = f.seedBlock(); const next = '32345678901234567';
+    const fetch = f.guild.members.fetch.getMockImplementation()!;
+    f.guild.members.fetch.mockImplementation(async options => {
+      const member = await fetch(options);
+      return { ...member, permissions: new PermissionsBitField(member.id === OTHER ? P.Administrator : 0n) };
+    });
+    f.access.markUncertain(f.state().room.id);
+    await expect(f.service.block(f.actor(), next, f.gateway)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.store.stageRoomBlock).not.toHaveBeenCalled(); expect(f.state().room.controlVersion).toBe(0);
+    expect(f.state().memberBlocks).toEqual([block]); expect(f.http).not.toHaveBeenCalled();
+    expect(f.access.isUncertain(f.state().room.id)).toBe(true);
+  });
+
+  it('does not retry an uncertain recovery removal or stage another intention', async () => {
+    const f = roomModerationFixture(); const block = f.seedBlock(); f.access.markUncertain(f.state().room.id);
+    f.http.mockRejectedValueOnce(new Error('uncertain recovery'));
+    await expect(f.service.block(f.actor(), '32345678901234567', f.gateway)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.http).toHaveBeenCalledOnce(); expect(f.store.stageRoomBlock).not.toHaveBeenCalled();
+    expect(f.state().memberBlocks).toEqual([block]); expect(f.state().room.controlVersion).toBe(0);
+  });
+
+  it('revalidates the actor after composed moderation recovery before staging', async () => {
+    const f = roomModerationFixture(); f.seedBlock(); f.access.markUncertain(f.state().room.id);
+    f.afterRemovalLocked.mockImplementationOnce(async () => { f.state().room.ownerDiscordId = '32345678901234567'; f.state().room.controlVersion++; });
+    await expect(f.service.block(f.actor(), '32345678901234567', f.gateway)).rejects.toThrow();
+    expect(f.store.stageRoomBlock).not.toHaveBeenCalled(); expect(f.http).toHaveBeenCalledOnce();
+    expect(f.state().memberBlocks).toHaveLength(1);
+  });
+
   it('saves block and deletes allowlist before native deny and disconnect', async () => {
     const f = roomModerationFixture(); f.state().allowedMemberIds = [OTHER];
     f.channel.permissionOverwrites.cache.set(OTHER, { id: OTHER, type: OverwriteType.Member, allow: new PermissionsBitField(), deny: new PermissionsBitField(P.SendTTSMessages) });

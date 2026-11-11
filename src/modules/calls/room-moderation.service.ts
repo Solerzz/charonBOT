@@ -48,6 +48,8 @@ export class RoomModerationService {
     return this.withRoom(actor, async channelId => {
       const { store, access, invalidateWorkspace, publishLocked } = this.dependencies;
       let attempted = false; let published = false;
+      const disconnects = new Set<string>();
+      const recoveredRemovals = new Set<string>();
       try {
         let { state, snapshot } = await this.ownedLocked(actor, channelId, gateway);
         if (state.transfer) throw new RoomActionError('TRANSFER_PENDING');
@@ -64,9 +66,12 @@ export class RoomModerationService {
         await access.settleLocked(actor.roomId);
         ({ state, snapshot } = await this.ownedLocked(actor, channelId, gateway));
         if (state.transfer) throw new RoomActionError('TRANSFER_PENDING');
-        if (kind === 'blocked' && access.isUncertain(actor.roomId)) {
-          await access.synchronizeLocked(state, snapshot, gateway);
-          ({ state } = await this.ownedLocked(actor, channelId, gateway));
+        if (kind === 'blocked' && (access.isUncertain(actor.roomId) || state.memberBlocks.length)) {
+          // Access projection alone cannot recover a protected BLOCKED occupant.
+          // Finish the composite obligation before admitting any new intention.
+          for (const memberId of await this.reconcileIntentLocked(actor.roomId, gateway, disconnects)) recoveredRemovals.add(memberId);
+          ({ state, snapshot } = await this.ownedLocked(actor, channelId, gateway));
+          if (state.transfer) throw new RoomActionError('TRANSFER_PENDING');
         }
         if (kind === 'blocked') {
           this.assertTarget(state, targetId, await safeRoomAction(() => gateway.resolveModerationTarget(targetId), 'DISCORD_FAILURE'));
@@ -96,7 +101,7 @@ export class RoomModerationService {
         if (!durable?.memberBlocks.some(block => block.id === write.block.id && block.memberDiscordId === targetId && block.state === write.block.state)) throw new RoomActionError('MODERATION_INCOMPLETE');
         const nextActor = { ...actor, controlVersion: write.controlVersion };
         const receipts = this.departures(durable);
-        const removed = await this.reconcileIntentLocked(actor.roomId, gateway);
+        const removed = await this.reconcileIntentLocked(actor.roomId, gateway, disconnects);
         const confirmed = await this.ownedLocked(nextActor, channelId, gateway);
         published = true;
         await safeRoomAction(() => publishLocked(actor.roomId, gateway), 'DISCORD_FAILURE');
@@ -106,7 +111,7 @@ export class RoomModerationService {
         if (kind === 'blocked'
           ? !final.state.memberBlocks.some(block => block.id === write.block.id && block.state === 'BLOCKED') || final.snapshot.members.some(member => member.memberDiscordId === targetId)
           : final.state.memberBlocks.some(block => block.memberDiscordId === targetId)) throw new RoomActionError('MODERATION_INCOMPLETE');
-        return { actor: nextActor, kind, memberDiscordId: targetId, removedFromRoom: removed.has(targetId) };
+        return { actor: nextActor, kind, memberDiscordId: targetId, removedFromRoom: removed.has(targetId) || recoveredRemovals.has(targetId) };
       } catch (error) {
         if (attempted || access.isUncertain(actor.roomId)) {
           access.markUncertain(actor.roomId);
@@ -126,7 +131,7 @@ export class RoomModerationService {
 
   // Caller owns the room coordinator. No locking, publication, recursion or
   // reauthorization here: committed intent outlives the initiating owner.
-  private async reconcileIntentLocked(roomId: string, gateway: RoomDiscordGateway): Promise<Set<string>> {
+  private async reconcileIntentLocked(roomId: string, gateway: RoomDiscordGateway, disconnects = new Set<string>()): Promise<Set<string>> {
     const { store, access, afterRemovalLocked } = this.dependencies;
     const removed = new Set<string>();
     try {
@@ -136,6 +141,13 @@ export class RoomModerationService {
       const receipts = this.departures(state);
       const snapshot = await safeRoomAction(() => gateway.snapshot(state.room.channelDiscordId), 'DISCORD_FAILURE');
       assertSnapshot(state, snapshot);
+      // Administrator/guild-owner bypasses denies even outside the call. A
+      // confirmed guild departure is safe, but fetch failures are not absence.
+      for (const block of state.memberBlocks.filter(b => b.state === 'BLOCKED')) {
+        const target = await safeRoomAction(() => gateway.resolveModerationTarget(block.memberDiscordId), 'DISCORD_FAILURE');
+        if (!target && !snapshot.members.some(member => member.memberDiscordId === block.memberDiscordId)) continue;
+        this.assertTarget(state, block.memberDiscordId, target);
+      }
       await access.synchronizeLocked(state, snapshot, gateway);
       await this.confirmLocked(state);
       for (const block of state.memberBlocks.filter(b => b.state === 'UNBLOCK_PENDING')) {
@@ -155,14 +167,17 @@ export class RoomModerationService {
       for (const block of projected.memberBlocks) {
         const live = await safeRoomAction(() => gateway.snapshot(state.room.channelDiscordId), 'DISCORD_FAILURE');
         assertSnapshot(projected, live);
-        if (!live.members.some(member => member.memberDiscordId === block.memberDiscordId)) continue;
         const target = await safeRoomAction(() => gateway.resolveModerationTarget(block.memberDiscordId), 'DISCORD_FAILURE');
+        if (!target && !live.members.some(member => member.memberDiscordId === block.memberDiscordId)) continue;
         this.assertTarget(projected, block.memberDiscordId, target);
+        if (!live.members.some(member => member.memberDiscordId === block.memberDiscordId)) continue;
         if (target!.channelDiscordId !== state.room.channelDiscordId) continue;
         await safeRoomAction(() => gateway.assertModerationPermissions(state.room.channelDiscordId, block.memberDiscordId), 'DISCORD_FAILURE');
         // Last SQL check, after all preceding REST awaits. The gateway supplies
         // the final native protection/channel check immediately before HTTP.
         await this.confirmLocked(projected);
+        if (disconnects.has(block.memberDiscordId)) throw new RoomActionError('MODERATION_INCOMPLETE');
+        disconnects.add(block.memberDiscordId);
         const result = await safeRoomAction(() => gateway.disconnectFromRoom(state.room.channelDiscordId, block.memberDiscordId), 'DISCORD_FAILURE');
         const after = await safeRoomAction(() => gateway.snapshot(state.room.channelDiscordId), 'DISCORD_FAILURE');
         assertSnapshot(projected, after);
