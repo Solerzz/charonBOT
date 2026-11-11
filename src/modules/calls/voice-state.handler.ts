@@ -1,9 +1,11 @@
-import { ActivityType, type VoiceState } from 'discord.js';
+import { ActivityType, type Guild, type VoiceState } from 'discord.js';
 import type { Logger } from 'pino';
 
 import { DiscordCallGateway } from './call.discord.js';
 import { voiceTransitionSchema } from './call.schemas.js';
 import type { CallService } from './call.service.js';
+import { DiscordRoomGateway } from './room.discord.js';
+import type { RoomDiscordGateway } from './room.types.js';
 
 export interface VoiceStateDispatcher {
   dispatch(oldState: VoiceState, newState: VoiceState): Promise<void>;
@@ -13,6 +15,7 @@ export class VoiceStateHandler implements VoiceStateDispatcher {
   constructor(
     private readonly service: CallService,
     private readonly logger: Logger,
+    private readonly gatewayFor: (guild: Guild) => RoomDiscordGateway = guild => new DiscordRoomGateway(guild),
   ) {}
 
   async dispatch(oldState: VoiceState, newState: VoiceState): Promise<void> {
@@ -35,7 +38,7 @@ export class VoiceStateHandler implements VoiceStateDispatcher {
         displayName: member.displayName,
         oldChannelMemberCount: oldState.channel?.members.size ?? 0,
       });
-      const gateway = new DiscordCallGateway(newState.guild, member);
+      const gateway = new DiscordCallGateway(newState.guild, member, this.gatewayFor(newState.guild));
       await this.service.handleVoiceTransition(transition, gateway);
     } catch (error: unknown) {
       this.logger.error(

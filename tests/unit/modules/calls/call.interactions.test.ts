@@ -13,6 +13,7 @@ import { createLogger } from '../../../../src/core/logger/logger.js';
 import { PrismaRoomStateRepository } from '../../../../src/modules/calls/room-state.repository.js';
 import type { Prisma, PrismaClient } from '../../../../src/generated/prisma/client.js';
 import { creator } from './call.fixtures.js';
+import { RoomModerationService } from '../../../../src/modules/calls/room-moderation.service.js';
 
 function fixture() {
   const f = roomSettingsFixture();
@@ -22,7 +23,8 @@ function fixture() {
   const workspaces = new CallPrivateWorkspace();
   const metricLines: string[] = [];
   const logger = createLogger({ level: 'info', destination: { write: line => { metricLines.push(line); } } });
-  const handler = new CallInteractions({ ...f, ownership: f.service, transfers, panels, workspaces, logger }, () => f.gateway);
+  const moderation = new RoomModerationService({ ...f, invalidateWorkspace: id => { void workspaces.reconcile(id, null); }, publishLocked: f.onChangedLocked, afterRemovalLocked: f.onChangedLocked });
+  const handler = new CallInteractions({ ...f, ownership: f.service, transfers, moderation, panels, workspaces, logger }, () => f.gateway);
   const interaction = (action: CallComponent['action'], kind = 'button', member = OWNER) => {
     const component = { version: 'v3', action, roomId: f.state().room.id,
       ...(['confirm', 'undo'].includes(action) ? { operationId: f.state().transfer!.id } : { controlVersion: f.state().room.controlVersion }) } as CallComponent;
@@ -66,7 +68,7 @@ describe('CallInteractions real controllers', () => {
       const findUnique = vi.fn(async () => {
         now += 2; const s = f.state();
         return { ...structuredClone(s.room), voiceCreator: { ...creator, roomCommandsEnabled: s.controlsEnabled },
-          presences: s.presences, allowedMembers: s.allowedMemberIds.map(memberDiscordId => ({ memberDiscordId })), pendingTransfer: s.transfer };
+          presences: s.presences, allowedMembers: s.allowedMemberIds.map(memberDiscordId => ({ memberDiscordId })), memberBlocks: s.memberBlocks, pendingTransfer: s.transfer };
       });
       const updateMany = vi.fn(async ({ where, data }: Prisma.TemporaryRoomUpdateManyArgs) => {
         now += 2; const s = f.state();

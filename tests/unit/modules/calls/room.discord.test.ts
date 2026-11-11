@@ -1,5 +1,5 @@
 import { ChannelType, OverwriteType, PermissionFlagsBits as P, PermissionsBitField, type Guild, type OverwriteData } from 'discord.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { DiscordRoomGateway } from '../../../../src/modules/calls/room.discord.js';
 import { creator, deferred, room } from './call.fixtures.js';
@@ -17,6 +17,48 @@ function fixture() {
 function bits(value: OverwriteData['allow']) { return new PermissionsBitField(value).bitfield; }
 
 describe('DiscordRoomGateway', () => {
+  it('refreshes the guild owner rather than trusting an old guild-owner cache', async () => {
+    const f = fixture(); f.guild.fetch.mockResolvedValueOnce({ id: f.guild.id, ownerId: f.member.id });
+    await expect(f.gateway.assertModerationPermissions(room.channelDiscordId, f.member.id)).rejects.toMatchObject({ code: 'PROTECTED_MEMBER' });
+  });
+  it('treats a freshly confirmed guild departure as not-in-room, not an uncertain disconnect', async () => {
+    const f = fixture();
+    f.guild.members.fetch.mockRejectedValueOnce({ code: 10007 });
+    const transport = { disconnectOnce: async (_guild: Guild, _id: string, guard: () => Promise<boolean>) => await guard() ? 'disconnected' as const : 'not-in-room' as const, stop: async () => {} };
+    const gateway = new DiscordRoomGateway(f.guild as unknown as Guild, transport);
+    await expect(gateway.disconnectFromRoom(room.channelDiscordId, f.member.id)).resolves.toBe('not-in-room');
+  });
+  it('uses refreshed role authority when resolving a moderation target', async () => {
+    const f = fixture();
+    f.guild.roles.fetch.mockImplementationOnce(async () => { f.member.permissions.add(P.Administrator); return { permissions: f.member.permissions }; });
+    await expect(f.gateway.resolveModerationTarget(f.member.id)).resolves.toMatchObject({ isAdministrator: true, channelDiscordId: room.channelDiscordId });
+  });
+  it('rechecks MoveMembers after target/role reads, before handing control to HTTP', async () => {
+    const f = fixture(); const fetch = f.guild.members.fetch.getMockImplementation()!;
+    f.guild.members.fetch.mockImplementationOnce(async options => { const result = await fetch(options); f.channel.permissionsFor.mockReturnValue(new PermissionsBitField(P.ViewChannel)); return result; });
+    await expect(f.gateway.assertModerationPermissions(room.channelDiscordId, f.member.id)).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE', reason: 'MOVE_MEMBERS' });
+  });
+  it('fails closed without a moderation transport instead of using the retrying voice SDK', async () => {
+    const f = fixture();
+    await expect(f.gateway.disconnectFromRoom(room.channelDiscordId, f.member.id)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+    expect(f.member.voice.setChannel).not.toHaveBeenCalled();
+  });
+  it.each(['other-call', 'bot', 'admin', 'guild-owner', 'permissions'] as const)('checks current target/permissions at send time: %s', async cause => {
+    const f = fixture();
+    const transport = { disconnectOnce: vi.fn(async (_guild: Guild, _id: string, beforeSend: () => Promise<boolean>) => {
+      if (cause === 'other-call') f.states.set(f.member.id, { channelId: creator.creatorChannelDiscordId });
+      if (cause === 'bot') f.member.user.bot = true;
+      if (cause === 'admin') f.member.permissions.add(P.Administrator);
+      if (cause === 'guild-owner') Object.assign(f.guild, { ownerId: f.member.id });
+      if (cause === 'permissions') f.channel.permissionsFor.mockReturnValue(new PermissionsBitField(P.ViewChannel));
+      return await beforeSend() ? 'disconnected' as const : 'not-in-room' as const;
+    }), stop: vi.fn(async () => {}) };
+    const gateway = new DiscordRoomGateway(f.guild as unknown as Guild, transport);
+    const result = gateway.disconnectFromRoom(room.channelDiscordId, f.member.id);
+    if (cause === 'other-call') await expect(result).resolves.toBe('not-in-room');
+    else await expect(result).rejects.toMatchObject({ code: cause === 'permissions' ? 'PERMISSIONS_UNAVAILABLE' : 'PROTECTED_MEMBER', ...(cause === 'permissions' ? { reason: 'MOVE_MEMBERS' } : {}) });
+    expect(f.member.voice.setChannel).not.toHaveBeenCalled();
+  });
   it('edits a panel by ID without fetching the message, retaining forced authority reads', async () => {
     const f = fixture();
     await f.gateway.updateControlPanel(room.channelDiscordId, room.controlMessageDiscordId!, panel);
@@ -27,19 +69,19 @@ describe('DiscordRoomGateway', () => {
   });
   it('accepts exactly 100 projected overwrites without dropping an authorized member', async () => {
     const f = fixture(); const allowed = Array.from({ length: 98 }, (_, i) => String(70000000000000000n + BigInt(i)));
-    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PUBLIC', isLocked: true }, allowed);
+    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PUBLIC', isLocked: true }, allowed, []);
     const sent = f.channel.permissionOverwrites.set.mock.lastCall![0] as OverwriteData[];
     expect(sent).toHaveLength(100);
     for (const id of allowed) expect(bits(sent.find((p) => p.id === id)!.allow) & access).toBe(access);
   });
   it.each([P.ViewChannel, P.SendMessages])('allows external %s grants in visible locked rooms but rejects Connect grants', async (grant) => {
     const f = fixture(); f.put('72345678901234567', OverwriteType.Role, grant);
-    await f.gateway.setRoomAccess(room.channelDiscordId, { isLocked: true, visibility: 'PUBLIC' }, [f.member.id]);
+    await f.gateway.setRoomAccess(room.channelDiscordId, { isLocked: true, visibility: 'PUBLIC' }, [f.member.id], []);
     const sent = f.channel.permissionOverwrites.set.mock.lastCall![0] as OverwriteData[];
     expect(bits(sent.find(({ id }) => id === creator.guildDiscordId)!.allow)).toBe(P.ViewChannel | P.SendMessages);
     expect(bits(sent.find(({ id }) => id === creator.guildDiscordId)!.deny)).toBe(P.Connect);
     f.put('72345678901234567', OverwriteType.Role, P.Connect);
-    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { isLocked: true, visibility: 'PUBLIC' }, [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
+    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { isLocked: true, visibility: 'PUBLIC' }, [], [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     expect(f.channel.permissionOverwrites.set).toHaveBeenCalledTimes(1);
   });
   it('exposes only genuine unknown-message edits as replaceable, not forbidden or missing channels', async () => {
@@ -146,7 +188,7 @@ describe('DiscordRoomGateway', () => {
   it('projects private access without touching unrelated bits and retains bot operational access', async () => {
     const f = fixture(); f.put(creator.guildDiscordId, OverwriteType.Role, access | P.Speak, P.Stream);
     f.put(f.member.id, OverwriteType.Member, P.Speak, access | P.Stream);
-    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id, f.member.id]);
+    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id, f.member.id], []);
     const sent = f.channel.permissionOverwrites.set.mock.calls[0]![0] as OverwriteData[];
     const everyone = sent.find(({ id }) => id === creator.guildDiscordId)!; const member = sent.find(({ id }) => id === f.member.id)!;
     const bot = sent.find(({ id }) => id === f.bot.id)!;
@@ -156,14 +198,14 @@ describe('DiscordRoomGateway', () => {
   });
   it.each([OverwriteType.Role, OverwriteType.Member])('rejects incompatible external grants (%s) without making a partial permission edit', async (type) => {
     const f = fixture(); f.put('72345678901234567', type, P.Connect);
-    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
+    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id], [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
   });
   it('revokes a previous complete member projection on resync while preserving unrelated overwrite bits', async () => {
     const f = fixture();
     f.put('72345678901234567', OverwriteType.Member, access | P.Speak, P.Stream);
     f.put('82345678901234567', OverwriteType.Member, access);
-    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id]);
+    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id], []);
     const sent = f.channel.permissionOverwrites.set.mock.lastCall![0] as OverwriteData[];
     expect(sent.find(({ id }) => id === '72345678901234567')).toEqual({ id: '72345678901234567', type: OverwriteType.Member, allow: P.Speak, deny: P.Stream });
     expect(sent.find(({ id }) => id === '82345678901234567')).toBeUndefined();
@@ -171,21 +213,21 @@ describe('DiscordRoomGateway', () => {
   });
   it('does not mistake a complete role grant for a revocable member projection', async () => {
     const f = fixture(); f.put('72345678901234567', OverwriteType.Role, access);
-    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
+    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [], [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
   });
   it('acknowledges the Administrator bypass instead of requesting Administrator for the bot', async () => {
     const f = fixture(); f.put('72345678901234567', OverwriteType.Role, P.Connect);
     f.guild.roles.fetch.mockResolvedValueOnce({ permissions: new PermissionsBitField([P.Administrator]) });
     f.channel.permissionsFor.mockReturnValue(new PermissionsBitField([P.ViewChannel, P.ManageRoles]));
-    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, []);
+    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [], []);
     const sent = f.channel.permissionOverwrites.set.mock.calls[0]![0] as OverwriteData[];
     expect(bits(sent.find(({ id }) => id === f.bot.id)!.allow) & P.Administrator).toBe(0n);
     expect(bits(sent.find(({ id }) => id === '72345678901234567')!.allow)).toBe(P.Connect);
   });
   it('accepts the bot Administrator exception to Manage Roles through SDK permission semantics', async () => {
     const f = fixture(); f.channel.permissionsFor.mockReturnValue(new PermissionsBitField([P.Administrator]));
-    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id]);
+    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [f.member.id], []);
     expect(f.channel.permissionOverwrites.set).toHaveBeenCalledOnce();
     expect(f.guild.members.fetchMe).toHaveBeenCalledWith({ force: true });
   });
@@ -199,23 +241,23 @@ describe('DiscordRoomGateway', () => {
   });
   it('requires Manage Roles (not merely Manage Channels) and rejects capacity instead of truncating allowed users', async () => {
     const f = fixture(); f.channel.permissionsFor.mockReturnValue(new PermissionsBitField([P.ManageChannels, P.ViewChannel]));
-    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
-    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PUBLIC', isLocked: false }, [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
+    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [], [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
+    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PUBLIC', isLocked: false }, [], [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     await expect(f.gateway.restoreAccess(room.channelDiscordId, [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     const g = fixture();
-    await expect(g.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, Array.from({ length: 99 }, (_, i) => String(70000000000000000n + BigInt(i))))).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
+    await expect(g.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, Array.from({ length: 99 }, (_, i) => String(70000000000000000n + BigInt(i))), [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     expect(g.channel.permissionOverwrites.set).not.toHaveBeenCalled();
   });
   it('cannot turn an everyone-role ID in the allowlist into a public privacy projection', async () => {
     const f = fixture();
-    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [creator.guildDiscordId])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
+    await expect(f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PRIVATE', isLocked: false }, [creator.guildDiscordId], [])).rejects.toMatchObject({ code: 'PERMISSIONS_UNAVAILABLE' });
     expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
   });
   it('reads restorable detached overwrites and public projection preserves other bits and entries', async () => {
     const f = fixture(); f.put(creator.guildDiscordId, OverwriteType.Role, P.Speak, access | P.Stream);
     f.put(f.member.id, OverwriteType.Member, P.Speak, P.Stream);
     const previous = await f.gateway.readAccess(room.channelDiscordId);
-    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PUBLIC', isLocked: false }, []);
+    await f.gateway.setRoomAccess(room.channelDiscordId, { visibility: 'PUBLIC', isLocked: false }, [], []);
     const sent = f.channel.permissionOverwrites.set.mock.calls[0]![0] as OverwriteData[];
     expect(bits(sent.find(({ id }) => id === creator.guildDiscordId)!.allow)).toBe(access | P.Speak);
     expect(bits(sent.find(({ id }) => id === creator.guildDiscordId)!.deny)).toBe(P.Stream);

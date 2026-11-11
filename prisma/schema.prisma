@@ -19,6 +19,11 @@ enum TemporaryRoomStatus {
   CLOSED
 }
 
+enum RoomMemberBlockState {
+  BLOCKED
+  UNBLOCK_PENDING
+}
+
 model VoiceCreator {
   id                      String          @id @default(uuid()) @db.Uuid
   guildDiscordId          String
@@ -56,6 +61,7 @@ model TemporaryRoom {
   voiceCreator            VoiceCreator        @relation(fields: [voiceCreatorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   presences               RoomPresence[]
   allowedMembers          RoomAllowedMember[]
+  memberBlocks            RoomMemberBlock[]
   pendingTransfer         PendingOwnershipTransfer?
 
   @@index([guildDiscordId, ownerDiscordId, status])
@@ -90,4 +96,16 @@ model PendingOwnershipTransfer {
   controlVersion  Int
   expiresAt       DateTime?     @db.Timestamptz(3)
   room            TemporaryRoom @relation(fields: [roomId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+}
+
+model RoomMemberBlock {
+  id              String               @id @default(uuid()) @db.Uuid
+  roomId          String               @db.Uuid
+  memberDiscordId String
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  state           RoomMemberBlockState @default(BLOCKED)
+  deniedBefore    BigInt               @default(0)
+  room            TemporaryRoom        @relation(fields: [roomId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([roomId, memberDiscordId])
 }

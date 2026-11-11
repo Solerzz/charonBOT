@@ -1,5 +1,6 @@
 import { requireOwnedRoom } from './room-context.js';
 import type { RoomStateRepository } from './room-state.repository.js';
+import { sameRoomBlocks } from './room-moderation.permissions.js';
 import { RoomActionError, type RoomActor, type RoomDiscordGateway, type RoomState } from './room.types.js';
 
 export async function safeRoomAction<T>(work: () => Promise<T>, code: 'DISCORD_FAILURE' | 'PERSISTENCE_FAILURE' = 'PERSISTENCE_FAILURE'): Promise<T> {
@@ -19,7 +20,8 @@ export async function currentOwnedRoom(store: RoomStateRepository, actor: RoomAc
     // drift as well, rather than committing a projection of a stale state.
     if (room.name !== expected.room.name || room.userLimit !== expected.room.userLimit || room.visibility !== expected.room.visibility
       || room.isLocked !== expected.room.isLocked
-      || [...context.state.allowedMemberIds].sort().join(',') !== [...expected.allowedMemberIds].sort().join(',')) {
+      || [...context.state.allowedMemberIds].sort().join(',') !== [...expected.allowedMemberIds].sort().join(',')
+      || !sameRoomBlocks(context.state.memberBlocks, expected.memberBlocks)) {
       throw new RoomActionError('STALE_CONTROLS');
     }
   }

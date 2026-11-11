@@ -14,7 +14,7 @@ async function prepare(): Promise<void> {
       END $$;
       GRANT USAGE ON SCHEMA public TO anon, authenticated;
       GRANT SELECT ON TABLE public."VoiceCreator", public."TemporaryRoom", public."_prisma_migrations",
-        public."RoomPresence", public."RoomAllowedMember", public."PendingOwnershipTransfer" TO anon, authenticated;
+        public."RoomPresence", public."RoomAllowedMember", public."RoomMemberBlock", public."PendingOwnershipTransfer" TO anon, authenticated;
     `);
     console.log('Local database test grants prepared');
   } finally {

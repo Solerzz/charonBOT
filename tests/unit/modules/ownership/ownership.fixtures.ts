@@ -18,7 +18,7 @@ export const human = (memberDiscordId: string): RoomMember => ({ memberDiscordId
 
 export function ownershipFixture() {
   const states = new Map<string, RoomState>();
-  states.set(ROOM_ID, { room: { ...room, ownerDiscordId: null }, controlsEnabled: true, presences: [], allowedMemberIds: [], transfer: null });
+  states.set(ROOM_ID, { room: { ...room, ownerDiscordId: null }, controlsEnabled: true, presences: [], allowedMemberIds: [], memberBlocks: [], transfer: null });
   const state = () => states.get(ROOM_ID)!;
   const live: { snapshot: RoomSnapshot | null } = { snapshot: { guildDiscordId: room.guildDiscordId, channelDiscordId: room.channelDiscordId, name: room.name, userLimit: 0, members: [human(OLDEST), human(OTHER)] } };
   const hooks = { beforeOwnerChange: async () => {}, beforePrioritySave: async () => {}, beforeSnapshot: async () => {} };
@@ -89,10 +89,12 @@ export function ownershipFixture() {
     }),
     listTracked: unused, listForCreator: unused, cancelPreviousRunTransfers: unused, settleAccess: unused,
     setAllowed: unused, updateSettings: unused, setPanelId: unused, invalidateControls: unused,
+    stageRoomBlock: unused, stageRoomUnblock: unused, completeRoomUnblock: unused, purgeClosedRoomBlocks: unused,
   } satisfies RoomStateRepository;
   const gateway = {
     snapshot: vi.fn(async (_id: string) => { await hooks.beforeSnapshot(); return structuredClone(live.snapshot); }),
     resolveMember: vi.fn(async (id: string) => structuredClone(live.snapshot?.members.find((m) => m.memberDiscordId === id) ?? null)),
+    resolveModerationTarget: unused, assertModerationPermissions: unused, disconnectFromRoom: unused,
     rename: unused, restoreName: unused, setLimit: unused, readAccess: unused,
     setRoomAccess: unused, restoreAccess: unused,
     sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,

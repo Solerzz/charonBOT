@@ -66,3 +66,8 @@ export type RoomAllowedMember = Prisma.RoomAllowedMemberModel
  * 
  */
 export type PendingOwnershipTransfer = Prisma.PendingOwnershipTransferModel
+/**
+ * Model RoomMemberBlock
+ *
+ */
+export type RoomMemberBlock = Prisma.RoomMemberBlockModel

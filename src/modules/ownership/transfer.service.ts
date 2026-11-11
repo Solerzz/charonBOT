@@ -178,6 +178,7 @@ export class TransferService {
   private async liveOwned(actor: RoomActor, targetId: string, channelId: string, gateway: RoomDiscordGateway) {
     const context = await requireOwnedRoom(this.dependencies.store, actor, this.safeGateway(gateway));
     if (context.state.room.channelDiscordId !== channelId) throw new RoomActionError('ROOM_UNAVAILABLE');
+    if (context.state.memberBlocks.some(block => block.memberDiscordId === targetId)) throw new RoomActionError('MEMBER_BLOCKED');
     if (!context.snapshot.members.some((member) => member.memberDiscordId === targetId && !member.isBot)) throw new RoomActionError('UNKNOWN_MEMBER');
     return context;
   }

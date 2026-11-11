@@ -7,7 +7,8 @@ import { room } from './call.fixtures.js';
 function fixture() {
   const temporaryRoom = { findFirst: vi.fn(), create: vi.fn(), updateMany: vi.fn(), findUniqueOrThrow: vi.fn() };
   const pendingOwnershipTransfer = { deleteMany: vi.fn() };
-  const tx = { temporaryRoom, pendingOwnershipTransfer };
+  const roomMemberBlock = { deleteMany: vi.fn() };
+  const tx = { temporaryRoom, pendingOwnershipTransfer, roomMemberBlock };
   const $transaction = vi.fn(async (fn) => fn(tx));
   return { temporaryRoom, pendingOwnershipTransfer, $transaction, repository: new PrismaTemporaryRoomRepository({ ...tx, $transaction } as unknown as PrismaClient) };
 }

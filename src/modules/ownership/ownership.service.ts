@@ -51,7 +51,8 @@ export class OwnershipService {
       if (!expected) this.dependencies.timers.cancel(`priority:${roomId}`);
       return state;
     }
-    const presentHumans = new Set(snapshot.members.filter((member) => !member.isBot).map((member) => member.memberDiscordId));
+    const presentHumans = new Set(snapshot.members.filter((member) => !member.isBot
+      && !state.memberBlocks.some(block => block.memberDiscordId === member.memberDiscordId)).map((member) => member.memberDiscordId));
     const ordered = [...state.presences].filter((member) => !member.isBot && presentHumans.has(member.memberDiscordId))
       .sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime()
         // Equally verifiable joins after restart must not replace a still eligible reservation.
@@ -84,6 +85,7 @@ export class OwnershipService {
         await this.dependencies.reconcileDeparturesLocked?.(actor.roomId);
         await this.dependencies.recoverAccessLocked?.(actor.roomId, gateway);
         const context = await requireActiveRoom(store, actor, gateway);
+        if (context.state.memberBlocks.some(block => block.memberDiscordId === actor.memberDiscordId)) throw new RoomActionError('MEMBER_BLOCKED');
         if (context.state.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         if (await store.findOwnedRoom(actor.guildDiscordId, actor.memberDiscordId)) throw new RoomActionError('ALREADY_OWNS_ROOM');
         if (context.state.room.ownerDiscordId !== null) throw new RoomActionError('ROOM_UNAVAILABLE');
@@ -91,6 +93,7 @@ export class OwnershipService {
         if (!observed || observed.room.controlVersion !== actor.controlVersion) throw new RoomActionError('STALE_CONTROLS');
         // Finish reconciliation/eligibility I/O before the final live check; only the ownership CAS follows it.
         const { state: current } = await requireActiveRoom(store, actor, gateway);
+        if (current.memberBlocks.some(block => block.memberDiscordId === actor.memberDiscordId)) throw new RoomActionError('MEMBER_BLOCKED');
         if (current.room.channelDiscordId !== initial.room.channelDiscordId) throw new RoomActionError('ROOM_UNAVAILABLE');
         if (current.room.ownerDiscordId !== null) throw new RoomActionError('ROOM_UNAVAILABLE');
         const { priorityMemberDiscordId, priorityExpiresAt } = current.room;

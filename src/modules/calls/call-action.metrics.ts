@@ -8,7 +8,7 @@ export type CallActionStage = 'ack' | 'queue' | 'state' | 'discord' | 'persist' 
 export type CallTraceAction = CallComponent['action'] | 'invalid';
 type Trace = { active: boolean; failed: boolean; stages: Record<CallActionStage, { count: number; durationMs: number }> };
 const traces = new AsyncLocalStorage<Trace>();
-const actions = new Set<CallTraceAction>(['lock', 'claim', 'rename', 'rename-save', 'limit', 'limit-save', 'visibility', 'access', 'allow-add', 'allow-remove', 'transfer', 'transfer-target', 'confirm', 'undo', 'invalid']);
+const actions = new Set<CallTraceAction>(['lock', 'claim', 'rename', 'rename-save', 'limit', 'limit-save', 'visibility', 'access', 'allow-add', 'allow-remove', 'transfer', 'transfer-target', 'confirm', 'undo', 'moderation', 'mod-home', 'mod-block', 'mod-list', 'mod-target', 'mod-unblock', 'mod-page', 'mod-confirm', 'mod-cancel', 'invalid']);
 
 export async function runCallActionTrace<T>(logger: Logger, action: CallTraceAction, work: () => Promise<T>): Promise<T> {
   const trace: Trace = { active: true, failed: false, stages: {

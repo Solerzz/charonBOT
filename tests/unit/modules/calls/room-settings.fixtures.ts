@@ -50,7 +50,8 @@ export function roomSettingsFixture() {
   };
   const gateway = new DiscordRoomGateway(discord.guild as unknown as Guild);
   const access = new RoomAccessService(store, f.coordinator);
-  const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: f.onChangedLocked });
+  const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: f.onChangedLocked,
+    recoverRoomLocked: (id, gateway) => access.recoverLocked(id, gateway, f.onChangedLocked) });
   const join = (id: string) => discord.states.set(id, { channelId: f.state().room.channelDiscordId });
   const leave = (id: string) => discord.states.delete(id);
   const projected = () => [...discord.channel.permissionOverwrites.cache.values()];

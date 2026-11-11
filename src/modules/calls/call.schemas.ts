@@ -27,23 +27,36 @@ export function buildInitialRoomName(
 const callControlActionSchema = z.enum([
   'lock', 'claim', 'rename', 'rename-save', 'limit', 'limit-save',
   'visibility', 'access', 'allow-add', 'allow-remove', 'transfer', 'transfer-target',
+  'moderation', 'mod-block', 'mod-list', 'mod-target', 'mod-unblock', 'mod-home',
 ]);
 export type CallControlAction = z.infer<typeof callControlActionSchema>;
 export type CallComponent =
   | { [Action in CallControlAction]: { version: 'v3'; action: Action; roomId: string; controlVersion: number } }[CallControlAction]
-  | { [Action in 'confirm' | 'undo']: { version: 'v3'; action: Action; roomId: string; operationId: string } }['confirm' | 'undo'];
+  | { [Action in 'confirm' | 'undo']: { version: 'v3'; action: Action; roomId: string; operationId: string } }['confirm' | 'undo']
+  | { [Action in 'mod-confirm' | 'mod-cancel']: { version: 'v3'; action: Action; roomId: string; selectionId: string } }['mod-confirm' | 'mod-cancel']
+  | { version: 'v3'; action: 'mod-page'; roomId: string; controlVersion: number; page: number };
 
 const roomUuidSchema = z.string().uuid();
+const safeIntegerToken = (value: string) => /^(0|[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value));
 
 function decodeCallComponent(value: string): CallComponent | null {
   const parts = value.split(':');
   const [prefix, version, action, roomId, token] = parts;
-  if (parts.length !== 5 || prefix !== 'call' || version !== 'v3' ||
+  if (parts.length !== (action === 'mod-page' ? 6 : 5) || prefix !== 'call' || version !== 'v3' ||
       !roomUuidSchema.safeParse(roomId).success || roomId === undefined || token === undefined) return null;
 
   if (action === 'confirm' || action === 'undo') {
     return roomUuidSchema.safeParse(token).success
       ? { version, action, roomId, operationId: token } : null;
+  }
+  if (action === 'mod-confirm' || action === 'mod-cancel') {
+    return roomUuidSchema.safeParse(token).success
+      ? { version, action, roomId, selectionId: token } : null;
+  }
+  if (action === 'mod-page') {
+    const page = parts[5];
+    return safeIntegerToken(token) && page !== undefined && safeIntegerToken(page)
+      ? { version, action, roomId, controlVersion: Number(token), page: Number(page) } : null;
   }
   const parsedAction = callControlActionSchema.safeParse(action);
   if (!parsedAction.success || !/^(0|[1-9]\d*)$/.test(token)) return null;
@@ -61,7 +74,8 @@ export const callComponentSchema = z.string().max(100).transform((value, context
 });
 
 export function encodeCallComponent(value: CallComponent): string {
-  const encoded = `call:${value.version}:${value.action}:${value.roomId}:${'operationId' in value ? value.operationId : value.controlVersion}`;
+  const token = 'operationId' in value ? value.operationId : 'selectionId' in value ? value.selectionId : value.controlVersion;
+  const encoded = `call:${value.version}:${value.action}:${value.roomId}:${token}${value.action === 'mod-page' ? `:${value.page}` : ''}`;
   callComponentSchema.parse(encoded);
   return encoded;
 }

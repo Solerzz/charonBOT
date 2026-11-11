@@ -517,6 +517,7 @@ describe('default module composition', () => {
     vi.spyOn(database, '$connect').mockResolvedValue(undefined);
     vi.spyOn(database, '$queryRawUnsafe').mockResolvedValue([]);
     vi.spyOn(database.pendingOwnershipTransfer, 'deleteMany').mockResolvedValue({ count: 0 });
+    vi.spyOn(database.roomMemberBlock, 'deleteMany').mockResolvedValue({ count: 0 });
     vi.spyOn(database.temporaryRoom, 'findMany').mockResolvedValue([]);
     const lookup = vi.spyOn(database.temporaryRoom, 'findFirst').mockResolvedValue(null);
     const discord = dependencies([]).discord;

@@ -59,19 +59,19 @@ const botRoomPermissions = [
 ];
 
 export class DiscordCallGateway implements CallDiscordGateway {
-  private readonly rooms: DiscordRoomGateway;
-
-  constructor(private readonly guild: Guild, private readonly member: GuildMember) {
-    this.rooms = new DiscordRoomGateway(guild);
-  }
+  constructor(private readonly guild: Guild, private readonly member: GuildMember,
+    private readonly rooms: RoomDiscordGateway = new DiscordRoomGateway(guild)) {}
 
   snapshot(channelId: string) { return this.rooms.snapshot(channelId); }
   resolveMember(memberId: string) { return this.rooms.resolveMember(memberId); }
+  resolveModerationTarget(memberId: string) { return this.rooms.resolveModerationTarget(memberId); }
+  assertModerationPermissions(channelId: string, targetId: string) { return this.rooms.assertModerationPermissions(channelId, targetId); }
+  disconnectFromRoom(channelId: string, targetId: string) { return this.rooms.disconnectFromRoom(channelId, targetId); }
   rename(channelId: string, name: string) { return this.rooms.rename(channelId, name); }
   restoreName(channelId: string, previousName: string) { return this.rooms.restoreName(channelId, previousName); }
   setLimit(channelId: string, limit: number) { return this.rooms.setLimit(channelId, limit); }
   readAccess(channelId: string) { return this.rooms.readAccess(channelId); }
-  setRoomAccess(channelId: string, policy: Parameters<RoomDiscordGateway['setRoomAccess']>[1], allowedIds: string[]) { return this.rooms.setRoomAccess(channelId, policy, allowedIds); }
+  setRoomAccess(channelId: string, policy: Parameters<RoomDiscordGateway['setRoomAccess']>[1], allowedIds: string[], blocks: Parameters<RoomDiscordGateway['setRoomAccess']>[3]) { return this.rooms.setRoomAccess(channelId, policy, allowedIds, blocks); }
   restoreAccess(channelId: string, previous: Parameters<RoomDiscordGateway['restoreAccess']>[1]) { return this.rooms.restoreAccess(channelId, previous); }
   deleteControlPanel(channelId: string, messageId: string) { return this.rooms.deleteControlPanel(channelId, messageId); }
 

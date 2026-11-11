@@ -7,9 +7,105 @@ import { deferred } from './call.fixtures.js';
 
 const GUEST = '72345678901234567';
 const accessBits = P.ViewChannel | P.Connect | P.SendMessages;
+const moderationBits = P.Connect | P.SendMessages | P.SendTTSMessages | P.SendVoiceMessages | P.SendPolls;
+const block = (roomId: string, state: 'BLOCKED' | 'UNBLOCK_PENDING' = 'BLOCKED', deniedBefore = 0n) => ({ id: 'block', roomId, memberDiscordId: OTHER, state, deniedBefore, createdAt: new Date(0) });
 const granted = (f: ReturnType<typeof roomSettingsFixture>) => f.projected().filter((p) => p.type === OverwriteType.Member && p.allow.has(accessBits, false)).map(({ id }) => id).sort();
 
 describe('RoomAccessService', () => {
+  it.each(['PUBLIC', 'PRIVATE'] as const)('compensation reprojects an active block over stale saved authorization: %s', async visibility => {
+    const f = roomSettingsFixture(); f.state().room.visibility = visibility; f.join(OTHER);
+    f.state().memberBlocks = [block(f.state().room.id)]; await f.synchronize();
+    const captured = await f.gateway.readAccess(f.channel.id);
+    const stale = captured.map(p => p.id === OTHER ? { ...p, allow: accessBits | P.Speak, deny: P.Stream } : p);
+    vi.spyOn(f.gateway, 'readAccess').mockResolvedValueOnce(stale); f.store.updateSettings.mockResolvedValueOnce(false);
+    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    const restored = f.projected().find(p => p.id === OTHER)!;
+    expect(restored.allow.bitfield & moderationBits).toBe(0n); expect(restored.deny.bitfield & moderationBits).toBe(moderationBits);
+    expect(restored.allow.has(P.ViewChannel, false)).toBe(visibility === 'PUBLIC');
+    expect(restored.deny.has(P.ViewChannel, false)).toBe(visibility === 'PRIVATE');
+    expect(restored.allow.has(P.Speak, false)).toBe(true); expect(restored.deny.has(P.Stream, false)).toBe(true);
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+  });
+  it('pending-unblock compensation restores old denies but never old authorization', async () => {
+    const f = roomSettingsFixture(); f.state().room.visibility = 'PRIVATE';
+    f.state().memberBlocks = [block(f.state().room.id, 'UNBLOCK_PENDING', P.SendPolls)]; await f.synchronize();
+    const captured = await f.gateway.readAccess(f.channel.id);
+    vi.spyOn(f.gateway, 'readAccess').mockResolvedValueOnce([...captured.filter(p => p.id !== OTHER), { id: OTHER, type: OverwriteType.Member, allow: accessBits | P.Speak, deny: moderationBits | P.Stream }]);
+    f.store.updateSettings.mockResolvedValueOnce(false);
+    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    const target = f.projected().find(p => p.id === OTHER)!;
+    expect(target.allow.bitfield).toBe(P.Speak); expect(target.deny.bitfield).toBe(P.SendPolls | P.Stream);
+    expect(f.state().allowedMemberIds).toEqual([]);
+  });
+  it('does not clear quarantine on same-version block-record drift during REST', async () => {
+    const f = roomSettingsFixture(); f.state().room.visibility = 'PRIVATE';
+    f.state().memberBlocks = [block(f.state().room.id)];
+    const write = f.channel.permissionOverwrites.set.getMockImplementation()!;
+    f.channel.permissionOverwrites.set.mockImplementationOnce(async input => {
+      await write(input); f.state().memberBlocks[0]!.state = 'UNBLOCK_PENDING';
+      f.state().memberBlocks[0]!.deniedBefore = P.SendPolls;
+    });
+    await f.synchronize();
+    expect(f.channel.permissionOverwrites.set).toHaveBeenCalledTimes(2);
+    expect(f.projected().find(p => p.id === OTHER)!.deny.bitfield).toBe(P.SendPolls);
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+  });
+  it('rejects same-version deniedBefore drift after capture before the first projection', async () => {
+    const f = roomSettingsFixture(); f.state().memberBlocks = [block(f.state().room.id)];
+    const read = f.gateway.readAccess.bind(f.gateway);
+    vi.spyOn(f.gateway, 'readAccess').mockImplementationOnce(async id => {
+      const captured = await read(id); f.state().memberBlocks[0]!.deniedBefore = P.SendPolls; return captured;
+    });
+    await expect(f.controls.toggleLock(f.actor(), f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+    expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
+  });
+  it.each(['BLOCKED', 'UNBLOCK_PENDING'] as const)('refuses authorization while any %s record exists', async state => {
+    const f = roomSettingsFixture(); f.state().memberBlocks = [block(f.state().room.id, state)];
+    await expect(f.controls.setAllowed(f.actor(), OTHER, true, f.gateway)).rejects.toMatchObject({ code: 'MEMBER_BLOCKED' });
+    expect(f.store.setAllowed).not.toHaveBeenCalled(); expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
+  });
+  it('recovery settles an absent row before retiring an unsettled write', async () => {
+    const f = roomSettingsFixture(); const id = f.state().room.id;
+    f.access.markUnsettled(id, 0); f.roomStates.delete(id);
+    f.store.settleAccess.mockRejectedValueOnce(new Error('barrier unavailable'));
+    await expect(f.access.recoverLocked(id, f.gateway, f.onChangedLocked)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.access.isUncertain(id)).toBe(true);
+    await f.access.recoverLocked(id, f.gateway, f.onChangedLocked);
+    expect(f.access.isUncertain(id)).toBe(false); expect(f.channel.permissionOverwrites.set).not.toHaveBeenCalled();
+  });
+  it('never authorizes a blocked present owner or allowlisted participant', async () => {
+    const f = roomSettingsFixture(); f.join(OTHER); f.state().room.visibility = 'PRIVATE';
+    f.state().allowedMemberIds = [OTHER];
+    f.state().memberBlocks = [OWNER, OTHER].map(memberDiscordId => ({ id: memberDiscordId, roomId: f.state().room.id, memberDiscordId, state: 'BLOCKED', deniedBefore: 0n, createdAt: new Date(0) }));
+    await f.synchronize();
+    expect(granted(f)).toEqual([f.bot.id]);
+    for (const id of [OWNER, OTHER]) expect(f.projected().find(p => p.id === id)!.deny.has(P.Connect, false)).toBe(true);
+  });
+
+  it.each(['absent', 'CLOSED'] as const)('settles an unsettled write even for %s SQL state; failure retains the fence', async terminal => {
+    const f = roomSettingsFixture(); const id = f.state().room.id;
+    f.access.markUnsettled(id, 0);
+    if (terminal === 'absent') f.roomStates.delete(id); else f.state().room.status = 'CLOSED';
+    f.store.settleAccess.mockRejectedValueOnce(new Error('barrier unavailable'));
+    await expect(f.access.settleLocked(id)).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+    expect(f.access.isUncertain(id)).toBe(true);
+    if (terminal === 'absent') await expect(f.access.settleLocked(id)).resolves.toBeNull();
+    else await expect(f.access.settleLocked(id)).resolves.toMatchObject({ room: { status: 'CLOSED' } });
+    expect(f.store.settleAccess).toHaveBeenLastCalledWith(id, 0);
+  });
+
+  it('canonicalizes reordered cloned block records with bigint denies rather than mistaking them for drift', async () => {
+    const f = roomSettingsFixture(); f.state().memberBlocks = [block(f.state().room.id, 'BLOCKED', 1n << 60n),
+      { ...block(f.state().room.id), id: 'second-block', memberDiscordId: GUEST }];
+    const read = f.store.read.getMockImplementation()!; let reads = 0;
+    f.store.read.mockImplementation(async id => {
+      const state = await read(id); if (state && ++reads % 2) state.memberBlocks.reverse(); return state;
+    });
+    await f.synchronize();
+    expect(f.channel.permissionOverwrites.set).toHaveBeenCalledOnce();
+    expect(f.access.isUncertain(f.state().room.id)).toBe(false);
+  });
+
   it('retires confirmed CLOSED and absent SQL rows across room churn without retaining quarantine IDs', async () => {
     const f = roomSettingsFixture(); const snapshot = (await f.gateway.snapshot(f.channel.id))!;
     for (let index = 0; index < 24; index++) {

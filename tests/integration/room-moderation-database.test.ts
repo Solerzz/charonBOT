@@ -1,0 +1,637 @@
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+
+import { Client } from 'pg';
+import { Client as DiscordClient, DefaultRestOptions, MessageFlags, MessageFlagsBitField, PermissionFlagsBits as P, type Guild } from 'discord.js';
+import { Response } from 'undici';
+import { describe, expect, it, vi } from 'vitest';
+
+import { createPrismaClient, disconnectDatabase } from '../../src/core/database/prisma.js';
+import { PrismaRoomStateRepository } from '../../src/modules/calls/room-state.repository.js';
+import { PrismaTemporaryRoomRepository } from '../../src/modules/calls/call.repository.js';
+import { RoomAccessService } from '../../src/modules/calls/room-access.service.js';
+import { RoomModerationService } from '../../src/modules/calls/room-moderation.service.js';
+import { createRoomRuntime } from '../../src/modules/calls/room.runtime.js';
+import { createLogger } from '../../src/core/logger/logger.js';
+import { CallService } from '../../src/modules/calls/call.service.js';
+import { DiscordCallGateway } from '../../src/modules/calls/call.discord.js';
+import type { GuildMember } from 'discord.js';
+import type { VoiceCreatorRepository } from '../../src/modules/setup/setup.repository.js';
+import { deferred, entry } from '../unit/modules/calls/call.fixtures.js';
+import { OWNER, OTHER, roomModerationFixture } from '../unit/modules/calls/room-moderation.fixtures.js';
+import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
+import { CallInteractions, type CallInteraction } from '../../src/modules/calls/call.interactions.js';
+import { callComponentSchema, type CallComponent } from '../../src/modules/calls/call.schemas.js';
+
+const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
+
+async function fixture() {
+  assertDisposableDatabaseEnvironment();
+  const client = createPrismaClient({ url: process.env.DATABASE_URL!, directUrl: process.env.DIRECT_URL! });
+  const store = new PrismaRoomStateRepository(client);
+  const creatorId = randomUUID(); const guildDiscordId = randomUUID();
+  const roomId = randomUUID(); const otherId = randomUUID();
+  await client.voiceCreator.create({ data: { id: creatorId, guildDiscordId, creatorChannelDiscordId: randomUUID(), categoryDiscordId: randomUUID() } });
+  for (const id of [roomId, otherId]) await client.temporaryRoom.create({ data: { id, guildDiscordId, voiceCreatorId: creatorId, channelDiscordId: randomUUID(), name: 'Kept', status: 'ACTIVE', ownerDiscordId: id === roomId ? 'owner' : 'other-owner', priorityMemberDiscordId: 'priority', priorityExpiresAt: new Date(300000) } });
+  const actor = { roomId, guildDiscordId, memberDiscordId: 'owner', controlVersion: 0 };
+  return { client, store, actor, roomId, otherId, creatorId, async cleanup() {
+    try { await client.temporaryRoom.deleteMany({ where: { id: { in: [roomId, otherId] } } }); await client.voiceCreator.delete({ where: { id: creatorId } }); }
+    finally { await disconnectDatabase(client); }
+  } };
+}
+
+describe('durable room moderation', () => {
+  integrationTest.each([false, true])('real handler → runtime → Prisma commits before native deny/removal and keeps one private area (uncertain HTTP: %s)', async uncertain => {
+    const f = await fixture(); const native = roomModerationFixture();
+    const discord = new DiscordClient({ intents: [] }); discord.token = 'test-only'; Object.assign(native.guild, { client: discord });
+    const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));
+    const handler = new CallInteractions(runtime, runtime.gatewayFor); const events: string[] = [];
+    const http = vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(async () => {
+      events.push('disconnect');
+      expect((await f.store.read(f.roomId))!.allowedMemberIds).toEqual([]);
+      expect(native.overwrite()?.deny.has(P.Connect | P.SendMessages)).toBe(true);
+      if (uncertain) throw new Error('unconfirmed private-token');
+      native.leave(OTHER); return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    let visible: unknown; const privateId = '82345678901234567'; let follows = 0;
+    const render = (payload: unknown) => { visible = JSON.parse(JSON.stringify(payload)); return { id: privateId }; };
+    const interaction = (action: CallComponent['action'], selectionId?: string) => {
+      const customId = `call:v3:${action}:${f.roomId}:${selectionId ?? 0}${action === 'mod-page' ? ':0' : ''}`;
+      return {
+        customId, guild: native.guild, guildId: native.guild.id, channelId: native.channel.id, user: { id: OWNER },
+        createdTimestamp: Date.now(), applicationId: '92345678901234567',
+        message: { id: action === 'moderation' ? native.message.id : privateId,
+          flags: new MessageFlagsBitField(action === 'moderation' ? 0 : MessageFlags.Ephemeral),
+          author: { id: '92345678901234567' }, interactionMetadata: { user: { id: OWNER } }, components: [{ components: [{ customId }] }] },
+        values: [OTHER], inGuild: () => true, isButton: () => action !== 'mod-target', isUserSelectMenu: () => action === 'mod-target', isStringSelectMenu: () => false, isModalSubmit: () => false,
+        deferUpdate: vi.fn(async () => {}), reply: vi.fn(async () => {}), editReply: vi.fn(async () => {}),
+        followUp: vi.fn(async (payload: unknown) => { follows++; return render(payload); }),
+        webhook: { editMessage: vi.fn(async (_id: string, payload: unknown) => render(payload)) },
+      };
+    };
+    const execute = (i: ReturnType<typeof interaction>) => handler.execute(i as unknown as CallInteraction);
+    const select = async () => {
+      await execute(interaction('mod-target'));
+      const customId = JSON.stringify(visible).match(/call:v3:mod-confirm:[^"\\]+/)?.[0]; expect(customId).toBeDefined();
+      const component = callComponentSchema.parse(customId!); if (!('selectionId' in component)) throw new Error('Missing selection');
+      return component.selectionId;
+    };
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER, controlMessageDiscordId: native.message.id } });
+      await f.store.setAllowed(f.roomId, 0, OTHER, true);
+      const open = interaction('moderation'); await execute(open); expect(open.deferUpdate).toHaveBeenCalledOnce();
+      const canceled = await select(); await execute(interaction('mod-cancel', canceled)); await execute(interaction('mod-page'));
+      expect((await f.store.read(f.roomId))!).toMatchObject({ allowedMemberIds: [OTHER], memberBlocks: [], room: { controlVersion: 0 } });
+      expect(native.projected()).toEqual([]); expect(http).not.toHaveBeenCalled();
+      const selectionId = await select();
+      const set = native.channel.permissionOverwrites.set.getMockImplementation()!;
+      native.channel.permissionOverwrites.set.mockImplementation(async input => {
+        const state = (await f.store.read(f.roomId))!;
+        expect(state).toMatchObject({ allowedMemberIds: [], memberBlocks: [expect.objectContaining({ state: 'BLOCKED', memberDiscordId: OTHER })], room: { controlVersion: 1 } });
+        events.push('durable-before-deny'); await set(input);
+      });
+      const confirm = interaction('mod-confirm', selectionId); await execute(confirm);
+      expect(events).toEqual(['durable-before-deny', 'disconnect']); expect(http).toHaveBeenCalledOnce(); expect(follows).toBe(1);
+      expect((await f.store.read(f.roomId))!).toMatchObject({ allowedMemberIds: [], memberBlocks: [expect.objectContaining({ state: 'BLOCKED' })] });
+      expect(native.states.has(OTHER)).toBe(uncertain); expect(runtime.access.isUncertain(f.roomId)).toBe(uncertain);
+      if (uncertain) {
+        expect(JSON.stringify(visible)).toContain('salva'); expect(JSON.stringify(visible)).not.toContain('Membro bloqueado');
+      } else {
+        expect(JSON.stringify(visible)).toContain('Membro bloqueado');
+        expect((await f.store.read(f.roomId))!.presences.map(p => p.memberDiscordId)).toEqual([OWNER]);
+      }
+      expect(confirm.webhook.editMessage).toHaveBeenLastCalledWith(privateId, expect.anything());
+      await execute(interaction('mod-confirm', selectionId)); expect(http).toHaveBeenCalledOnce();
+      expect(native.channel.messages.edit.mock.calls.every(call => !JSON.stringify(call).includes('Membro bloqueado'))).toBe(true);
+    } finally { await runtime.stop(); http.mockRestore(); await f.cleanup(); }
+  });
+
+  integrationTest.each([false, true])('empty close bypasses SQL quarantine and purges only confirmed CLOSED intent, initial deletion failure: %s', async failDeletion => {
+    const f = await fixture(); const native = roomModerationFixture();
+    const runtime = createRoomRuntime(f.client, createLogger({ level: 'silent' }));
+    const lifecycle = new PrismaTemporaryRoomRepository(f.client);
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER } });
+      await f.store.stageRoomBlock({ ...f.actor, guildDiscordId: native.guild.id, memberDiscordId: OWNER }, OTHER, 0n);
+      runtime.access.markUnsettled(f.roomId, 1);
+      const fence = vi.spyOn(runtime.store, 'settleAccess').mockRejectedValue(new Error('SQL fence unavailable'));
+      native.leave(OWNER); native.leave(OTHER);
+      if (failDeletion) native.channel.delete.mockRejectedValueOnce(new Error('native deletion unavailable'));
+      const service = new CallService({ findByChannel: async () => null } as unknown as VoiceCreatorRepository, lifecycle, runtime, createLogger({ level: 'silent' }));
+      const guild = native.guild as unknown as Guild;
+      const gateway = new DiscordCallGateway(guild, native.member as unknown as GuildMember, runtime.gatewayFor(guild));
+      const leave = () => service.handleVoiceTransition({ ...entry, oldChannelDiscordId: native.channel.id, newChannelDiscordId: null }, gateway);
+      await leave();
+      if (failDeletion) {
+        expect(await f.store.read(f.roomId)).toMatchObject({ room: { status: 'CLOSING' }, memberBlocks: [expect.objectContaining({ state: 'BLOCKED' })] });
+        expect(runtime.access.isUncertain(f.roomId)).toBe(true);
+        await leave();
+      }
+      expect(await f.store.read(f.roomId)).toMatchObject({ room: { status: 'CLOSED', ownerDiscordId: null }, memberBlocks: [] });
+      expect(runtime.access.isUncertain(f.roomId)).toBe(false); expect(fence).not.toHaveBeenCalled();
+      const deletions = native.channel.delete.mock.calls.length; await leave();
+      expect(native.channel.delete).toHaveBeenCalledTimes(deletions);
+      expect((await f.store.read(f.otherId))!.room.status).toBe('ACTIVE');
+    } finally { await runtime.stop(); await f.cleanup(); }
+  });
+
+  integrationTest('fresh runtimes recover durable intent with setup off and a new room never inherits the closed room restriction', async () => {
+    const f = await fixture(); const native = roomModerationFixture();
+    const discord = new DiscordClient({ intents: [] }); discord.token = 'test-only';
+    Object.assign(native.guild, { client: discord });
+    const guild = native.guild as unknown as Guild;
+    const http = vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(async url => {
+      native.leave(String(url).split('/').at(-1)!);
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    const logger = createLogger({ level: 'silent' });
+    const first = createRoomRuntime(f.client, logger); const second = createRoomRuntime(f.client, logger);
+    const fresh = createRoomRuntime(f.client, logger); const newRoomId = randomUUID();
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER } });
+      const actor = { ...f.actor, guildDiscordId: guild.id, memberDiscordId: OWNER };
+      await f.store.setAllowed(f.roomId, 0, OTHER, true);
+      await f.store.stageRoomBlock(actor, OTHER, 0n);
+      const pending = (await f.store.stageRoomBlock({ ...actor, controlVersion: 1 }, '10000000000000001', 0n))!.block;
+      await f.store.stageRoomUnblock({ ...actor, controlVersion: 2 }, pending.id);
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      await f.client.temporaryRoom.update({ where: { id: f.otherId }, data: { status: 'CLOSED' } });
+      await f.client.roomMemberBlock.create({ data: { roomId: f.otherId, memberDiscordId: OTHER } });
+      await first.start(async () => guild); await first.stop();
+      expect(await f.store.read(f.roomId)).toMatchObject({ controlsEnabled: false, allowedMemberIds: [], memberBlocks: [expect.objectContaining({ memberDiscordId: OTHER, state: 'BLOCKED' })] });
+      expect((await f.store.read(f.otherId))!.memberBlocks).toEqual([]);
+      expect(native.states.has(OTHER)).toBe(false); expect(http).toHaveBeenCalledOnce();
+      native.join(OTHER);
+      await second.start(async () => guild); await second.stop();
+      expect(http).toHaveBeenCalledTimes(2); expect(native.states.has(OTHER)).toBe(false);
+      const lifecycle = new PrismaTemporaryRoomRepository(f.client);
+      await lifecycle.beginClosing(f.roomId); await lifecycle.markClosed(f.roomId);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toEqual([]);
+      const newChannelId = '73345678901234567';
+      native.channel.id = newChannelId; native.state().room.channelDiscordId = newChannelId;
+      native.join(OWNER);
+      await f.client.temporaryRoom.create({ data: { id: newRoomId, voiceCreatorId: f.creatorId, guildDiscordId: guild.id,
+        channelDiscordId: newChannelId, name: 'New room', ownerDiscordId: OWNER, status: 'ACTIVE' } });
+      native.join(OTHER); await fresh.start(async () => guild);
+      expect((await f.store.read(newRoomId))!.memberBlocks).toEqual([]);
+      expect(native.states.has(OTHER)).toBe(true); expect(http).toHaveBeenCalledTimes(2);
+      // Repeated terminalization remains safe and cannot touch the replacement.
+      await lifecycle.markClosed(f.roomId);
+      expect((await f.store.read(newRoomId))!.room.status).toBe('ACTIVE');
+    } finally {
+      await Promise.all([first.stop(), second.stop(), fresh.stop()]); http.mockRestore();
+      await f.client.temporaryRoom.deleteMany({ where: { id: newRoomId } }); await f.cleanup();
+    }
+  });
+
+  integrationTest.each(['BLOCKED', 'UNBLOCK_PENDING'] as const)('SQL priority excludes %s members without preventing safe revocation', async state => {
+    const f = await fixture();
+    try {
+      const block = (await f.store.stageRoomBlock(f.actor, 'guest', 0n))!.block;
+      if (state === 'UNBLOCK_PENDING') await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, block.id);
+      const version = state === 'BLOCKED' ? 1 : 2;
+      await f.store.changeOwner(f.roomId, version, 'owner', null);
+      expect(await f.store.savePriority(f.roomId, version + 1, 'guest', new Date(Date.now() + 300_000))).toBe(false);
+      expect(await f.store.savePriority(f.roomId, version + 1, null, null)).toBe(true);
+      expect(await f.store.savePriority(f.roomId, version + 1, 'next', new Date(Date.now() + 300_000))).toBe(true);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('service recovers lost SQL stage and finalize replies without replaying removal', async () => {
+    const f = await fixture(); const native = roomModerationFixture();
+    try {
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: {
+        guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER,
+      } });
+      const actor = { ...f.actor, guildDiscordId: native.guild.id, memberDiscordId: OWNER };
+      const access = new RoomAccessService(f.store, native.coordinator);
+      const service = new RoomModerationService({ store: f.store, coordinator: native.coordinator, access,
+        invalidateWorkspace: native.invalidateWorkspace, publishLocked: native.publishLocked,
+        afterRemovalLocked: async () => {
+          const snapshot = (await native.gateway.snapshot(native.channel.id))!;
+          await f.store.syncPresence(f.roomId, snapshot.members, new Date(), false);
+        },
+      });
+      await f.store.setAllowed(f.roomId, 0, OTHER, true);
+      const stage = f.store.stageRoomBlock.bind(f.store);
+      vi.spyOn(f.store, 'stageRoomBlock').mockImplementationOnce(async (...args) => { await stage(...args); throw new Error('lost stage reply'); });
+      await service.block(actor, OTHER, native.gateway).catch(error => { expect(error).toMatchObject({ code: 'MODERATION_INCOMPLETE' }); });
+      const blocked = (await f.store.read(f.roomId))!;
+      expect(blocked).toMatchObject({ allowedMemberIds: [], memberBlocks: [expect.objectContaining({ memberDiscordId: OTHER, state: 'BLOCKED' })] });
+      expect(native.http).toHaveBeenCalledTimes(1); expect(native.states.has(OTHER)).toBe(false);
+      const unblock = f.store.stageRoomUnblock.bind(f.store);
+      vi.spyOn(f.store, 'stageRoomUnblock').mockImplementationOnce(async (...args) => { await unblock(...args); throw new Error('lost unblock stage reply'); });
+      const complete = f.store.completeRoomUnblock.bind(f.store);
+      vi.spyOn(f.store, 'completeRoomUnblock').mockImplementationOnce(async (...args) => { await complete(...args); throw new Error('lost finalize reply'); });
+      await expect(service.unblock({ ...actor, controlVersion: blocked.room.controlVersion }, blocked.memberBlocks[0]!.id, native.gateway)).rejects.toMatchObject({ code: 'MODERATION_INCOMPLETE' });
+      expect(access.isUncertain(f.roomId)).toBe(true);
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [], allowedMemberIds: [] });
+      await native.coordinator.room(native.guild.id, native.channel.id, () => service.reconcileLocked(f.roomId, native.gateway));
+      expect(access.isUncertain(f.roomId)).toBe(false); expect(native.http).toHaveBeenCalledTimes(1);
+      expect((await f.store.read(f.roomId))!.room.controlVersion).toBeGreaterThan(blocked.room.controlVersion);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('service performs no REST until an admitted late stage writer is fenced', async () => {
+    const f = await fixture(); const native = roomModerationFixture(); const observer = new Client({ connectionString: process.env.DIRECT_URL });
+    const locked = deferred<number>(); const admitted = deferred<number>(); const release = deferred();
+    let writer: Promise<unknown> | undefined; let action: Promise<unknown> | undefined;
+    try {
+      await observer.connect();
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { guildDiscordId: native.guild.id, channelDiscordId: native.channel.id, ownerDiscordId: OWNER } });
+      const actor = { ...f.actor, guildDiscordId: native.guild.id, memberDiscordId: OWNER };
+      const access = new RoomAccessService(f.store, native.coordinator);
+      const service = new RoomModerationService({ store: f.store, coordinator: native.coordinator, access,
+        invalidateWorkspace: native.invalidateWorkspace, publishLocked: native.publishLocked, afterRemovalLocked: async () => {},
+      });
+      const transaction = f.client.$transaction.bind(f.client);
+      vi.spyOn(f.client, '$transaction')
+        .mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+          const result = await work(tx as unknown as typeof f.client);
+          locked.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+          await release.promise; return result;
+        })) as never)
+        .mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+          admitted.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+          return work(tx as unknown as typeof f.client);
+        })) as never);
+      const stage = f.store.stageRoomBlock.bind(f.store);
+      vi.spyOn(f.store, 'stageRoomBlock').mockImplementationOnce(async (...args) => {
+        writer = stage(...args); await locked.promise; throw new Error('transport failed while SQL still owns the row');
+      });
+      action = service.block(actor, OTHER, native.gateway);
+      // Attach rejection handling immediately while inspecting the blocked SQL.
+      const observed = action.then(result => ({ result }), error => ({ error }));
+      const writerPid = await locked.promise;
+      let timer: ReturnType<typeof setTimeout> | undefined; let fencePid: number;
+      try {
+        fencePid = await Promise.race([admitted.promise, new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('Fence was not admitted within 2000ms')), 2_000);
+        })]);
+      } finally { clearTimeout(timer); }
+      const deadline = performance.now() + 2_000;
+      let waiting = false;
+      do {
+        const row = (await observer.query<{ waiting: boolean }>(`SELECT wait_event_type='Lock' AND $2=ANY(pg_blocking_pids(pid)) AS waiting FROM pg_stat_activity WHERE pid=$1`, [fencePid, writerPid])).rows[0];
+        waiting = row?.waiting === true;
+      } while (!waiting && performance.now() < deadline);
+      expect(waiting).toBe(true);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toEqual([]);
+      expect(native.channel.permissionOverwrites.set).not.toHaveBeenCalled(); expect(native.http).not.toHaveBeenCalled();
+      release.resolve(); await writer;
+      expect(await observed).toMatchObject({ result: { kind: 'blocked', removedFromRoom: true } });
+      expect(native.http).toHaveBeenCalledTimes(1);
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [expect.objectContaining({ memberDiscordId: OTHER, state: 'BLOCKED' })], room: { controlVersion: 1 } });
+    } finally { release.resolve(); await writer?.catch(() => {}); await action?.catch(() => {}); await observer.end(); await f.cleanup(); }
+  }, 30_000);
+
+  integrationTest('persists intent and removes allowlist atomically', async () => {
+    const f = await fixture();
+    try {
+      await f.store.setAllowed(f.roomId, 0, 'guest', true);
+      await f.store.setAllowed(f.otherId, 0, 'guest', true);
+      const write = (await f.store.stageRoomBlock(f.actor, 'guest', 16n))!;
+      expect(write).toMatchObject({ controlVersion: 1, changed: true, block: { memberDiscordId: 'guest', state: 'BLOCKED', deniedBefore: 16n } });
+      expect(write.block.id).toEqual(expect.any(String)); expect(write.block.createdAt).toBeInstanceOf(Date);
+      expect(await f.store.read(f.roomId)).toMatchObject({ allowedMemberIds: [], memberBlocks: [write.block], room: { ownerDiscordId: 'owner', priorityMemberDiscordId: 'priority', priorityExpiresAt: new Date(300000) } });
+      expect(await f.store.setAllowed(f.roomId, 1, 'guest', true)).toBe(false);
+      expect(await f.store.read(f.otherId)).toMatchObject({ memberBlocks: [], allowedMemberIds: ['guest'], room: { controlVersion: 0 } });
+      expect(await f.store.stageRoomBlock({ ...f.actor, controlVersion: 1 }, 'guest', 32n)).toEqual({ ...write, changed: false });
+      expect(await f.store.stageRoomBlock(f.actor, 'guest', 0n)).toBeNull();
+      await expect(f.client.roomMemberBlock.create({ data: { roomId: f.roomId, memberDiscordId: 'guest' } })).rejects.toMatchObject({ code: 'P2002' });
+      await f.store.stageRoomBlock({ ...f.actor, controlVersion: 1 }, 'aaa', 0n);
+      expect((await f.store.read(f.roomId))!.memberBlocks.map(b => b.memberDiscordId)).toEqual(['aaa', 'guest']);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('does not finalize a superseded unblock', async () => {
+    const f = await fixture();
+    try {
+      const first = (await f.store.stageRoomBlock(f.actor, 'guest', 16n))!;
+      const pending = (await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, first.block.id))!;
+      expect(pending).toMatchObject({ controlVersion: 2, changed: true, block: { id: first.block.id, state: 'UNBLOCK_PENDING', deniedBefore: 16n } });
+      expect((await f.store.read(f.roomId))!.memberBlocks).toEqual([pending.block]);
+      expect(await f.store.setAllowed(f.roomId, 2, 'guest', true)).toBe(false);
+      expect(await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 2 }, first.block.id)).toEqual({ ...pending, changed: false });
+      expect(await f.store.stageRoomBlock({ ...f.actor, controlVersion: 2 }, 'guest', 99n)).toMatchObject({ controlVersion: 3, block: { id: first.block.id, state: 'BLOCKED', deniedBefore: 16n } });
+      expect(await f.store.completeRoomUnblock(f.roomId, 2, first.block.id)).toBe(false);
+      expect(await f.store.completeRoomUnblock(f.otherId, 3, first.block.id)).toBe(false);
+      await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 3 }, first.block.id);
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      expect(await f.store.completeRoomUnblock(f.roomId, 4, first.block.id)).toBe(true);
+      expect(await f.store.completeRoomUnblock(f.roomId, 4, first.block.id)).toBe(false);
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [], allowedMemberIds: [], room: { controlVersion: 4 } });
+      expect(await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 4 }, first.block.id)).toBeNull();
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('arbitrates concurrent identical intent writes with one epoch winner', async () => {
+    const f = await fixture();
+    try {
+      const writes = await Promise.all([f.store.stageRoomBlock(f.actor, 'guest', 16n), f.store.stageRoomBlock(f.actor, 'guest', 32n)]);
+      expect(writes.filter(Boolean)).toHaveLength(1); expect(writes.filter(w => w === null)).toHaveLength(1);
+      expect(await f.client.roomMemberBlock.count({ where: { roomId: f.roomId } })).toBe(1);
+      expect((await f.store.read(f.roomId))!.room.controlVersion).toBe(1);
+      const winner = writes.find(w => w !== null)!;
+      const pending = (await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, winner.block.id))!;
+      expect(await f.store.completeRoomUnblock(f.roomId, 2, winner.block.id)).toBe(true);
+      const replacement = (await f.store.stageRoomBlock({ ...f.actor, controlVersion: 2 }, 'guest', 64n))!;
+      expect(replacement.block.id).not.toBe(winner.block.id);
+      expect(replacement.block.deniedBefore).toBe(64n);
+      await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 3 }, replacement.block.id);
+      expect(await f.store.completeRoomUnblock(f.roomId, 4, pending.block.id)).toBe(false);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toEqual([expect.objectContaining({ id: replacement.block.id, state: 'UNBLOCK_PENDING' })]);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('refuses unblock admission without current authority but permits corrective owner unblock', async () => {
+    const f = await fixture();
+    try {
+      const block = (await f.store.stageRoomBlock(f.actor, 'guest', 16n))!.block;
+      const actor = { ...f.actor, controlVersion: 1 };
+      for (const patch of [{ guildDiscordId: 'wrong' }, { memberDiscordId: 'wrong' }, { controlVersion: 0 }, { roomId: f.otherId, memberDiscordId: 'other-owner', controlVersion: 0 }]) {
+        expect(await f.store.stageRoomUnblock({ ...actor, ...patch }, block.id)).toBeNull();
+      }
+      for (const status of ['CREATING', 'CLOSING', 'CLOSED'] as const) {
+        await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { status } });
+        expect(await f.store.stageRoomUnblock(actor, block.id)).toBeNull();
+      }
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { status: 'ACTIVE' } });
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      expect(await f.store.stageRoomUnblock(actor, block.id)).toBeNull();
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: true } });
+      const transfer = await f.store.createTransfer({ roomId: f.roomId, controlVersion: 1, ownerDiscordId: 'owner', targetDiscordId: 'next' });
+      expect(await f.store.stageRoomUnblock(actor, block.id)).toBeNull();
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [block], room: { controlVersion: 1 } });
+      await f.store.discardTransfer(transfer.id);
+      // A legacy/inconsistent owner block must still be removable, not stranded
+      // by the protection that prevents creating owner blocks in the first place.
+      await f.client.roomMemberBlock.update({ where: { id: block.id }, data: { memberDiscordId: 'owner' } });
+      expect(await f.store.stageRoomUnblock(actor, block.id)).toMatchObject({ controlVersion: 2, block: { memberDiscordId: 'owner', state: 'UNBLOCK_PENDING' } });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('rejects wrong guild, owner, target owner, version, inactive room, disabled setup and pending transfer without writes', async () => {
+    const f = await fixture();
+    try {
+      for (const actor of [{ ...f.actor, guildDiscordId: 'wrong' }, { ...f.actor, memberDiscordId: 'wrong' }, { ...f.actor, controlVersion: 1 }]) {
+        expect(await f.store.stageRoomBlock(actor, 'guest', 0n)).toBeNull();
+        expect(await f.store.stageRoomUnblock(actor, randomUUID())).toBeNull();
+      }
+      expect(await f.store.stageRoomBlock(f.actor, 'owner', 0n)).toBeNull();
+      for (const status of ['CREATING', 'CLOSING', 'CLOSED'] as const) {
+        await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { status } });
+        expect(await f.store.stageRoomBlock(f.actor, 'guest', 0n)).toBeNull();
+      }
+      await f.client.temporaryRoom.update({ where: { id: f.roomId }, data: { status: 'ACTIVE' } });
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: false } });
+      expect(await f.store.stageRoomBlock(f.actor, 'guest', 0n)).toBeNull();
+      await f.client.voiceCreator.update({ where: { id: f.creatorId }, data: { roomCommandsEnabled: true } });
+      await f.store.createTransfer({ roomId: f.roomId, ownerDiscordId: 'owner', targetDiscordId: 'next', controlVersion: 0 });
+      expect(await f.store.stageRoomBlock(f.actor, 'guest', 0n)).toBeNull();
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [], room: { controlVersion: 0 } });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('rolls back intent, allowlist and version when allowlist removal fails', async () => {
+    const f = await fixture();
+    try {
+      await f.store.setAllowed(f.roomId, 0, 'guest', true);
+      const transaction = f.client.$transaction.bind(f.client);
+      vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        const remove = tx.roomAllowedMember.deleteMany.bind(tx.roomAllowedMember);
+        vi.spyOn(tx.roomAllowedMember, 'deleteMany').mockImplementationOnce(((args: Parameters<typeof remove>[0]) => remove(args).then(() => { throw new Error('failed removal'); })) as typeof remove);
+        return work(tx as unknown as typeof f.client);
+      })) as never);
+      await expect(f.store.stageRoomBlock(f.actor, 'guest', 0n)).rejects.toThrow('failed removal');
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [], allowedMemberIds: ['guest'], room: { controlVersion: 0 } });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('blocks acquisition and transfer for either intent state but permits owner departure', async () => {
+    const f = await fixture();
+    try {
+      const block = (await f.store.stageRoomBlock(f.actor, 'guest', 0n))!;
+      for (const version of [1, 2]) {
+        if (version === 2) await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, block.block.id);
+        expect(await f.store.changeOwner(f.roomId, version, 'owner', 'guest')).toBe(false);
+        await expect(f.store.createTransfer({ roomId: f.roomId, ownerDiscordId: 'owner', targetDiscordId: 'guest', controlVersion: version })).rejects.toThrow();
+        const transfer = await f.store.createTransfer({ roomId: f.roomId, ownerDiscordId: 'owner', targetDiscordId: 'next', controlVersion: version });
+        await f.client.pendingOwnershipTransfer.update({ where: { id: transfer.id }, data: { targetDiscordId: 'guest' } });
+        expect(await f.store.finishTransfer(transfer.id, version, new Date(), 'confirm')).toBe(false);
+        await f.store.discardTransfer(transfer.id);
+      }
+      expect(await f.store.changeOwner(f.roomId, 2, 'owner', null)).toBe(true);
+      expect(await f.store.changeOwner(f.roomId, 3, null, 'guest')).toBe(false);
+      expect(await f.store.changeOwner(f.roomId, 3, null, 'next')).toBe(true);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toHaveLength(1);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('keeps closing intentions, purges only closed rooms, closes atomically and cascades deletes', async () => {
+    const f = await fixture(); const lifecycle = new PrismaTemporaryRoomRepository(f.client);
+    try {
+      await f.store.stageRoomBlock(f.actor, 'guest', 0n);
+      await lifecycle.beginClosing(f.roomId);
+      expect(await f.store.purgeClosedRoomBlocks()).toBe(0);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toHaveLength(1);
+      await lifecycle.markClosed(f.roomId);
+      expect((await f.store.read(f.roomId))!.memberBlocks).toEqual([]);
+      await f.client.roomMemberBlock.create({ data: { roomId: f.roomId, memberDiscordId: 'old' } });
+      expect(await f.store.purgeClosedRoomBlocks()).toBe(1);
+      await f.store.stageRoomBlock({ ...f.actor, roomId: f.otherId, memberDiscordId: 'other-owner' }, 'guest', 0n);
+      await f.client.temporaryRoom.delete({ where: { id: f.otherId } });
+      expect(await f.client.roomMemberBlock.count({ where: { roomId: f.otherId } })).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('rolls back closure if terminal block cleanup fails', async () => {
+    const f = await fixture(); const lifecycle = new PrismaTemporaryRoomRepository(f.client);
+    try {
+      await f.store.stageRoomBlock(f.actor, 'guest', 0n); await lifecycle.beginClosing(f.roomId);
+      const transaction = f.client.$transaction.bind(f.client);
+      vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        const remove = tx.roomMemberBlock.deleteMany.bind(tx.roomMemberBlock);
+        vi.spyOn(tx.roomMemberBlock, 'deleteMany').mockImplementationOnce(((args: Parameters<typeof remove>[0]) => remove(args).then(() => { throw new Error('failed cleanup'); })) as typeof remove);
+        return work(tx as unknown as typeof f.client);
+      })) as never);
+      await expect(lifecycle.markClosed(f.roomId)).rejects.toThrow('failed cleanup');
+      expect(await f.store.read(f.roomId)).toMatchObject({ room: { status: 'CLOSING', controlVersion: 2, closedAt: null }, memberBlocks: [expect.objectContaining({ memberDiscordId: 'guest' })] });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest('fence waits for a late intent writer', async () => {
+    const f = await fixture(); const observer = new Client({ connectionString: process.env.DIRECT_URL });
+    const locked = deferred<number>(); const admitted = deferred<number>(); const release = deferred();
+    let writer: Promise<unknown> | undefined; let fence: Promise<unknown> | undefined;
+    try {
+      await observer.connect();
+      const transaction = f.client.$transaction.bind(f.client);
+      const transactions = vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        const result = await work(tx as unknown as typeof f.client);
+        locked.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        await release.promise; return result;
+      })) as never);
+      writer = f.store.stageRoomBlock(f.actor, 'guest', 0n); const writerPid = await locked.promise;
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [], room: { controlVersion: 0 } });
+      transactions.mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        admitted.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        return work(tx as unknown as typeof f.client);
+      })) as never);
+      const deadline = performance.now() + 2_000;
+      fence = f.store.settleAccess(f.roomId, 0);
+      let timer: ReturnType<typeof setTimeout> | undefined; let fencePid: number;
+      try {
+        fencePid = await Promise.race([admitted.promise,
+          fence.then((): never => { throw new Error('Fence completed without transaction admission'); }),
+          new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Fence transaction was not admitted within 2000ms')), Math.max(1, deadline - performance.now())); }),
+        ]);
+      } finally { clearTimeout(timer); }
+      type LockObservation = { state: string; wait_event_type: string | null; blockers: number[]; room_lock: boolean };
+      let row: LockObservation | undefined;
+      do {
+        row = (await observer.query<LockObservation>(`SELECT state, wait_event_type, pg_blocking_pids(pid) AS blockers,
+          query LIKE '%TemporaryRoom%' AND query ILIKE 'UPDATE %' AS room_lock
+          FROM pg_stat_activity WHERE datname=current_database() AND pid=$1`, [fencePid])).rows[0];
+        if (row?.wait_event_type === 'Lock' && row.room_lock && row.blockers.includes(writerPid)) break;
+      } while (performance.now() < deadline);
+      expect(row).toMatchObject({ state: 'active', wait_event_type: 'Lock', room_lock: true });
+      expect(row!.blockers).toContain(writerPid); release.resolve(); await writer;
+      expect(await fence).toMatchObject({ memberBlocks: [expect.objectContaining({ memberDiscordId: 'guest' })], room: { controlVersion: 1 } });
+      expect(await f.store.stageRoomBlock(f.actor, 'late', 0n)).toBeNull();
+      await f.client.$transaction(async tx => {
+        await tx.$executeRaw`SET LOCAL lock_timeout = '500ms'`;
+        expect(await tx.temporaryRoom.updateMany({ where: { id: f.roomId }, data: { userLimit: 7 } })).toEqual({ count: 1 });
+      });
+    } finally { release.resolve(); await writer?.catch(() => {}); await fence?.catch(() => {}); await observer.end(); await f.cleanup(); }
+  }, 30_000);
+
+  integrationTest('confirms lost stage and completion replies by readback and fence', async () => {
+    const f = await fixture();
+    try {
+      const transaction = f.client.$transaction.bind(f.client);
+      const loseReply = () => vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: never) => { await transaction(work); throw new Error('lost acknowledgement'); }) as never);
+      loseReply(); await expect(f.store.stageRoomBlock(f.actor, 'guest', 0n)).rejects.toThrow('lost acknowledgement');
+      const block = (await f.store.settleAccess(f.roomId, 0))!.memberBlocks[0]!;
+      await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, block.id);
+      loseReply(); await expect(f.store.completeRoomUnblock(f.roomId, 2, block.id)).rejects.toThrow('lost acknowledgement');
+      expect(await f.store.settleAccess(f.roomId, 2)).toMatchObject({ memberBlocks: [], room: { controlVersion: 3 } });
+    } finally { await f.cleanup(); }
+  });
+
+  integrationTest.each(['block', 'unblock', 'complete'] as const)('fences a queued old-version %s through the shared room row lock', async operation => {
+    const f = await fixture(); const observer = new Client({ connectionString: process.env.DIRECT_URL });
+    const locked = deferred<number>(); const admitted = deferred<number>(); const release = deferred();
+    let fence: Promise<unknown> | undefined; let writer: Promise<unknown> | undefined;
+    try {
+      await observer.connect();
+      const block = (await f.store.stageRoomBlock(f.actor, 'guest', 16n))!.block;
+      await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, block.id);
+      const transaction = f.client.$transaction.bind(f.client);
+      const transactions = vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        const result = await work(tx as unknown as typeof f.client);
+        locked.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        await release.promise; return result;
+      })) as never);
+      fence = f.store.settleAccess(f.roomId, 2); const fencePid = await locked.promise;
+      transactions.mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        admitted.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        return work(tx as unknown as typeof f.client);
+      })) as never);
+      // A started JS promise is not an admitted DB transaction: pool admission
+      // can outlast 100 observer queries. Wait for its actual backend first.
+      // Bound admission + lock observation to 2s, leaving headroom inside the
+      // interactive fence transaction; no sleep or fixed query-count budget.
+      const deadline = performance.now() + 2_000;
+      writer = operation === 'block' ? f.store.stageRoomBlock({ ...f.actor, controlVersion: 2 }, 'guest', 99n)
+        : operation === 'unblock' ? f.store.stageRoomUnblock({ ...f.actor, controlVersion: 2 }, block.id)
+          : f.store.completeRoomUnblock(f.roomId, 2, block.id);
+      let timer: ReturnType<typeof setTimeout> | undefined; let writerPid: number;
+      try {
+        writerPid = await Promise.race([admitted.promise,
+          writer.then((): never => { throw new Error('Writer completed without transaction admission'); }),
+          new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Writer transaction was not admitted within 2000ms')), Math.max(1, deadline - performance.now())); }),
+        ]);
+      } finally { clearTimeout(timer); }
+      type LockObservation = { state: string; wait_event_type: string | null; blockers: number[]; room_lock: boolean };
+      let row: LockObservation | undefined;
+      do {
+        row = (await observer.query<LockObservation>(`SELECT state, wait_event_type, pg_blocking_pids(pid) AS blockers,
+          query LIKE '%TemporaryRoom%' AND query ILIKE '%FOR UPDATE%' AS room_lock
+          FROM pg_stat_activity WHERE datname=current_database() AND pid=$1`, [writerPid])).rows[0];
+        if (row?.wait_event_type === 'Lock' && row.room_lock && row.blockers.includes(fencePid)) break;
+      } while (performance.now() < deadline);
+      expect(row).toMatchObject({ state: 'active', wait_event_type: 'Lock', room_lock: true });
+      expect(row!.blockers).toContain(fencePid);
+      release.resolve(); await fence;
+      expect(await writer).toBe(operation === 'complete' ? false : null);
+      expect(await f.store.read(f.roomId)).toMatchObject({ memberBlocks: [expect.objectContaining({ id: block.id, state: 'UNBLOCK_PENDING', deniedBefore: 16n })], room: { controlVersion: 3 } });
+    } finally { release.resolve(); await fence?.catch(() => {}); await writer?.catch(() => {}); await observer.end(); await f.cleanup(); }
+  }, 30_000);
+
+  integrationTest('fence waits for an admitted completion and completion releases the lock before REST', async () => {
+    const f = await fixture(); const observer = new Client({ connectionString: process.env.DIRECT_URL });
+    const locked = deferred<number>(); const admitted = deferred<number>(); const release = deferred();
+    let writer: Promise<boolean> | undefined; let fence: Promise<unknown> | undefined;
+    try {
+      await observer.connect();
+      const block = (await f.store.stageRoomBlock(f.actor, 'guest', 0n))!.block;
+      await f.store.stageRoomUnblock({ ...f.actor, controlVersion: 1 }, block.id);
+      const transaction = f.client.$transaction.bind(f.client);
+      const transactions = vi.spyOn(f.client, '$transaction').mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        const result = await work(tx as unknown as typeof f.client);
+        locked.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        await release.promise; return result;
+      })) as never);
+      writer = f.store.completeRoomUnblock(f.roomId, 2, block.id); const writerPid = await locked.promise;
+      expect((await f.store.read(f.roomId))!.memberBlocks).toHaveLength(1);
+      transactions.mockImplementationOnce((async (work: (tx: typeof f.client) => Promise<unknown>) => transaction(async tx => {
+        admitted.resolve((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid);
+        return work(tx as unknown as typeof f.client);
+      })) as never);
+      const deadline = performance.now() + 2_000;
+      fence = f.store.settleAccess(f.roomId, 2);
+      let timer: ReturnType<typeof setTimeout> | undefined; let fencePid: number;
+      try {
+        fencePid = await Promise.race([admitted.promise,
+          fence.then((): never => { throw new Error('Fence completed without transaction admission'); }),
+          new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Fence transaction was not admitted within 2000ms')), Math.max(1, deadline - performance.now())); }),
+        ]);
+      } finally { clearTimeout(timer); }
+      type LockObservation = { state: string; wait_event_type: string | null; blockers: number[]; room_lock: boolean };
+      let row: LockObservation | undefined;
+      do {
+        row = (await observer.query<LockObservation>(`SELECT state, wait_event_type, pg_blocking_pids(pid) AS blockers,
+          query LIKE '%TemporaryRoom%' AND query ILIKE 'UPDATE %' AS room_lock
+          FROM pg_stat_activity WHERE datname=current_database() AND pid=$1`, [fencePid])).rows[0];
+        if (row?.wait_event_type === 'Lock' && row.room_lock && row.blockers.includes(writerPid)) break;
+      } while (performance.now() < deadline);
+      expect(row).toMatchObject({ state: 'active', wait_event_type: 'Lock', room_lock: true });
+      expect(row!.blockers).toContain(writerPid); release.resolve(); expect(await writer).toBe(true);
+      expect(await fence).toMatchObject({ memberBlocks: [], room: { controlVersion: 3 } });
+      await f.client.$transaction(async tx => {
+        await tx.$executeRaw`SET LOCAL lock_timeout = '500ms'`;
+        expect(await tx.temporaryRoom.updateMany({ where: { id: f.roomId }, data: { userLimit: 7 } })).toEqual({ count: 1 });
+      });
+    } finally { release.resolve(); await writer?.catch(() => {}); await fence?.catch(() => {}); await observer.end(); await f.cleanup(); }
+  }, 30_000);
+
+  integrationTest('additive migration preserves prior data with an empty backend-only block table', async () => {
+    assertDisposableDatabaseEnvironment();
+    const migration = await readFile(new URL('../../prisma/migrations/20261110030000_room_member_blocks/migration.sql', import.meta.url), 'utf8');
+    const client = new Client({ connectionString: process.env.DIRECT_URL }); const schema = `moderation_${randomUUID().replaceAll('-', '')}`;
+    try {
+      await client.connect(); await client.query(`CREATE SCHEMA "${schema}"`); await client.query(`SET search_path TO "${schema}"`);
+      await client.query(`CREATE TABLE "TemporaryRoom" (id UUID PRIMARY KEY, name TEXT NOT NULL, "controlVersion" INTEGER NOT NULL); ALTER TABLE "TemporaryRoom" ENABLE ROW LEVEL SECURITY;`);
+      const id = randomUUID(); await client.query(`INSERT INTO "TemporaryRoom" VALUES ($1, 'Kept', 7)`, [id]);
+      const before = (await client.query('SELECT * FROM "TemporaryRoom"')).rows;
+      await client.query(migration);
+      expect((await client.query('SELECT * FROM "TemporaryRoom"')).rows).toEqual(before);
+      expect((await client.query('SELECT * FROM "RoomMemberBlock"')).rows).toEqual([]);
+      expect((await client.query(`SELECT relrowsecurity FROM pg_class WHERE oid='"RoomMemberBlock"'::regclass`)).rows[0]!.relrowsecurity).toBe(true);
+      expect((await client.query('SELECT * FROM pg_policies WHERE schemaname=$1', [schema])).rows).toEqual([]);
+      const inserted = (await client.query(`INSERT INTO "RoomMemberBlock" (id,"roomId","memberDiscordId") VALUES ($1,$2,'guest') RETURNING *`, [randomUUID(), id])).rows[0]!;
+      expect(inserted).toMatchObject({ state: 'BLOCKED', deniedBefore: '0', createdAt: expect.any(Date) });
+    } finally { try { await client.query('RESET search_path'); await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); } finally { await client.end(); } }
+  });
+});

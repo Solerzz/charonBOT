@@ -52,13 +52,14 @@ describe('buildCallPanel', () => {
     expect(JSON.stringify(payload)).not.toContain('<@null>');
   });
 
-  it.each([room.ownerDiscordId, null])('exposes 3+3+1 public controls with owner %s', (ownerDiscordId) => {
+  it.each([room.ownerDiscordId, null])('exposes 3+3+2 public controls with owner %s', (ownerDiscordId) => {
     const payload = json({ room: { ...room, ownerDiscordId }, participantCount: 12 });
-    expect(payload.components.map(row => row.components.length)).toEqual([3, 3, 1]);
+    expect(payload.components.map(row => row.components.length)).toEqual([3, 3, 2]);
     const buttons = payload.components.flatMap(row => row.components);
-    expect(buttons.map(button => 'custom_id' in button && button.custom_id.split(':')[2])).toEqual(['lock', 'visibility', 'rename', 'limit', 'access', 'transfer', 'claim']);
+    expect(buttons.map(button => 'custom_id' in button && button.custom_id.split(':')[2])).toEqual(['lock', 'visibility', 'rename', 'limit', 'access', 'transfer', 'claim', 'moderation']);
     expect(buttons.slice(0, 6).every(button => button.disabled === (ownerDiscordId === null))).toBe(true);
     expect(buttons[6]).toMatchObject({ type: ComponentType.Button, custom_id: 'call:v3:claim:123e4567-e89b-42d3-a456-426614174000:7', label: 'Assumir sala', style: ButtonStyle.Secondary, disabled: ownerDiscordId !== null });
+    expect(buttons[7]).toMatchObject({ label: 'Moderação', disabled: ownerDiscordId === null });
     expect(JSON.stringify(payload)).not.toContain('Abrir controles');
   });
 

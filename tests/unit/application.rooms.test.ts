@@ -1,10 +1,12 @@
-import { ChannelType, Events, MessageFlags, PermissionFlagsBits, PermissionsBitField, type Guild, type Interaction, type VoiceState } from 'discord.js';
+import { randomUUID } from 'node:crypto';
+import { ChannelType, DefaultRestOptions, Events, MessageFlags, PermissionFlagsBits, PermissionsBitField, REST, RESTEvents, type Guild, type Interaction, type VoiceState } from 'discord.js';
+import { Response } from 'undici';
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { createApplication, type DiscordClientPort } from '../../src/application.js';
 import { createPrismaClient } from '../../src/core/database/prisma.js';
 import { createLogger } from '../../src/core/logger/logger.js';
 import { CallPrivateWorkspace } from '../../src/modules/calls/call-workspace.js';
-import type { PendingOwnershipTransfer, RoomPresence } from '../../src/modules/calls/room.types.js';
+import type { PendingOwnershipTransfer, RoomMemberBlock, RoomPresence } from '../../src/modules/calls/room.types.js';
 import { creator, room, deferred } from './modules/calls/call.fixtures.js';
 import { discordFixture } from './modules/calls/call.discord.fixtures.js';
 import { OTHER, OWNER } from './modules/ownership/ownership.fixtures.js';
@@ -22,6 +24,7 @@ function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
   const native = discordFixture(); native.states.set(OWNER, { channelId: room.channelDiscordId }); native.states.set(OTHER, { channelId: room.channelDiscordId });
   const record = structuredClone(room); const configuration = structuredClone(creator);
   const presences: RoomPresence[] = []; let pending: PendingOwnershipTransfer | null = null;
+  const memberBlocks: RoomMemberBlock[] = [];
   const database = createPrismaClient(config.database);
   vi.spyOn(database, '$connect').mockResolvedValue(undefined);
   vi.spyOn(database, '$queryRawUnsafe').mockResolvedValue([]);
@@ -30,7 +33,7 @@ function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
   const disconnect = vi.spyOn(database, '$disconnect').mockResolvedValue(undefined);
   const rows = () => tracked && record.status !== 'CLOSED' ? [structuredClone(record)] : [];
   const list = sqlSpy(database.temporaryRoom, 'findMany').mockImplementation(async () => rows());
-  sqlSpy(database.temporaryRoom, 'findUnique').mockImplementation(async () => ({ ...structuredClone(record), voiceCreator: structuredClone(configuration), presences: structuredClone(presences), allowedMembers: [], pendingTransfer: structuredClone(pending) }));
+  sqlSpy(database.temporaryRoom, 'findUnique').mockImplementation(async () => ({ ...structuredClone(record), voiceCreator: structuredClone(configuration), presences: structuredClone(presences), allowedMembers: [], memberBlocks: structuredClone(memberBlocks), pendingTransfer: structuredClone(pending) }));
   sqlSpy(database.temporaryRoom, 'findUniqueOrThrow').mockImplementation(async () => structuredClone(record));
   sqlSpy(database.temporaryRoom, 'findFirst').mockImplementation(async (input) => {
     const where = input?.where;
@@ -59,6 +62,11 @@ function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
     return presences.at(-1)! as never;
   });
   sqlSpy(database.pendingOwnershipTransfer, 'findUnique').mockImplementation(async (input) => pending?.id === input.where.id ? structuredClone(pending) : null);
+  sqlSpy(database.roomMemberBlock, 'findUnique').mockResolvedValue(null);
+  sqlSpy(database.roomMemberBlock, 'deleteMany').mockImplementation(async input => {
+    if (input?.where?.room && record.status !== 'CLOSED') return { count: 0 };
+    const count = memberBlocks.length; memberBlocks.splice(0); return { count };
+  });
   sqlSpy(database.pendingOwnershipTransfer, 'deleteMany').mockImplementation(async () => { pending = null; return { count: 1 }; });
   sqlSpy(database.pendingOwnershipTransfer, 'create').mockImplementation(async (input) => {
     pending = { ...input.data, id: '323e4567-e89b-42d3-a456-426614174000', expiresAt: null } as PendingOwnershipTransfer; return structuredClone(pending);
@@ -72,10 +80,12 @@ function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
   sqlSpy(database.voiceCreator, 'update').mockImplementation(async (input) => { Object.assign(configuration, input.data); return structuredClone(configuration); });
   const listeners = new Map<string, (...args: never[]) => void>(); let ready = false;
   const client = {
+    rest: new REST(), token: 'test-only',
     on: vi.fn((event: string, listener: (...args: never[]) => void) => { listeners.set(event, listener); }),
     off: vi.fn((event: string) => { listeners.delete(event); }), isReady: () => ready,
     guilds: { fetch: vi.fn(async () => native.guild as unknown as Guild) }, login: vi.fn(async () => {}), destroy: vi.fn(),
   };
+  Object.assign(native.guild, { client });
   const app = createApplication(config, { database, discord: client as unknown as DiscordClientPort, logger });
   const emit = (event: string, ...args: unknown[]) => listeners.get(event)?.(...args as never[]);
   const markReady = () => { ready = true; emit(Events.ClientReady); };
@@ -99,12 +109,53 @@ function fixture(tracked = true, logger = createLogger({ level: 'silent' })) {
     const old = { id: memberId, guild: native.guild, member, channelId: room.channelDiscordId, channel: null } as unknown as VoiceState;
     emit(Events.VoiceStateUpdate, old, { ...old, channelId: null });
   };
-  return { ...native, database, record, configuration, presences, app, client, emit, markReady, interaction, voice, list, disconnect, pending: () => pending };
+  return { ...native, database, record, configuration, presences, memberBlocks, app, client, emit, markReady, interaction, voice, list, disconnect, pending: () => pending };
 }
 const flush = async () => { await new Promise<void>((resolve) => setImmediate(resolve)); };
 afterEach(() => vi.useRealTimers());
 
 describe('default room lifecycle at SQL/REST/client boundaries', () => {
+  it('shares startup, voice and interaction moderation cooldown instead of allocating bypass transports', async () => {
+    const f = fixture();
+    f.memberBlocks.push({ id: randomUUID(), roomId: room.id, memberDiscordId: OTHER, state: 'BLOCKED', deniedBefore: 0n, createdAt: new Date() });
+    const http = vi.spyOn(DefaultRestOptions, 'makeRequest').mockResolvedValue(new Response('{"retry_after":60}', { status: 429, headers: { 'content-type': 'application/json' } }));
+    try {
+      const starting = f.app.start(); await flush(); f.markReady(); await starting;
+      expect(http).toHaveBeenCalledOnce(); expect(f.client.rest.listenerCount(RESTEvents.RateLimited)).toBe(1);
+      const member = { ...f.member, id: OTHER, displayName: 'Member', presence: null };
+      const old = { id: OTHER, guild: f.guild, member, channelId: null, channel: null };
+      f.emit(Events.VoiceStateUpdate, old, { ...old, channelId: room.channelDiscordId }); await flush();
+      const action = f.interaction(`call:v3:lock:${room.id}:${f.record.controlVersion}`);
+      f.emit(Events.InteractionCreate, action); await flush();
+      expect(action.deferUpdate).toHaveBeenCalledOnce();
+      expect(f.record.isLocked).toBe(false); expect(f.states.has(OTHER)).toBe(true);
+      expect(http).toHaveBeenCalledOnce(); expect(f.client.rest.listenerCount(RESTEvents.RateLimited)).toBe(1);
+    } finally { await f.app.stop('test'); http.mockRestore(); }
+    expect(f.client.rest.listenerCount(RESTEvents.RateLimited)).toBe(0);
+  });
+
+  it('keeps the shared Client, SQL and transport available to accepted work that reaches HTTP after shutdown starts', async () => {
+    const f = fixture(); const entered = deferred(); const release = deferred();
+    const http = vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(async () => {
+      expect(f.client.destroy).not.toHaveBeenCalled(); expect(f.disconnect).not.toHaveBeenCalled();
+      f.states.delete(OTHER); return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    try {
+      const starting = f.app.start(); await flush(); f.markReady(); await starting;
+      f.memberBlocks.push({ id: randomUUID(), roomId: room.id, memberDiscordId: OTHER, state: 'BLOCKED', deniedBefore: 0n, createdAt: new Date() });
+      const project = f.channel.permissionOverwrites.set.getMockImplementation()!;
+      f.channel.permissionOverwrites.set.mockImplementationOnce(async input => { entered.resolve(); await release.promise; return project(input); });
+      f.emit(Events.InteractionCreate, f.interaction(`call:v3:lock:${room.id}:${f.record.controlVersion}`));
+      await entered.promise;
+      const stopping = f.app.stop('test'); await flush();
+      expect(http).not.toHaveBeenCalled(); expect(f.client.destroy).not.toHaveBeenCalled(); expect(f.disconnect).not.toHaveBeenCalled();
+      release.resolve(); await stopping;
+      expect(http).toHaveBeenCalledOnce(); expect(f.states.has(OTHER)).toBe(false);
+      expect(f.record.isLocked).toBe(true); expect(f.client.destroy).toHaveBeenCalledOnce(); expect(f.disconnect).toHaveBeenCalledOnce();
+      expect(f.client.rest.listenerCount(RESTEvents.RateLimited)).toBe(0);
+    } finally { release.resolve(); await f.app.stop('test'); http.mockRestore(); }
+  });
+
   it('routes call metrics through the application logger rather than a separate default logger', async () => {
     const lines: string[] = [];
     const logger = createLogger({ level: 'info', destination: { write: line => { lines.push(line); } } });

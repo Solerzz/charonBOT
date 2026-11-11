@@ -16,7 +16,6 @@ import { PrismaTemporaryRoomRepository } from './modules/calls/call.repository.j
 import { CallService } from './modules/calls/call.service.js';
 import { CallInteractions } from './modules/calls/call.interactions.js';
 import { createRoomRuntime, type RoomRuntime } from './modules/calls/room.runtime.js';
-import { DiscordRoomGateway } from './modules/calls/room.discord.js';
 import {
   VoiceStateHandler,
   type VoiceStateDispatcher,
@@ -119,7 +118,7 @@ export function createApplication(
   const closeResources = (): Promise<void> => {
     closePromise ??= (async () => {
       // Callers have already closed admission by entering stopping/failed.
-      const timersDrained = runtime?.stop();
+      const timersDrained = runtime?.stop(Promise.allSettled([...inFlight]));
       await Promise.allSettled([...inFlight, timersDrained]);
       await drafts.dispose();
       discord.destroy();
@@ -230,7 +229,7 @@ export function createApplication(
       abort.abort();
       settleReadiness?.(false);
       // Close timer admission now, not after startup or dispatches release locks.
-      const timersDrained = runtime?.stop();
+      const timersDrained = runtime?.stop(Promise.allSettled([...inFlight]));
       stopPromise = (async () => {
         logger.info({ signal }, 'Charon stopping');
         await startPromise?.catch(() => undefined);
@@ -300,7 +299,7 @@ export function createDefaultDispatcher(
   );
   registry.register(new SetupCreationInteractions(drafts, new SetupCreationService(setupRepository, logger),
     (interaction) => new DiscordSetupGateway(interaction.guild)));
-  registry.register(new CallInteractions({ ...runtime, logger }, (guild) => new DiscordRoomGateway(guild)));
+  registry.register(new CallInteractions({ ...runtime, logger }, runtime.gatewayFor));
   return registry;
 }
 
@@ -316,5 +315,5 @@ export function createDefaultVoiceDispatcher(
     runtime,
     logger,
   );
-  return new VoiceStateHandler(service, logger);
+  return new VoiceStateHandler(service, logger, runtime.gatewayFor);
 }

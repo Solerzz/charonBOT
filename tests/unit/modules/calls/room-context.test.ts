@@ -6,7 +6,7 @@ import { lifecycleFixture, room } from './call.fixtures.js';
 
 function fixture() {
   const actor: RoomActor = { roomId: room.id, guildDiscordId: room.guildDiscordId, memberDiscordId: room.ownerDiscordId!, controlVersion: 0 };
-  const state: RoomState = { room: { ...room }, controlsEnabled: true, presences: [], allowedMemberIds: [], transfer: null };
+  const state: RoomState = { room: { ...room }, controlsEnabled: true, presences: [], allowedMemberIds: [], memberBlocks: [], transfer: null };
   const snapshot = { guildDiscordId: room.guildDiscordId, channelDiscordId: room.channelDiscordId, name: 'Game', userLimit: 0, members: [{ memberDiscordId: actor.memberDiscordId, isBot: false }] };
   const store = { read: vi.fn(async (_id: string) => state as RoomState | null) };
   const gateway = { ...lifecycleFixture().gateway, snapshot: vi.fn(async (_id: string) => snapshot) };

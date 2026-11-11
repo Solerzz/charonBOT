@@ -401,7 +401,8 @@ export const ModelName = {
   TemporaryRoom: 'TemporaryRoom',
   RoomPresence: 'RoomPresence',
   RoomAllowedMember: 'RoomAllowedMember',
-  PendingOwnershipTransfer: 'PendingOwnershipTransfer'
+  PendingOwnershipTransfer: 'PendingOwnershipTransfer',
+  RoomMemberBlock: 'RoomMemberBlock'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -417,7 +418,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "voiceCreator" | "temporaryRoom" | "roomPresence" | "roomAllowedMember" | "pendingOwnershipTransfer"
+    modelProps: "voiceCreator" | "temporaryRoom" | "roomPresence" | "roomAllowedMember" | "pendingOwnershipTransfer" | "roomMemberBlock"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -791,6 +792,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    RoomMemberBlock: {
+      payload: Prisma.$RoomMemberBlockPayload<ExtArgs>
+      fields: Prisma.RoomMemberBlockFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.RoomMemberBlockFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.RoomMemberBlockFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>
+        }
+        findFirst: {
+          args: Prisma.RoomMemberBlockFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.RoomMemberBlockFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>
+        }
+        findMany: {
+          args: Prisma.RoomMemberBlockFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>[]
+        }
+        create: {
+          args: Prisma.RoomMemberBlockCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>
+        }
+        createMany: {
+          args: Prisma.RoomMemberBlockCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.RoomMemberBlockCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>[]
+        }
+        delete: {
+          args: Prisma.RoomMemberBlockDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>
+        }
+        update: {
+          args: Prisma.RoomMemberBlockUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>
+        }
+        deleteMany: {
+          args: Prisma.RoomMemberBlockDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.RoomMemberBlockUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.RoomMemberBlockUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>[]
+        }
+        upsert: {
+          args: Prisma.RoomMemberBlockUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$RoomMemberBlockPayload>
+        }
+        aggregate: {
+          args: Prisma.RoomMemberBlockAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateRoomMemberBlock>
+        }
+        groupBy: {
+          args: Prisma.RoomMemberBlockGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RoomMemberBlockGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.RoomMemberBlockCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.RoomMemberBlockCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -900,6 +975,18 @@ export const PendingOwnershipTransferScalarFieldEnum = {
 export type PendingOwnershipTransferScalarFieldEnum = (typeof PendingOwnershipTransferScalarFieldEnum)[keyof typeof PendingOwnershipTransferScalarFieldEnum]
 
 
+export const RoomMemberBlockScalarFieldEnum = {
+  id: 'id',
+  roomId: 'roomId',
+  memberDiscordId: 'memberDiscordId',
+  createdAt: 'createdAt',
+  state: 'state',
+  deniedBefore: 'deniedBefore'
+} as const
+
+export type RoomMemberBlockScalarFieldEnum = (typeof RoomMemberBlockScalarFieldEnum)[keyof typeof RoomMemberBlockScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -1005,6 +1092,34 @@ export type EnumTemporaryRoomStatusFieldRefInput<$PrismaModel> = FieldRefInputTy
  */
 export type ListEnumTemporaryRoomStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'TemporaryRoomStatus[]'>
     
+
+
+/**
+ * Reference to a field of type 'RoomMemberBlockState'
+ */
+export type EnumRoomMemberBlockStateFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'RoomMemberBlockState'>
+
+
+
+/**
+ * Reference to a field of type 'RoomMemberBlockState[]'
+ */
+export type ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'RoomMemberBlockState[]'>
+
+
+
+/**
+ * Reference to a field of type 'BigInt'
+ */
+export type BigIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'BigInt'>
+
+
+
+/**
+ * Reference to a field of type 'BigInt[]'
+ */
+export type ListBigIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'BigInt[]'>
+
 
 
 /**
@@ -1176,6 +1291,7 @@ export type GlobalOmitConfig = {
   roomPresence?: Prisma.RoomPresenceOmit
   roomAllowedMember?: Prisma.RoomAllowedMemberOmit
   pendingOwnershipTransfer?: Prisma.PendingOwnershipTransferOmit
+  roomMemberBlock?: Prisma.RoomMemberBlockOmit
 }
 
 /* Types for Logging */
@@ -1238,4 +1354,3 @@ export type PrismaAction =
  * `PrismaClient` proxy available in interactive transactions.
  */
 export type TransactionClient = Omit<DefaultPrismaClient, runtime.ITXClientDenyList>
-

@@ -14,7 +14,7 @@ export function attachRoomRuntime(f: ReturnType<typeof lifecycleFixture>, logger
   const presence = new Map<string, RoomPresence[]>();
   vi.spyOn(runtime.store, 'read').mockImplementation(async (id) => {
     const record = f.records.get(id);
-    return record ? { room: structuredClone(record), controlsEnabled: f.configuration.roomCommandsEnabled, presences: structuredClone(presence.get(id) ?? []), allowedMemberIds: [], transfer: null } : null;
+    return record ? { room: structuredClone(record), controlsEnabled: f.configuration.roomCommandsEnabled, presences: structuredClone(presence.get(id) ?? []), allowedMemberIds: [], memberBlocks: [], transfer: null } : null;
   });
   vi.spyOn(runtime.store, 'syncPresence').mockImplementation(async (id, members, at, reset) => {
     presence.set(id, members.map((member) => ({ ...member, id: `${id}:${member.memberDiscordId}`, roomId: id,

@@ -236,6 +236,50 @@ export type EnumTemporaryRoomStatusWithAggregatesFilter<$PrismaModel = never> = 
   _max?: Prisma.NestedEnumTemporaryRoomStatusFilter<$PrismaModel>
 }
 
+export type EnumRoomMemberBlockStateFilter<$PrismaModel = never> = {
+  equals?: $Enums.RoomMemberBlockState | Prisma.EnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  in?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  notIn?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumRoomMemberBlockStateFilter<$PrismaModel> | $Enums.RoomMemberBlockState
+}
+
+export type BigIntFilter<$PrismaModel = never> = {
+  equals?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  in?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  notIn?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  lt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  lte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedBigIntFilter<$PrismaModel> | bigint | number
+}
+
+export type EnumRoomMemberBlockStateWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.RoomMemberBlockState | Prisma.EnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  in?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  notIn?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumRoomMemberBlockStateWithAggregatesFilter<$PrismaModel> | $Enums.RoomMemberBlockState
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumRoomMemberBlockStateFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumRoomMemberBlockStateFilter<$PrismaModel>
+}
+
+export type BigIntWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  in?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  notIn?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  lt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  lte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedBigIntWithAggregatesFilter<$PrismaModel> | bigint | number
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _avg?: Prisma.NestedFloatFilter<$PrismaModel>
+  _sum?: Prisma.NestedBigIntFilter<$PrismaModel>
+  _min?: Prisma.NestedBigIntFilter<$PrismaModel>
+  _max?: Prisma.NestedBigIntFilter<$PrismaModel>
+}
+
 export type NestedUuidFilter<$PrismaModel = never> = {
   equals?: string | Prisma.StringFieldRefInput<$PrismaModel>
   in?: string[] | Prisma.ListStringFieldRefInput<$PrismaModel>
@@ -467,6 +511,50 @@ export type NestedEnumTemporaryRoomStatusWithAggregatesFilter<$PrismaModel = nev
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedEnumTemporaryRoomStatusFilter<$PrismaModel>
   _max?: Prisma.NestedEnumTemporaryRoomStatusFilter<$PrismaModel>
+}
+
+export type NestedEnumRoomMemberBlockStateFilter<$PrismaModel = never> = {
+  equals?: $Enums.RoomMemberBlockState | Prisma.EnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  in?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  notIn?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumRoomMemberBlockStateFilter<$PrismaModel> | $Enums.RoomMemberBlockState
+}
+
+export type NestedBigIntFilter<$PrismaModel = never> = {
+  equals?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  in?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  notIn?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  lt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  lte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedBigIntFilter<$PrismaModel> | bigint | number
+}
+
+export type NestedEnumRoomMemberBlockStateWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.RoomMemberBlockState | Prisma.EnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  in?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  notIn?: $Enums.RoomMemberBlockState[] | Prisma.ListEnumRoomMemberBlockStateFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumRoomMemberBlockStateWithAggregatesFilter<$PrismaModel> | $Enums.RoomMemberBlockState
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumRoomMemberBlockStateFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumRoomMemberBlockStateFilter<$PrismaModel>
+}
+
+export type NestedBigIntWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  in?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  notIn?: bigint[] | number[] | Prisma.ListBigIntFieldRefInput<$PrismaModel>
+  lt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  lte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gt?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  gte?: bigint | number | Prisma.BigIntFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedBigIntWithAggregatesFilter<$PrismaModel> | bigint | number
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _avg?: Prisma.NestedFloatFilter<$PrismaModel>
+  _sum?: Prisma.NestedBigIntFilter<$PrismaModel>
+  _min?: Prisma.NestedBigIntFilter<$PrismaModel>
+  _max?: Prisma.NestedBigIntFilter<$PrismaModel>
 }
 
 
