@@ -32,6 +32,8 @@ export function discordFixture() {
     },
   };
   const guild = {
+    ownerId: '82345678901234567',
+    fetch: vi.fn(async (): Promise<{ id: string; ownerId: string }> => ({ id: guild.id, ownerId: guild.ownerId })),
     id: creator.guildDiscordId, roles: { everyone: { id: creator.guildDiscordId }, fetch: vi.fn(async (_id: string, _options?: unknown) => ({ permissions: new PermissionsBitField() })) },
     voiceStates: {
       cache: states,

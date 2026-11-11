@@ -6,8 +6,10 @@ import {
 import { discordIdSchema } from '../setup/setup.schemas.js';
 import type { CallPanelPayload } from './call-panel.view.js';
 import { temporaryRoomNameSchema } from './call.schemas.js';
-import { RoomActionError, type RoomAccessPolicy, type RoomDiscordGateway, type RoomMember, type RoomSnapshot } from './room.types.js';
+import { RoomActionError, type RoomAccessPolicy, type RoomDiscordGateway, type RoomMember, type RoomMemberBlock, type RoomModerationTarget, type RoomSnapshot } from './room.types.js';
 import { measureCallStage } from './call-action.metrics.js';
+import { projectModerationAccess } from './room-moderation.permissions.js';
+import type { RoomModerationTransport } from './room-moderation.transport.js';
 
 export type { RoomDiscordGateway } from './room.types.js';
 
@@ -17,7 +19,7 @@ type Overwrite = { id: string; type: OverwriteType; allow: bigint; deny: bigint 
 const hasCode = (error: unknown, code: number): boolean => typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 
 export class DiscordRoomGateway implements RoomDiscordGateway {
-  constructor(private readonly guild: Guild) {}
+  constructor(private readonly guild: Guild, private readonly moderation?: RoomModerationTransport) {}
 
   snapshot(channelId: string): Promise<RoomSnapshot | null> {
     return this.checked(async () => {
@@ -41,6 +43,39 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
     return this.checked(async () => {
       const member = await this.fetchMember(memberId);
       return member ? { memberDiscordId: member.id, isBot: member.user.bot } : null;
+    });
+  }
+
+  resolveModerationTarget(memberId: string): Promise<RoomModerationTarget | null> {
+    return this.checked(async () => {
+      const guild = await this.guild.fetch();
+      if (guild.id !== this.guild.id) throw new RoomActionError('ROOM_UNAVAILABLE');
+      discordIdSchema.parse(guild.ownerId);
+      // A forced member read refreshes role IDs, not the guild's role grants.
+      await this.guild.roles.fetch();
+      const member = await this.fetchMember(memberId);
+      return member ? { memberDiscordId: member.id, isBot: member.user.bot, isAdministrator: member.permissions.has(P.Administrator),
+        isGuildOwner: guild.ownerId === member.id, channelDiscordId: this.guild.voiceStates.cache.get(member.id)?.channelId ?? null } : null;
+    });
+  }
+
+  assertModerationPermissions(channelId: string, targetId: string): Promise<void> {
+    return this.checked(async () => {
+      const target = await this.moderationTarget(channelId, targetId);
+      if (!target) throw new RoomActionError('UNKNOWN_MEMBER');
+    });
+  }
+
+  disconnectFromRoom(channelId: string, targetId: string): Promise<'disconnected' | 'not-in-room'> {
+    return this.checked(async () => {
+      if (!this.moderation) throw new RoomActionError('MODERATION_INCOMPLETE');
+      discordIdSchema.parse(channelId); discordIdSchema.parse(targetId);
+      return this.moderation.disconnectOnce(this.guild, targetId, async () => {
+        // Fetch bot/channel authority first; the target's fresh role protection
+        // and latest observed voice cache are the last reads before HTTP.
+        const target = await this.moderationTarget(channelId, targetId);
+        return target !== null && this.guild.voiceStates.cache.get(targetId)?.channelId === channelId;
+      });
     });
   }
 
@@ -73,18 +108,22 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
     return this.checked(async () => this.overwrites(await this.requireChannel(channelId)));
   }
 
-  setRoomAccess(channelId: string, policy: RoomAccessPolicy, allowedIds: string[]): Promise<void> {
+  setRoomAccess(channelId: string, policy: RoomAccessPolicy, allowedIds: string[], blocks: readonly RoomMemberBlock[]): Promise<void> {
     return this.checked(async () => {
       if (typeof policy.isLocked !== 'boolean' || !['PUBLIC', 'PRIVATE'].includes(policy.visibility)) throw new RangeError('Invalid room access policy');
       const { channel, bot } = await this.authorized(channelId, [P.ViewChannel, P.ManageRoles]);
       const allowed = new Set(allowedIds.map((id) => discordIdSchema.parse(id)));
+      const managed = new Set(blocks.map(block => discordIdSchema.parse(block.memberDiscordId)));
+      if (managed.has(bot.id) || managed.has(this.guild.id)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'INCOMPATIBLE_OVERWRITES');
+      for (const block of blocks) if (block.state === 'BLOCKED') allowed.delete(block.memberDiscordId);
       if (allowed.has(this.guild.roles.everyone.id)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'INCOMPATIBLE_OVERWRITES');
       allowed.add(bot.id);
       const restricted = policy.visibility === 'PRIVATE' ? accessBits : policy.isLocked ? P.Connect : 0n;
       const previous = this.overwrites(channel);
+      if (previous.some(p => managed.has(p.id) && p.type !== OverwriteType.Member)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'INCOMPATIBLE_OVERWRITES');
       const projected = new Map(previous.map((overwrite) => [overwrite.id, overwrite]));
       for (const overwrite of previous) {
-        if (overwrite.id === this.guild.id || (overwrite.type === OverwriteType.Member && allowed.has(overwrite.id))) continue;
+        if (overwrite.id === this.guild.id || managed.has(overwrite.id) || (overwrite.type === OverwriteType.Member && allowed.has(overwrite.id))) continue;
         // A complete member access projection is compatible with our managed
         // allow set, including after restart. Revoke only its access bits when
         // the member leaves that set; retain any unrelated grants/denies.
@@ -104,8 +143,9 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
       }
       this.project(projected, this.guild.roles.everyone.id, OverwriteType.Role, accessBits & ~restricted, restricted);
       for (const id of allowed) this.project(projected, id, OverwriteType.Member, id === bot.id ? botBits : accessBits, 0n);
-      if (projected.size > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'OVERWRITE_CAPACITY');
-      await channel.permissionOverwrites.set([...projected.values()]);
+      const moderated = projectModerationAccess([...projected.values()], policy, [...allowed], blocks);
+      if (moderated.length > 100) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', 'OVERWRITE_CAPACITY');
+      await channel.permissionOverwrites.set(moderated);
     });
   }
 
@@ -205,15 +245,29 @@ export class DiscordRoomGateway implements RoomDiscordGateway {
 
   private async assertPermissions(channel: VoiceChannel, permissions: bigint[]): Promise<GuildMember> {
     const bot = await this.guild.members.fetchMe({ force: true });
+    this.checkPermissions(channel, bot, permissions);
+    return bot;
+  }
+
+  private checkPermissions(channel: VoiceChannel, bot: GuildMember, permissions: bigint[]): void {
     if (bot.guild.id !== this.guild.id) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
     const actual = channel.permissionsFor(bot);
     const named = [[P.ManageRoles, 'MANAGE_ROLES'], [P.ManageChannels, 'MANAGE_CHANNELS'], [P.ViewChannel, 'VIEW_CHANNEL'],
-      [P.SendMessages, 'SEND_MESSAGES'], [P.EmbedLinks, 'EMBED_LINKS'], [P.ReadMessageHistory, 'READ_MESSAGE_HISTORY']] as const;
+      [P.SendMessages, 'SEND_MESSAGES'], [P.EmbedLinks, 'EMBED_LINKS'], [P.ReadMessageHistory, 'READ_MESSAGE_HISTORY'], [P.MoveMembers, 'MOVE_MEMBERS']] as const;
     for (const [permission, reason] of named) {
       if (permissions.includes(permission) && !actual?.has(permission)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE', reason);
     }
     if (!actual?.has(permissions)) throw new RoomActionError('PERMISSIONS_UNAVAILABLE');
-    return bot;
+  }
+
+  private async moderationTarget(channelId: string, targetId: string): Promise<RoomModerationTarget | null> {
+    const permissions = [P.ViewChannel, P.MoveMembers];
+    const { channel, bot } = await this.authorized(channelId, permissions);
+    const target = await this.resolveModerationTarget(targetId);
+    // Role/member reads can yield. Re-evaluate bot channel permissions too.
+    this.checkPermissions(channel, bot, permissions);
+    if (target && (target.isBot || target.isAdministrator || target.isGuildOwner)) throw new RoomActionError('PROTECTED_MEMBER');
+    return target;
   }
 
   private async authorized(channelId: string, permissions: bigint[]): Promise<{ channel: VoiceChannel; bot: GuildMember }> {

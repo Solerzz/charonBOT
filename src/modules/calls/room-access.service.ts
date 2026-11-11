@@ -5,15 +5,18 @@ import { discordIdSchema } from '../setup/setup.schemas.js';
 import { currentOwnedRoom, safeRoomAction } from './room-mutation.js';
 import type { RoomStateRepository } from './room-state.repository.js';
 import type { RoomCoordinator } from './room.coordinator.js';
+import { projectModerationAccess, sameRoomBlocks } from './room-moderation.permissions.js';
 import { RoomActionError, type RoomAccessPolicy, type RoomActor, type RoomChanged, type RoomDiscordGateway, type RoomSnapshot, type RoomState } from './room.types.js';
 
 const allowedUnion = (state: RoomState, snapshot: RoomSnapshot, allowed = state.allowedMemberIds): string[] =>
-  [...new Set([...(state.room.ownerDiscordId ? [state.room.ownerDiscordId] : []), ...snapshot.members.map(({ memberDiscordId }) => memberDiscordId), ...allowed])];
+  [...new Set([...(state.room.ownerDiscordId ? [state.room.ownerDiscordId] : []), ...snapshot.members.map(({ memberDiscordId }) => memberDiscordId), ...allowed])]
+    .filter(id => !state.memberBlocks.some(block => block.memberDiscordId === id && block.state === 'BLOCKED'));
 const sameIds = (a: string[], b: string[]) => [...a].sort().join(',') === [...b].sort().join(',');
 const sameAuthority = (a: RoomState, b: RoomState) => a.room.id === b.room.id && a.room.guildDiscordId === b.room.guildDiscordId
   && a.room.channelDiscordId === b.room.channelDiscordId && a.room.status === b.room.status
   && a.room.controlVersion === b.room.controlVersion && a.room.ownerDiscordId === b.room.ownerDiscordId && a.controlsEnabled === b.controlsEnabled;
-const sameAccess = (a: RoomState, b: RoomState) => a.room.visibility === b.room.visibility && a.room.isLocked === b.room.isLocked && sameIds(a.allowedMemberIds, b.allowedMemberIds);
+const sameAccess = (a: RoomState, b: RoomState) => a.room.visibility === b.room.visibility && a.room.isLocked === b.room.isLocked && sameIds(a.allowedMemberIds, b.allowedMemberIds)
+  && sameRoomBlocks(a.memberBlocks, b.memberBlocks);
 
 function safePrevious(previous: OverwriteData[], allowed: string[], restricted: boolean): OverwriteData[] {
   const mask = P.ViewChannel | P.Connect | P.SendMessages;
@@ -48,6 +51,18 @@ export class RoomAccessService {
 
   isUncertain(roomId: string): boolean { return this.uncertain.has(roomId); }
   markUncertain(roomId: string): void { this.uncertain.add(roomId); }
+  markUnsettled(roomId: string, attemptedVersion: number): void {
+    this.markUncertain(roomId); this.unsettled.set(roomId, attemptedVersion);
+  }
+
+  async settleLocked(roomId: string): Promise<RoomState | null> {
+    const attemptedVersion = this.unsettled.get(roomId);
+    if (attemptedVersion === undefined) return safeRoomAction(() => this.store.read(roomId));
+    this.onInvalidated?.(roomId);
+    const settled = await safeRoomAction(() => this.store.settleAccess(roomId, attemptedVersion));
+    this.unsettled.delete(roomId);
+    return settled;
+  }
 
   // Only a confirmed SQL read/lifecycle result may retire these obligations.
   // CREATING/CLOSING can still recover: neither is a terminal state.
@@ -61,7 +76,7 @@ export class RoomAccessService {
   // Recovery must publish the fenced generation before final actor/CAS checks.
   async recoverLocked(roomId: string, gateway: RoomDiscordGateway, publish: RoomChanged): Promise<void> {
     if (!this.isUncertain(roomId)) return;
-    const state = await safeRoomAction(() => this.store.read(roomId));
+    const state = await this.settleLocked(roomId);
     if (this.retireConfirmedLocked(roomId, state?.room.status ?? null)) return;
     const snapshot = await safeRoomAction(() => gateway.snapshot(state!.room.channelDiscordId), 'DISCORD_FAILURE');
     assertSnapshot(state!, snapshot);
@@ -87,6 +102,7 @@ export class RoomAccessService {
 
   async setAllowedLocked(actor: RoomActor, state: RoomState, memberId: string, allowed: boolean, gateway: RoomDiscordGateway): Promise<void> {
     discordIdSchema.parse(memberId);
+    if (allowed && state.memberBlocks.some(block => block.memberDiscordId === memberId)) throw new RoomActionError('MEMBER_BLOCKED');
     const member = await safeRoomAction(() => gateway.resolveMember(memberId), 'DISCORD_FAILURE');
     if (!member || member.memberDiscordId !== memberId) throw new RoomActionError('UNKNOWN_MEMBER');
     const desired = { ...state, allowedMemberIds: [...new Set([...state.allowedMemberIds.filter((id) => id !== memberId), ...(allowed ? [memberId] : [])])] };
@@ -102,7 +118,7 @@ export class RoomAccessService {
     let committed = false;
     let rejectedCommit = false;
     try {
-      await safeRoomAction(() => gateway.setRoomAccess(channelId, desired.room, projected), 'DISCORD_FAILURE');
+      await safeRoomAction(() => gateway.setRoomAccess(channelId, desired.room, projected, current.state.memberBlocks), 'DISCORD_FAILURE');
     } catch (error) {
       // A rejected REST response can itself be lost after the write applied.
       this.markUncertain(state.room.id);
@@ -128,8 +144,7 @@ export class RoomAccessService {
         // A transport rejection does not settle the server-side writer. Fence
         // its version before read-back or REST; retain the obligation if the
         // barrier itself cannot be confirmed, including across later controls.
-        this.markUncertain(state.room.id);
-        this.unsettled.set(state.room.id, actor.controlVersion);
+        this.markUnsettled(state.room.id, actor.controlVersion);
         try { await this.synchronizeLocked(state, current.snapshot, gateway); }
         catch { throw new RoomActionError('PERSISTENCE_FAILURE'); }
         // Fencing invalidates this attempt's authority, even if it committed.
@@ -172,7 +187,7 @@ export class RoomAccessService {
         }
         this.assertRosterCurrent(state, live.members.map((member) => member.memberDiscordId), receipts);
         const restricted = state.room.isLocked || state.room.visibility === 'PRIVATE';
-        await gateway.restoreAccess(channelId, safePrevious(previous, allowed, restricted));
+        await gateway.restoreAccess(channelId, projectModerationAccess(safePrevious(previous, allowed, restricted), latest.room, allowed, latest.memberBlocks));
         const restoredReceipts = this.departures(state);
         const restoredLive = await safeRoomAction(() => gateway.snapshot(channelId), 'DISCORD_FAILURE');
         assertSnapshot(latest, restoredLive);
@@ -209,7 +224,7 @@ export class RoomAccessService {
       const next = allowedUnion(current.state, current.snapshot, desired.allowedMemberIds);
       if (sameIds(next, projected)) return projected;
       if (attempt === 2) throw new RoomActionError('ROOM_UNAVAILABLE');
-      await safeRoomAction(() => gateway.setRoomAccess(expected.room.channelDiscordId, desired.room, next), 'DISCORD_FAILURE');
+      await safeRoomAction(() => gateway.setRoomAccess(expected.room.channelDiscordId, desired.room, next, current.state.memberBlocks), 'DISCORD_FAILURE');
       projected = next;
     }
     throw new RoomActionError('ROOM_UNAVAILABLE');
@@ -218,13 +233,8 @@ export class RoomAccessService {
   async synchronizeLocked(state: RoomState, snapshot: RoomSnapshot, gateway: RoomDiscordGateway): Promise<void> {
     assertSnapshot(state, snapshot);
     this.markUncertain(state.room.id);
-    const attemptedVersion = this.unsettled.get(state.room.id);
-    if (attemptedVersion !== undefined) {
-      // Private delivery generations must be retired even if the fence or the
-      // subsequent native projection fails and no success callback is reached.
-      this.onInvalidated?.(state.room.id);
-      const settled = await safeRoomAction(() => this.store.settleAccess(state.room.id, attemptedVersion));
-      this.unsettled.delete(state.room.id);
+    if (this.unsettled.has(state.room.id)) {
+      const settled = await this.settleLocked(state.room.id);
       if (this.retireConfirmedLocked(state.room.id, settled?.room.status ?? null)) return;
     }
     let projected: { state: RoomState; allowed: string[] } | null = null;
@@ -245,7 +255,7 @@ export class RoomAccessService {
         this.uncertain.delete(state.room.id); return;
       }
       if (attempt === 3) break;
-      await safeRoomAction(() => gateway.setRoomAccess(current.room.channelDiscordId, confirmed.room, next), 'DISCORD_FAILURE');
+      await safeRoomAction(() => gateway.setRoomAccess(current.room.channelDiscordId, confirmed.room, next, confirmed.memberBlocks), 'DISCORD_FAILURE');
       projected = { state: confirmed, allowed: next };
     }
     throw new RoomActionError('ROOM_UNAVAILABLE');

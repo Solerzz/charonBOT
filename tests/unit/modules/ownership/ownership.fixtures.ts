@@ -94,6 +94,7 @@ export function ownershipFixture() {
   const gateway = {
     snapshot: vi.fn(async (_id: string) => { await hooks.beforeSnapshot(); return structuredClone(live.snapshot); }),
     resolveMember: vi.fn(async (id: string) => structuredClone(live.snapshot?.members.find((m) => m.memberDiscordId === id) ?? null)),
+    resolveModerationTarget: unused, assertModerationPermissions: unused, disconnectFromRoom: unused,
     rename: unused, restoreName: unused, setLimit: unused, readAccess: unused,
     setRoomAccess: unused, restoreAccess: unused,
     sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,

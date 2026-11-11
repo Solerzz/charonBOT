@@ -66,7 +66,7 @@ describe('CallInteractions real controllers', () => {
       const findUnique = vi.fn(async () => {
         now += 2; const s = f.state();
         return { ...structuredClone(s.room), voiceCreator: { ...creator, roomCommandsEnabled: s.controlsEnabled },
-          presences: s.presences, allowedMembers: s.allowedMemberIds.map(memberDiscordId => ({ memberDiscordId })), pendingTransfer: s.transfer };
+          presences: s.presences, allowedMembers: s.allowedMemberIds.map(memberDiscordId => ({ memberDiscordId })), memberBlocks: s.memberBlocks, pendingTransfer: s.transfer };
       });
       const updateMany = vi.fn(async ({ where, data }: Prisma.TemporaryRoomUpdateManyArgs) => {
         now += 2; const s = f.state();

@@ -7,6 +7,7 @@ import type { CallPanelPayload } from '../../../../src/modules/calls/call-panel.
 import type { CreateTemporaryRoomInput, TemporaryRoomRepository } from '../../../../src/modules/calls/call.repository.js';
 import type { VoiceTransition } from '../../../../src/modules/calls/call.schemas.js';
 import type { VoiceCreatorRepository } from '../../../../src/modules/setup/setup.repository.js';
+import type { RoomMemberBlock } from '../../../../src/modules/calls/room.types.js';
 
 export const creator: VoiceCreator = {
   id: '123e4567-e89b-42d3-a456-426614174000',
@@ -83,11 +84,14 @@ export function lifecycleFixture() {
       return { guildDiscordId: current.guildDiscordId, channelDiscordId: id, name: current.name, userLimit: current.userLimit, members };
     }),
     resolveMember: vi.fn(async (id: string) => ({ memberDiscordId: id, isBot: false })),
+    resolveModerationTarget: vi.fn(async (id: string) => ({ memberDiscordId: id, isBot: false, isAdministrator: false, isGuildOwner: false, channelDiscordId: memberChannel })),
+    assertModerationPermissions: vi.fn(async (_id: string, _target: string) => {}),
+    disconnectFromRoom: vi.fn(async (_id: string, _target: string): Promise<'disconnected' | 'not-in-room'> => 'not-in-room'),
     rename: vi.fn(async (_id: string, _name: string) => {}),
     restoreName: vi.fn(async (_id: string, _previousName: string) => {}),
     setLimit: vi.fn(async (_id: string, _limit: number) => {}),
     readAccess: vi.fn(async (_id: string) => []),
-    setRoomAccess: vi.fn(async (_id: string, _policy: { isLocked: boolean; visibility: 'PUBLIC' | 'PRIVATE' }, _allowed: string[]) => {}),
+    setRoomAccess: vi.fn(async (_id: string, _policy: { isLocked: boolean; visibility: 'PUBLIC' | 'PRIVATE' }, _allowed: string[], _blocks: readonly RoomMemberBlock[]) => {}),
     restoreAccess: vi.fn(async (_id: string, _previous: OverwriteData[]) => {}),
     deleteControlPanel: vi.fn(async (_id: string, _message: string) => {}),
     createTemporaryChannel: vi.fn(async () => ({ channelDiscordId: room.channelDiscordId })),

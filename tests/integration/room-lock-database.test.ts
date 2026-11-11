@@ -12,10 +12,60 @@ import { RoomControlsService } from '../../src/modules/calls/room-controls.servi
 import { roomSettingsFixture } from '../unit/modules/calls/room-settings.fixtures.js';
 import { assertDisposableDatabaseEnvironment } from './database-test-utils.js';
 import { deferred } from '../unit/modules/calls/call.fixtures.js';
+import { OTHER } from '../unit/modules/ownership/ownership.fixtures.js';
+import { moderationDeniedBefore, moderationDenyBits } from '../../src/modules/calls/room-moderation.permissions.js';
 
 const integrationTest = process.env.RUN_DATABASE_TESTS === 'true' ? it : it.skip;
 
 describe('independent room lock persistence', () => {
+  integrationTest('projects persisted blocks through compensation and same-version SQL drift without restoring authorization', async () => {
+    assertDisposableDatabaseEnvironment();
+    const client = createPrismaClient({ url: process.env.DATABASE_URL!, directUrl: process.env.DIRECT_URL! });
+    const store = new PrismaRoomStateRepository(client); const f = roomSettingsFixture();
+    const creatorId = randomUUID(); const roomId = randomUUID();
+    const access = new RoomAccessService(store, f.coordinator);
+    const controls = new RoomControlsService({ store, coordinator: f.coordinator, access, onChangedLocked: async () => {} });
+    const actor = { ...f.actor(), roomId };
+    try {
+      await client.voiceCreator.create({ data: { id: creatorId, guildDiscordId: f.guild.id, creatorChannelDiscordId: randomUUID(), categoryDiscordId: randomUUID() } });
+      await client.temporaryRoom.create({ data: { id: roomId, voiceCreatorId: creatorId, guildDiscordId: f.guild.id,
+        channelDiscordId: f.channel.id, ownerDiscordId: actor.memberDiscordId, name: 'Game', status: 'ACTIVE', visibility: 'PRIVATE', isLocked: true } });
+      f.join(OTHER); expect(await store.setAllowed(roomId, 0, OTHER, true)).toBe(true);
+      const stale = (await store.read(roomId))!; const snapshot = (await f.gateway.snapshot(f.channel.id))!;
+      await access.synchronizeLocked(stale, snapshot, f.gateway);
+      f.channel.permissionOverwrites.cache.get(OTHER)!.allow.add(P.Speak);
+      f.channel.permissionOverwrites.cache.get(OTHER)!.deny.add(P.SendPolls | P.Stream);
+      const deniedBefore = moderationDeniedBefore(await f.gateway.readAccess(f.channel.id), OTHER);
+      expect(deniedBefore).toBe(P.SendPolls);
+      const staged = (await store.stageRoomBlock(actor, OTHER, deniedBefore))!;
+      await access.synchronizeLocked(stale, snapshot, f.gateway);
+      expect(f.projected().find(p => p.id === OTHER)!.deny.bitfield & moderationDenyBits).toBe(moderationDenyBits);
+      vi.spyOn(store, 'updateSettings').mockResolvedValueOnce(false);
+      await expect(controls.toggleLock({ ...actor, controlVersion: staged.controlVersion }, f.gateway)).rejects.toMatchObject({ code: 'STALE_CONTROLS' });
+      expect(f.projected().find(p => p.id === OTHER)!.allow.has(P.Connect, false)).toBe(false);
+      expect(f.projected().find(p => p.id === OTHER)!.deny.has(P.ViewChannel, false)).toBe(true);
+      f.leave(OTHER);
+      const write = f.channel.permissionOverwrites.set.getMockImplementation()!;
+      f.channel.permissionOverwrites.set.mockImplementationOnce(async input => {
+        await write(input);
+        // Independent writer at the REST boundary: no SQL transaction from
+        // settlement/projection may retain the room row lock across this I/O.
+        await client.$transaction(async tx => {
+          await tx.$executeRaw`SET LOCAL lock_timeout = '500ms'`;
+          await tx.temporaryRoom.update({ where: { id: roomId }, data: { userLimit: 1 } });
+          await tx.roomMemberBlock.update({ where: { id: staged.block.id }, data: { state: 'UNBLOCK_PENDING' } });
+        });
+      });
+      await access.synchronizeLocked((await store.read(roomId))!, snapshot, f.gateway);
+      const target = f.projected().find(p => p.id === OTHER)!;
+      expect(target.allow.bitfield).toBe(P.Speak); expect(target.deny.bitfield).toBe(P.SendPolls | P.Stream);
+      expect(await store.read(roomId)).toMatchObject({ allowedMemberIds: [], memberBlocks: [{ state: 'UNBLOCK_PENDING', deniedBefore: P.SendPolls }] });
+      expect(access.isUncertain(roomId)).toBe(false);
+    } finally {
+      try { await client.temporaryRoom.deleteMany({ where: { id: roomId } }); await client.voiceCreator.deleteMany({ where: { id: creatorId } }); }
+      finally { await disconnectDatabase(client); }
+    }
+  }, 30_000);
   integrationTest('settlement waits for a row-locked writer and fences writers not yet admitted without retaining a SQL lock across REST', async () => {
     assertDisposableDatabaseEnvironment();
     const client = createPrismaClient({ url: process.env.DATABASE_URL!, directUrl: process.env.DIRECT_URL! });

@@ -361,6 +361,7 @@ describe('room ownership database', () => {
           members: [OWNER, 'second-owner', 'target'].map((memberDiscordId) => ({ memberDiscordId, isBot: false })) } : null;
       },
       resolveMember: async (memberDiscordId) => ({ memberDiscordId, isBot: false }),
+      resolveModerationTarget: unused, assertModerationPermissions: unused, disconnectFromRoom: unused,
       rename: unused, restoreName: unused, setLimit: unused, readAccess: unused, setRoomAccess: unused,
       restoreAccess: unused, sendControlPanel: unused, updateControlPanel: unused, deleteControlPanel: unused,
     };
